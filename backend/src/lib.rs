@@ -57,6 +57,11 @@ pub async fn build_state(cfg: Config) -> anyhow::Result<AppState> {
             home: std::env::var("HOME")
                 .map(PathBuf::from)
                 .unwrap_or_else(|_| cfg.data_dir.clone()),
+            pass_env: cfg
+                .pass_env
+                .iter()
+                .filter_map(|k| std::env::var(k).ok().map(|v| (k.clone(), v)))
+                .collect(),
         }),
         ExecMode::DryRun => Arc::new(DryRunExecutor),
     };

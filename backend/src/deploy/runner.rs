@@ -431,17 +431,22 @@ async fn run(
         }
     }
 
-    // 4) 활성화
+    // 4) 활성화 — 이 지점부터 실패/취소 시 이전 릴리스·env 로 되돌립니다
     log.step("릴리스 활성화").await;
     let current_link = if kind == AppKind::Static {
-        &paths.www_current
+        paths.www_current.clone()
     } else {
-        &paths.current
+        paths.current.clone()
     };
     let previous = if exec.is_dry_run() {
         None
     } else {
-        tokio::fs::read_link(current_link).await.ok()
+        tokio::fs::read_link(&current_link).await.ok()
+    };
+    let previous_env = if kind.is_service() && !exec.is_dry_run() {
+        tokio::fs::read_to_string(&paths.env_file).await.ok()
+    } else {
+        None
     };
 
     if kind.is_service() {
@@ -467,49 +472,59 @@ async fn run(
         exec.write_file(&paths.staging_unit, &unit, 0o644, log)
             .await?;
     }
-    exec.swap_symlink(&release_dir, current_link, log).await?;
+    exec.swap_symlink(&release_dir, &current_link, log).await?;
 
-    if kind.is_service() {
-        helper::call(state, &["install-unit", &app.slug], log).await?;
-        helper::call(state, &["svc", "restart", &app.slug], log).await?;
-
-        log.step("헬스체크").await;
-        if let Err(e) = health_check(state, &app, log).await {
-            log.line(format!("헬스체크 실패: {e:#}")).await;
-            if let Some(prev) = previous {
-                log.line(format!("이전 릴리스로 롤백: {}", prev.display()))
-                    .await;
-                exec.swap_symlink(&prev, current_link, log).await?;
-                let _ = helper::call(state, &["svc", "restart", &app.slug], log).await;
-            }
-            let journal = helper::call_quiet(state, &["journal", &app.slug, "30"]).await;
-            if let Ok(j) = journal {
-                log.line("── 최근 서비스 로그 (journalctl) ──").await;
-                for l in j.stdout.lines() {
-                    log.line(l).await;
+    let activated: anyhow::Result<()> = async {
+        if kind.is_service() {
+            helper::call(state, &["install-unit", &app.slug], log).await?;
+            helper::call(state, &["svc", "restart", &app.slug], log).await?;
+            log.step("헬스체크").await;
+            if let Err(e) = health_check(state, &app, log).await {
+                log.line(format!("헬스체크 실패: {e:#}")).await;
+                if let Ok(j) = helper::call_quiet(state, &["journal", &app.slug, "30"]).await {
+                    log.line("── 최근 서비스 로그 (journalctl) ──").await;
+                    for l in j.stdout.lines() {
+                        log.line(l).await;
+                    }
                 }
+                return Err(e.context("새 릴리스가 정상 응답하지 않아 배포를 중단했습니다"));
             }
-            return Err(e.context("새 릴리스가 정상 응답하지 않아 배포를 중단했습니다"));
         }
-    }
 
-    // 5) Nginx
-    log.step("Nginx 사이트").await;
-    match templates::nginx_site(&templates::SiteInput {
-        app: &app,
-        paths: &paths,
-        trusted_proxy: &state.cfg.trusted_proxy,
-    }) {
-        Some(conf) => {
-            exec.write_file(&paths.staging_site, &conf, 0o644, log)
-                .await?;
-            helper::call(state, &["install-site", &app.slug], log).await?;
+        // 5) Nginx
+        log.step("Nginx 사이트").await;
+        match templates::nginx_site(&templates::SiteInput {
+            app: &app,
+            paths: &paths,
+            trusted_proxy: &state.cfg.trusted_proxy,
+        }) {
+            Some(conf) => {
+                exec.write_file(&paths.staging_site, &conf, 0o644, log)
+                    .await?;
+                helper::call(state, &["install-site", &app.slug], log).await?;
+            }
+            None => {
+                log.line("도메인이 없어 Nginx 사이트를 만들지 않습니다 (내부 포트로만 접근 가능)")
+                    .await;
+                helper::call(state, &["remove-site", &app.slug], log).await?;
+            }
         }
-        None => {
-            log.line("도메인이 없어 Nginx 사이트를 만들지 않습니다 (내부 포트로만 접근 가능)")
-                .await;
-            helper::call(state, &["remove-site", &app.slug], log).await?;
-        }
+        Ok(())
+    }
+    .await;
+
+    if let Err(e) = activated {
+        revert(
+            state,
+            &app,
+            &paths,
+            &current_link,
+            previous,
+            previous_env,
+            log,
+        )
+        .await;
+        return Err(e);
     }
 
     // 6) 정리
@@ -524,6 +539,53 @@ async fn run(
     .execute(&state.db)
     .await?;
     Ok(sha)
+}
+
+/// 활성화 단계 실패/취소 시: current 링크와 env 파일을 이전 상태로 되돌리고 서비스 재시작.
+/// 취소 신호와 무관하게 끝까지 수행합니다.
+async fn revert(
+    state: &AppState,
+    app: &App,
+    paths: &AppPaths,
+    current_link: &std::path::Path,
+    previous: Option<PathBuf>,
+    previous_env: Option<String>,
+    log: &LogSink,
+) {
+    let log = log.uncancellable();
+    let exec = state.exec.as_ref();
+    let Some(prev) = previous else {
+        log.line("이전 릴리스가 없어 되돌릴 대상이 없습니다").await;
+        if app.kind().is_service() {
+            let _ = helper::call(state, &["svc", "stop", &app.slug], &log).await;
+        }
+        return;
+    };
+    log.line(format!("↩ 이전 릴리스로 되돌림: {}", prev.display()))
+        .await;
+    if let Err(e) = exec.swap_symlink(&prev, current_link, &log).await {
+        log.line(format!("되돌리기 실패: {e:#}")).await;
+        return;
+    }
+    if app.kind().is_service() {
+        if let Some(env) = previous_env {
+            if exec
+                .write_file(&paths.env_file, &env, 0o600, &log)
+                .await
+                .is_ok()
+            {
+                log.line("env 파일도 이전 내용으로 되돌렸습니다 (패널의 환경변수 값은 그대로)")
+                    .await;
+            }
+        }
+        if helper::call(state, &["svc", "restart", &app.slug], &log)
+            .await
+            .is_ok()
+            && health_check(state, app, &log).await.is_ok()
+        {
+            log.line("이전 릴리스가 정상 동작 중입니다").await;
+        }
+    }
 }
 
 async fn health_check(state: &AppState, app: &App, log: &LogSink) -> anyhow::Result<()> {

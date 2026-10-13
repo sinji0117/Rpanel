@@ -170,6 +170,8 @@ pub async fn run_ok(
 pub struct RealExecutor {
     pub base_path: String,
     pub home: PathBuf,
+    /// 빌드 명령에 그대로 넘길 환경변수 (프록시·CA 등, RPANEL_PASS_ENV)
+    pub pass_env: Vec<(String, String)>,
 }
 
 impl Executor for RealExecutor {
@@ -196,6 +198,7 @@ impl Executor for RealExecutor {
                 .env("CARGO_TERM_COLOR", "never")
                 .env("NO_COLOR", "1")
                 .env("CI", "1")
+                .envs(self.pass_env.iter().map(|(k, v)| (k.as_str(), v.as_str())))
                 .stdin(Stdio::null())
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped())
@@ -482,6 +485,7 @@ mod tests {
         let exec = RealExecutor {
             base_path: "/usr/bin:/bin".into(),
             home: std::env::temp_dir(),
+            pass_env: vec![],
         };
         let log = LogSink::capture();
         let out = exec
@@ -508,6 +512,7 @@ mod tests {
         let exec = RealExecutor {
             base_path: "/usr/bin:/bin".into(),
             home: std::env::temp_dir(),
+            pass_env: vec![],
         };
         let log = LogSink::capture();
         let out = exec
@@ -531,6 +536,7 @@ mod tests {
         let exec = RealExecutor {
             base_path: "/usr/bin:/bin".into(),
             home: std::env::temp_dir(),
+            pass_env: vec![],
         };
         let log = LogSink::capture();
         let mut spec = CmdSpec::new("sleep", &["5"]);
@@ -544,6 +550,7 @@ mod tests {
         let exec = RealExecutor {
             base_path: "/usr/bin:/bin".into(),
             home: std::env::temp_dir(),
+            pass_env: vec![],
         };
         let log = LogSink::capture();
         let dir = std::env::temp_dir().join(format!("rpanel-exec-{}", std::process::id()));

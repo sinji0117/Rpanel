@@ -37,6 +37,8 @@ pub struct Config {
     pub build_path: String,
     /// 동시 빌드 수
     pub max_concurrent_builds: usize,
+    /// 빌드 명령에 전달할 환경변수 이름 (기본: 없음). 예: HTTPS_PROXY,NO_PROXY,SSL_CERT_FILE
+    pub pass_env: Vec<String>,
 }
 
 fn var(name: &str) -> Option<String> {
@@ -102,6 +104,14 @@ impl Config {
             build_path: var("RPANEL_BUILD_PATH").unwrap_or_else(|| {
                 "/var/lib/rpanel/.cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin".into()
             }),
+            pass_env: var("RPANEL_PASS_ENV")
+                .map(|v| {
+                    v.split(',')
+                        .map(|s| s.trim().to_string())
+                        .filter(|s| !s.is_empty())
+                        .collect()
+                })
+                .unwrap_or_default(),
             max_concurrent_builds: var("RPANEL_MAX_CONCURRENT_BUILDS").map(|v| v.parse()).transpose()?.unwrap_or(2),
         })
     }
@@ -126,6 +136,7 @@ impl Config {
             trusted_proxy: "10.0.0.10".into(),
             build_path: "/usr/bin:/bin".into(),
             max_concurrent_builds: 2,
+            pass_env: vec![],
         }
     }
 }

@@ -30,6 +30,7 @@ struct RedisTarget {
 #[derive(Clone)]
 pub struct LogSink {
     inner: Arc<Inner>,
+    cancel: tokio::sync::watch::Receiver<bool>,
 }
 
 struct Inner {
@@ -37,7 +38,6 @@ struct Inner {
     seq: AtomicU64,
     buf: Mutex<String>,
     truncated: AtomicBool,
-    cancel: tokio::sync::watch::Receiver<bool>,
 }
 
 pub fn list_key(prefix: &str, deploy_id: u64) -> String {
@@ -64,8 +64,8 @@ impl LogSink {
                 seq: AtomicU64::new(0),
                 buf: Mutex::new(String::new()),
                 truncated: AtomicBool::new(false),
-                cancel,
             }),
+            cancel,
         }
     }
 
@@ -78,17 +78,26 @@ impl LogSink {
                 seq: AtomicU64::new(0),
                 buf: Mutex::new(String::new()),
                 truncated: AtomicBool::new(false),
-                cancel: rx,
             }),
+            cancel: rx,
         }
     }
 
     pub fn is_cancelled(&self) -> bool {
-        *self.inner.cancel.borrow()
+        *self.cancel.borrow()
     }
 
     pub fn cancel_receiver(&self) -> tokio::sync::watch::Receiver<bool> {
-        self.inner.cancel.clone()
+        self.cancel.clone()
+    }
+
+    /// 같은 로그에 쓰지만 취소 신호를 받지 않는 싱크 — 실패/취소 후 원상복구 작업용
+    pub fn uncancellable(&self) -> Self {
+        let (_tx, rx) = tokio::sync::watch::channel(false);
+        Self {
+            inner: self.inner.clone(),
+            cancel: rx,
+        }
     }
 
     pub async fn line(&self, text: impl AsRef<str>) {

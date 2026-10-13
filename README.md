@@ -30,7 +30,7 @@
   - `static` : `npm ci && npm run build` → `dist/`를 Nginx가 SPA로 서비스. **`/api/` 프록시 포트**를 지정하면 Vol.6 §9.13과 같은 “React + /api → Rust” 구조
   - `node` : `npm ci` (+빌드) → 시작 명령을 systemd 서비스로
 - **포트 자동 할당** (기본 8100–8999, Vol.6 수동 앱 8080–8083과 겹치지 않음) — `PORT`, `BIND_ADDR=127.0.0.1:<포트>` 자동 주입
-- **배포 파이프라인** — git fetch(shallow) → 빌드 → 릴리스 디렉토리 → `current` 심볼릭 링크 원자 교체 → 서비스 재시작 → **헬스체크 실패 시 이전 릴리스로 자동 롤백** → Nginx 사이트 설치(`nginx -t` 실패 시 원복) → 최근 3개 릴리스만 보관
+- **배포 파이프라인** — git fetch(shallow) → 빌드 → 릴리스 디렉토리 → `current` 심볼릭 링크 원자 교체 → 서비스 재시작 → **헬스체크·Nginx 단계 실패(또는 취소) 시 이전 릴리스와 env 파일로 자동 원복** → Nginx 사이트 설치(`nginx -t` 실패 시 원복) → 최근 3개 릴리스만 보관
 - **실시간 배포 로그** (WebSocket, 재접속해도 줄 중복 없음), **배포 취소**, **원클릭 롤백**
 - **환경변수** 편집 (.env 붙여넣기 지원, 값 마스킹, 감사 로그에는 값 미기록)
 - **Deploy key** — 앱별 ed25519 키 생성 → GitLab Deploy keys에 등록 (Vol.6 §9.10.0의 수작업 대체)
@@ -132,6 +132,13 @@ curl -fsS -X POST -H "X-Gitlab-Token: $RPANEL_HOOK_TOKEN" http://10.0.0.12:9000/
 ```
 
 ---
+
+## 실환경 검증
+
+이 저장소는 실제 실행 모드(`RPANEL_EXEC_MODE=real`)로 **자기 자신을 배포**해 검증했습니다 (Ubuntu 24.04 + MariaDB 10.11 + Redis 7 + Nginx):
+GitHub에서 clone → `cargo build --release`(백엔드)·`npm ci && npm run build`(프런트) → `rpanel-app` 사용자로 서비스 기동 →
+헬스체크 → Nginx가 `Host` 헤더로 정적 파일과 `/api/` 프록시를 분기. 이어서 잘못된 환경변수로 재배포 → 헬스체크 실패 → 이전 릴리스·env로 자동 원복,
+수동 Nginx 설정과 도메인 충돌 시 helper 거부, 배포 취소, 서비스 stop/start, journal, Deploy key, 앱 삭제(유닛·사이트·파일 정리)까지 확인했습니다.
 
 ## 디렉토리 구조 (VM102)
 

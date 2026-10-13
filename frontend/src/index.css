@@ -1,0 +1,69 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Pretendard", "Apple SD Gothic Neo", "Noto Sans KR", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: ui-monospace, "JetBrains Mono", "SFMono-Regular", Menlo, Consolas, monospace;
+
+  --color-ink-950: #0a0d12;
+  --color-ink-900: #0f1319;
+  --color-ink-850: #141922;
+  --color-ink-800: #1a2029;
+  --color-ink-700: #252d39;
+  --color-ink-600: #364152;
+  --color-ink-400: #7d889b;
+  --color-ink-300: #a7b0bf;
+  --color-ink-100: #e4e8ee;
+
+  --color-signal: #34d399;
+  --color-signal-dim: #10b98126;
+  --color-warn: #fbbf24;
+  --color-fail: #f87171;
+}
+
+@layer base {
+  html {
+    color-scheme: dark;
+  }
+  body {
+    @apply bg-ink-950 text-ink-100 font-sans antialiased;
+  }
+  ::selection {
+    background: var(--color-signal-dim);
+  }
+  :focus-visible {
+    outline: 2px solid var(--color-signal);
+    outline-offset: 2px;
+  }
+}
+
+@utility card {
+  @apply rounded-xl border border-ink-700/70 bg-ink-900;
+}
+
+@utility input {
+  @apply w-full rounded-lg border border-ink-700 bg-ink-950 px-3 py-2 text-sm text-ink-100 placeholder:text-ink-600 focus:border-signal/60 focus:outline-none;
+}
+
+@utility label {
+  @apply mb-1.5 block text-xs font-medium tracking-wide text-ink-300;
+}
+
+@utility btn {
+  @apply inline-flex items-center justify-center gap-2 rounded-lg px-3.5 py-2 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-50;
+}
+
+@utility btn-primary {
+  @apply btn bg-signal text-ink-950 hover:bg-emerald-300;
+}
+
+@utility btn-ghost {
+  @apply btn border border-ink-700 text-ink-100 hover:border-ink-600 hover:bg-ink-800;
+}
+
+@utility btn-danger {
+  @apply btn border border-fail/40 text-fail hover:bg-fail/10;
+}
+
+@utility kbd {
+  @apply rounded border border-ink-700 bg-ink-850 px-1.5 py-0.5 font-mono text-[11px] text-ink-300;
+}

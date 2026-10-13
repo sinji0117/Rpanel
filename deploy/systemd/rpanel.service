@@ -1,0 +1,30 @@
+# /etc/systemd/system/rpanel.service
+[Unit]
+Description=Rpanel deploy panel
+After=network-online.target mariadb.service redis-server.service nginx.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=rpanel
+Group=rpanel
+WorkingDirectory=/var/lib/rpanel
+EnvironmentFile=/etc/rpanel/rpanel.env
+Environment=HOME=/var/lib/rpanel
+ExecStart=/usr/local/bin/rpanel
+Restart=always
+RestartSec=5
+TimeoutStopSec=30
+# 빌드가 오래 걸리면 패널 종료 시 자식 프로세스까지 정리
+KillMode=control-group
+
+# ⚠ NoNewPrivileges / ProtectSystem 은 쓰지 않습니다:
+#   패널이 sudo rpanel-helper 로 /etc/systemd·/etc/nginx 를 수정해야 하는데,
+#   샌드박스 옵션은 sudo 자식 프로세스에도 그대로 적용되어 helper가 실패합니다.
+#   대신 rpanel 사용자의 sudo 권한을 helper 한 개로 제한하고, helper가 모든 입력을 검증합니다.
+PrivateTmp=true
+ProtectHome=true
+LimitNOFILE=65535
+
+[Install]
+WantedBy=multi-user.target

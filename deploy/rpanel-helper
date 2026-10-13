@@ -1,0 +1,231 @@
+#!/bin/bash
+# rpanel-helper — Rpanel이 sudo로 호출하는 유일한 권한 작업 스크립트.
+#
+#   설치: /usr/local/lib/rpanel/rpanel-helper  (root:root 0755)
+#   sudoers: rpanel ALL=(root) NOPASSWD: /usr/local/lib/rpanel/rpanel-helper
+#
+# 패널(rpanel 사용자)이 탈취되더라도 이 스크립트가 허용하는 일만 할 수 있도록,
+# 모든 인자와 스테이징 파일 내용을 화이트리스트로 검사합니다.
+#   - systemd 유닛: rpanel-app 사용자로만 실행, 허용된 키만, 경로는 앱 디렉토리 안
+#   - Nginx 사이트: 허용된 지시어만, root/로그/프록시 대상 경로 고정, 다른 사이트와 도메인 중복 금지
+set -euo pipefail
+umask 022
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export LC_ALL=C
+
+DATA=/var/lib/rpanel
+STAGING="$DATA/staging"
+RUN_USER=rpanel-app
+MARK="# managed by rpanel"
+AVAIL=/etc/nginx/sites-available
+ENABLED=/etc/nginx/sites-enabled
+
+die() { echo "rpanel-helper: $*" >&2; exit 1; }
+
+valid_slug() {
+  [[ "${1:-}" =~ ^[a-z0-9][a-z0-9-]{0,39}$ ]] || die "invalid slug: '${1:-}'"
+}
+
+unit_name() { echo "rpanel-app-$1.service"; }
+site_name() { echo "rpanel-$1.conf"; }
+
+staged_file() {
+  # 심볼릭 링크·다른 소유자 파일 거부
+  local f="$1"
+  [[ -f "$f" && ! -L "$f" ]] || die "staging file missing: $f"
+  [[ "$(stat -c %U "$f")" == "rpanel" ]] || die "staging file not owned by rpanel: $f"
+  head -n1 "$f" | grep -q "^$MARK" || die "staging file is not rpanel-managed: $f"
+  local size; size=$(stat -c %s "$f")
+  (( size < 65536 )) || die "staging file too large"
+}
+
+# ───────────────────────── systemd ─────────────────────────
+
+validate_unit() {
+  local f="$1" slug="$2" appdir="$DATA/apps/$2"
+  local line key val section=""
+  local saw_user=0 saw_nnp=0
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    [[ -z "$line" || "$line" == \#* ]] && continue
+    if [[ "$line" =~ ^\[(Unit|Service|Install)\]$ ]]; then section="${BASH_REMATCH[1]}"; continue; fi
+    [[ "$line" =~ ^([A-Za-z]+)=(.*)$ ]] || die "unit: bad line: $line"
+    key="${BASH_REMATCH[1]}"; val="${BASH_REMATCH[2]}"
+    case "$section:$key" in
+      Unit:Description|Unit:After|Unit:Wants) ;;
+      Service:Type) [[ "$val" == simple ]] || die "unit: Type must be simple" ;;
+      Service:User|Service:Group) [[ "$val" == "$RUN_USER" ]] || die "unit: $key must be $RUN_USER"; saw_user=1 ;;
+      Service:WorkingDirectory) [[ "$val" == "$appdir/current" ]] || die "unit: bad WorkingDirectory" ;;
+      Service:EnvironmentFile) [[ "$val" == "$appdir/app.env" ]] || die "unit: bad EnvironmentFile" ;;
+      Service:ReadWritePaths) [[ "$val" == "$appdir/data" ]] || die "unit: bad ReadWritePaths" ;;
+      Service:Environment) [[ "$val" =~ ^PATH=[A-Za-z0-9/:._-]+$ ]] || die "unit: only PATH= Environment allowed" ;;
+      Service:ExecStart)
+        if [[ "$val" == /bin/bash\ -c\ * ]]; then :
+        elif [[ "$val" =~ ^"$appdir/current/"[A-Za-z0-9_][A-Za-z0-9_.-]*$ ]]; then :
+        else die "unit: ExecStart must be the app binary or /bin/bash -c"; fi ;;
+      Service:NoNewPrivileges) [[ "$val" == true ]] || die "unit: NoNewPrivileges must be true"; saw_nnp=1 ;;
+      Service:Restart|Service:RestartSec|Service:TimeoutStopSec|Service:PrivateTmp|Service:PrivateDevices|\
+      Service:ProtectSystem|Service:ProtectHome|Service:ProtectKernelTunables|Service:ProtectKernelModules|\
+      Service:ProtectControlGroups|Service:RestrictAddressFamilies|Service:RestrictNamespaces|\
+      Service:LockPersonality|Service:MemoryDenyWriteExecute|Service:LimitNOFILE) ;;
+      Install:WantedBy) [[ "$val" == multi-user.target ]] || die "unit: bad WantedBy" ;;
+      *) die "unit: key not allowed: [$section] $key" ;;
+    esac
+  done < "$f"
+  (( saw_user && saw_nnp )) || die "unit: User=$RUN_USER and NoNewPrivileges=true are required"
+}
+
+install_unit() {
+  local slug="$1" src="$STAGING/$1.service" dst
+  staged_file "$src"
+  validate_unit "$src" "$slug"
+  dst="/etc/systemd/system/$(unit_name "$slug")"
+  install -m 0644 -o root -g root "$src" "$dst"
+  systemctl daemon-reload
+  systemctl enable "$(unit_name "$slug")" >/dev/null 2>&1
+  echo "installed $dst"
+}
+
+remove_unit() {
+  local u; u="$(unit_name "$1")"
+  if [[ -f "/etc/systemd/system/$u" ]]; then
+    systemctl disable --now "$u" >/dev/null 2>&1 || true
+    rm -f "/etc/systemd/system/$u"
+    systemctl daemon-reload
+    echo "removed $u"
+  fi
+}
+
+# ───────────────────────── nginx ─────────────────────────
+
+validate_site() {
+  local f="$1" slug="$2" line d
+  local www="$DATA/www/$slug/current"
+  local in_gzip_types=0
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line="${line#"${line%%[![:space:]]*}"}"   # ltrim
+    [[ -z "$line" || "$line" == \#* || "$line" == "}" ]] && continue
+    if (( in_gzip_types )); then
+      local re='^[a-z0-9/+. -]+;?$'
+      [[ "$line" =~ $re ]] || die "site: bad gzip_types continuation"
+      [[ "$line" == *\; ]] && in_gzip_types=0
+      continue
+    fi
+    d="${line%%[[:space:]]*}"
+    case "$d" in
+      try_files|proxy_set_header|location) ;;
+      *) [[ "$line" == *'$'* || "$line" == *'\'* || "$line" == *'`'* ]] && die "site: unexpected characters: $line" ;;
+    esac
+    case "$d" in
+      server) [[ "$line" == "server {" ]] || die "site: bad server line" ;;
+      listen) [[ "$line" == "listen 80;" ]] || die "site: only 'listen 80;' allowed" ;;
+      server_name) [[ "$line" =~ ^server_name(\ [a-z0-9.-]+)+\;$ ]] || die "site: bad server_name" ;;
+      set_real_ip_from) [[ "$line" =~ ^set_real_ip_from\ [0-9a-f.:/]+\;$ ]] || die "site: bad set_real_ip_from" ;;
+      real_ip_header|real_ip_recursive|client_max_body_size|index|expires|gzip|gzip_vary|gzip_min_length|\
+      proxy_http_version|proxy_connect_timeout|proxy_read_timeout|proxy_send_timeout|proxy_buffering|add_header|proxy_set_header|try_files)
+        [[ "$line" == *\; ]] || die "site: missing ';' in $d" ;;
+      gzip_types) [[ "$line" == *\; ]] || in_gzip_types=1 ;;
+      access_log|error_log)
+        [[ "$line" =~ ^(access|error)_log\ +(/var/log/nginx/rpanel-$slug-(access|error)\.log|off)\;$ ]] || die "site: bad log path" ;;
+      root) [[ "$line" == "root $www;" ]] || die "site: root must be $www" ;;
+      proxy_pass) [[ "$line" =~ ^proxy_pass\ http://127\.0\.0\.1:[0-9]{1,5}\;$ ]] || die "site: proxy_pass must target 127.0.0.1" ;;
+      location)
+        [[ "$line" == "location / {" || "$line" == "location /api/ {" || "$line" == "location = /index.html {" || \
+           "$line" == 'location ~* \.(?:js|css|woff2?|ttf|eot|svg|png|jpe?g|gif|webp|avif|ico)$ {' ]] || die "site: location not allowed: $line" ;;
+      *) die "site: directive not allowed: $d" ;;
+    esac
+  done < "$f"
+}
+
+check_domain_conflicts() {
+  local src="$1" slug="$2" own names n f target
+  own="$AVAIL/$(site_name "$slug")"
+  names=$(grep -Po '^\s*server_name\s+\K[^;]+' "$src" || true)
+  for n in $names; do
+    for f in "$ENABLED"/*; do
+      [[ -e "$f" ]] || continue
+      target=$(readlink -f "$f")
+      [[ "$target" == "$own" ]] && continue
+      if grep -Eq "^[[:space:]]*server_name[^;]*[[:space:]]${n//./\\.}([[:space:];]|$)" "$target"; then
+        die "domain '$n' is already served by $target — 수동 설정(Vol.6 §9.13/§9.14.6)과 겹칩니다. 기존 파일을 정리하거나 다른 도메인을 쓰세요"
+      fi
+    done
+  done
+}
+
+install_site() {
+  local slug="$1" src="$STAGING/$1.conf" dst link backup=""
+  staged_file "$src"
+  validate_site "$src" "$slug"
+  check_domain_conflicts "$src" "$slug"
+  dst="$AVAIL/$(site_name "$slug")"
+  link="$ENABLED/$(site_name "$slug")"
+  if [[ -f "$dst" ]]; then backup=$(mktemp); cp -p "$dst" "$backup"; fi
+  install -m 0644 -o root -g root "$src" "$dst"
+  ln -sfn "$dst" "$link"
+  if ! nginx -t 2>/tmp/rpanel-nginx-test.$$; then
+    cat /tmp/rpanel-nginx-test.$$ >&2; rm -f /tmp/rpanel-nginx-test.$$
+    if [[ -n "$backup" ]]; then mv "$backup" "$dst"; else rm -f "$dst" "$link"; fi
+    die "nginx -t failed — 이전 설정으로 되돌렸습니다"
+  fi
+  rm -f /tmp/rpanel-nginx-test.$$ "${backup:-/nonexistent}"
+  systemctl reload nginx
+  echo "installed $dst (nginx reloaded)"
+}
+
+remove_site() {
+  local slug="$1" dst link
+  dst="$AVAIL/$(site_name "$slug")"; link="$ENABLED/$(site_name "$slug")"
+  if [[ -e "$dst" || -L "$link" ]]; then
+    rm -f "$link" "$dst"
+    nginx -t >/dev/null 2>&1 && systemctl reload nginx
+    echo "removed $dst"
+  fi
+}
+
+# ───────────────────────── main ─────────────────────────
+
+main() {
+cmd="${1:-}"; shift || true
+case "$cmd" in
+  prepare-app)
+    valid_slug "${1:-}"
+    install -d -o "$RUN_USER" -g "$RUN_USER" -m 0750 "$DATA/apps/$1/data"
+    ;;
+  install-unit) valid_slug "${1:-}"; install_unit "$1" ;;
+  remove-unit)  valid_slug "${1:-}"; remove_unit "$1" ;;
+  install-site) valid_slug "${1:-}"; install_site "$1" ;;
+  remove-site)  valid_slug "${1:-}"; remove_site "$1" ;;
+  svc)
+    action="${1:-}"; valid_slug "${2:-}"
+    [[ "$action" =~ ^(start|stop|restart)$ ]] || die "svc: action must be start|stop|restart"
+    [[ -f "/etc/systemd/system/$(unit_name "$2")" ]] || die "unit not installed for $2"
+    systemctl "$action" "$(unit_name "$2")"
+    echo "$action $(unit_name "$2"): ok"
+    ;;
+  status)
+    valid_slug "${1:-}"
+    systemctl is-active "$(unit_name "$1")" 2>/dev/null || true
+    ;;
+  journal)
+    valid_slug "${1:-}"; n="${2:-200}"
+    [[ "$n" =~ ^[0-9]{1,4}$ ]] && (( n >= 1 && n <= 5000 )) || die "journal: lines must be 1..5000"
+    journalctl -u "$(unit_name "$1")" -n "$n" --no-pager -o short-iso 2>/dev/null || true
+    ;;
+  purge-app)
+    valid_slug "${1:-}"
+    remove_unit "$1"
+    remove_site "$1"
+    rm -rf --one-file-system "$DATA/apps/$1" "$DATA/www/$1" "$DATA/builds/$1"
+    rm -f "$DATA/keys/$1" "$DATA/keys/$1.pub" "$STAGING/$1.service" "$STAGING/$1.conf"
+    echo "purged $1"
+    ;;
+  *)
+    die "usage: rpanel-helper {prepare-app|install-unit|remove-unit|install-site|remove-site|purge-app} <slug> | svc {start|stop|restart} <slug> | status <slug> | journal <slug> <lines>"
+    ;;
+esac
+}
+
+# 테스트에서 source 할 수 있도록 (sudo 실행 시에는 항상 main)
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  main "$@"
+fi

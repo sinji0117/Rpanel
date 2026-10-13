@@ -32,3 +32,21 @@ pub async fn call_quiet(state: &AppState, args: &[&str]) -> anyhow::Result<CmdOu
         .run(CmdSpec::new("sudo", &full).timeout(60).quiet(), &log)
         .await
 }
+
+/// 오래 걸릴 수 있는 작업(덤프·복원)용
+pub async fn call_long(
+    state: &AppState,
+    args: &[&str],
+    log: &LogSink,
+    timeout_secs: u64,
+) -> anyhow::Result<CmdOutput> {
+    let helper = state.cfg.helper_path.display().to_string();
+    let mut full: Vec<&str> = vec!["-n", &helper];
+    full.extend_from_slice(args);
+    run_ok(
+        state.exec.as_ref(),
+        CmdSpec::new("sudo", &full).timeout(timeout_secs).quiet(),
+        log,
+    )
+    .await
+}

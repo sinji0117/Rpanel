@@ -42,7 +42,7 @@ staged_file() {
 # ───────────────────────── systemd ─────────────────────────
 
 validate_unit() {
-  local f="$1" slug="$2" appdir="$DATA/apps/$2"
+  local f="$1" slug="$2" appdir="$DATA/apps/$2" mode="${3:-service}"
   local line key val section=""
   local saw_user=0 saw_nnp=0
   while IFS= read -r line || [[ -n "$line" ]]; do
@@ -52,7 +52,10 @@ validate_unit() {
     key="${BASH_REMATCH[1]}"; val="${BASH_REMATCH[2]}"
     case "$section:$key" in
       Unit:Description|Unit:After|Unit:Wants) ;;
-      Service:Type) [[ "$val" == simple ]] || die "unit: Type must be simple" ;;
+      Service:Type)
+        if [[ "$mode" == cron ]]; then [[ "$val" == oneshot ]] || die "unit: cron Type must be oneshot"
+        else [[ "$val" == simple ]] || die "unit: Type must be simple"; fi ;;
+      Service:TimeoutStartSec) [[ "$mode" == cron && "$val" =~ ^[0-9]{1,6}$ ]] || die "unit: TimeoutStartSec only for cron" ;;
       Service:User|Service:Group) [[ "$val" == "$RUN_USER" ]] || die "unit: $key must be $RUN_USER"; saw_user=1 ;;
       Service:WorkingDirectory) [[ "$val" == "$appdir/current" ]] || die "unit: bad WorkingDirectory" ;;
       Service:EnvironmentFile) [[ "$val" == "$appdir/app.env" ]] || die "unit: bad EnvironmentFile" ;;
@@ -63,11 +66,13 @@ validate_unit() {
         elif [[ "$val" =~ ^"$appdir/current/"[A-Za-z0-9_][A-Za-z0-9_.-]*$ ]]; then :
         else die "unit: ExecStart must be the app binary or /bin/bash -c"; fi ;;
       Service:NoNewPrivileges) [[ "$val" == true ]] || die "unit: NoNewPrivileges must be true"; saw_nnp=1 ;;
-      Service:Restart|Service:RestartSec|Service:TimeoutStopSec|Service:PrivateTmp|Service:PrivateDevices|\
+      Service:Restart|Service:RestartSec)
+        [[ "$mode" == service ]] || die "unit: $key not allowed for cron" ;;
+      Service:TimeoutStopSec|Service:PrivateTmp|Service:PrivateDevices|\
       Service:ProtectSystem|Service:ProtectHome|Service:ProtectKernelTunables|Service:ProtectKernelModules|\
       Service:ProtectControlGroups|Service:RestrictAddressFamilies|Service:RestrictNamespaces|\
       Service:LockPersonality|Service:MemoryDenyWriteExecute|Service:LimitNOFILE) ;;
-      Install:WantedBy) [[ "$val" == multi-user.target ]] || die "unit: bad WantedBy" ;;
+      Install:WantedBy) [[ "$mode" == service && "$val" == multi-user.target ]] || die "unit: bad WantedBy" ;;
       *) die "unit: key not allowed: [$section] $key" ;;
     esac
   done < "$f"
@@ -182,6 +187,195 @@ remove_site() {
   fi
 }
 
+
+# ───────────────────────── cron (systemd timer) ─────────────────────────
+
+cron_unit() { echo "rpanel-cron-$1-$2"; }
+valid_id() { [[ "${1:-}" =~ ^[0-9]{1,10}$ ]] || die "invalid id: '${1:-}'"; }
+
+valid_calendar() {
+  local expr="$1" re='^[A-Za-z0-9*:/,. ~-]+$'
+  [[ ${#expr} -le 100 && "$expr" =~ $re ]] || die "timer: bad OnCalendar"
+  if command -v systemd-analyze >/dev/null 2>&1; then
+    systemd-analyze calendar "$expr" >/dev/null 2>&1 || die "timer: systemd가 해석할 수 없는 일정입니다: $expr"
+  fi
+}
+
+validate_timer() {
+  local f="$1" slug="$2" id="$3" line key val section="" saw_cal=0
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    [[ -z "$line" || "$line" == \#* ]] && continue
+    if [[ "$line" =~ ^\[(Unit|Timer|Install)\]$ ]]; then section="${BASH_REMATCH[1]}"; continue; fi
+    [[ "$line" =~ ^([A-Za-z]+)=(.*)$ ]] || die "timer: bad line: $line"
+    key="${BASH_REMATCH[1]}"; val="${BASH_REMATCH[2]}"
+    case "$section:$key" in
+      Unit:Description) ;;
+      Timer:OnCalendar) valid_calendar "$val"; saw_cal=1 ;;
+      Timer:Persistent) [[ "$val" == true || "$val" == false ]] || die "timer: bad Persistent" ;;
+      Timer:Unit) [[ "$val" == "$(cron_unit "$slug" "$id").service" ]] || die "timer: bad Unit" ;;
+      Install:WantedBy) [[ "$val" == timers.target ]] || die "timer: bad WantedBy" ;;
+      *) die "timer: key not allowed: [$section] $key" ;;
+    esac
+  done < "$f"
+  (( saw_cal )) || die "timer: OnCalendar required"
+}
+
+install_cron() {
+  local slug="$1" id="$2" svc="$STAGING/cron-$1-$2.service" tmr="$STAGING/cron-$1-$2.timer" u
+  staged_file "$svc"; staged_file "$tmr"
+  validate_unit "$svc" "$slug" cron
+  validate_timer "$tmr" "$slug" "$id"
+  u="$(cron_unit "$slug" "$id")"
+  install -m 0644 -o root -g root "$svc" "/etc/systemd/system/$u.service"
+  install -m 0644 -o root -g root "$tmr" "/etc/systemd/system/$u.timer"
+  systemctl daemon-reload
+  systemctl enable --now "$u.timer" >/dev/null 2>&1
+  echo "installed $u.timer"
+}
+
+remove_cron() {
+  local u; u="$(cron_unit "$1" "$2")"
+  systemctl disable --now "$u.timer" >/dev/null 2>&1 || true
+  systemctl stop "$u.service" >/dev/null 2>&1 || true
+  rm -f "/etc/systemd/system/$u.timer" "/etc/systemd/system/$u.service"
+  systemctl daemon-reload
+  echo "removed $u"
+}
+
+remove_all_crons() {
+  local f u
+  for f in /etc/systemd/system/rpanel-cron-"$1"-*.timer; do
+    [[ -e "$f" ]] || continue
+    u="$(basename "$f" .timer)"
+    [[ "$u" =~ ^rpanel-cron-$1-[0-9]+$ ]] || continue
+    remove_cron "$1" "${u##*-}"
+  done
+}
+
+# ───────────────────────── MariaDB ─────────────────────────
+
+REGISTRY=/etc/rpanel/managed-dbs
+RESERVED_DB=" mysql information_schema performance_schema sys test root rpanel mariadb.sys "
+
+valid_db_ident() {
+  local v="${1:-}" max="$2"
+  [[ "$v" =~ ^[a-z][a-z0-9_]+$ && ${#v} -le $max ]] || die "invalid identifier: '$v'"
+  [[ "$RESERVED_DB" != *" $v "* ]] || die "reserved name: $v"
+}
+
+registered() { [[ -f $REGISTRY ]] && grep -qx "$1 $2" "$REGISTRY"; }
+registered_db() { [[ -f $REGISTRY ]] && grep -q "^$1 " "$REGISTRY"; }
+sql() { mariadb --batch --skip-column-names -e "$1"; }
+
+db_create() {
+  local name="$1" user="$2" pw
+  valid_db_ident "$name" 64; valid_db_ident "$user" 32
+  [[ -z "$(sql "SELECT SCHEMA_NAME FROM information_schema.SCHEMATA WHERE SCHEMA_NAME='$name'")" ]] \
+    || die "데이터베이스 $name 이(가) 이미 있습니다 (패널은 기존 DB를 가져오지 않습니다)"
+  [[ -z "$(sql "SELECT User FROM mysql.user WHERE User='$user'")" ]] || die "사용자 $user 이(가) 이미 있습니다"
+  pw="$(openssl rand -hex 24)"
+  sql "CREATE DATABASE \`$name\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+       CREATE USER '$user'@'localhost' IDENTIFIED BY '$pw';
+       GRANT ALL PRIVILEGES ON \`$name\`.* TO '$user'@'localhost';
+       FLUSH PRIVILEGES;"
+  install -d -m 0750 -o root -g root /etc/rpanel
+  touch "$REGISTRY"; chmod 0600 "$REGISTRY"
+  echo "$name $user" >> "$REGISTRY"
+  echo "$pw"
+}
+
+db_drop() {
+  local name="$1" user="$2"
+  valid_db_ident "$name" 64; valid_db_ident "$user" 32
+  registered "$name" "$user" || die "패널이 만든 DB가 아닙니다: $name"
+  sql "DROP DATABASE IF EXISTS \`$name\`; DROP USER IF EXISTS '$user'@'localhost'; FLUSH PRIVILEGES;"
+  grep -vx "$name $user" "$REGISTRY" > "$REGISTRY.tmp" || true
+  mv "$REGISTRY.tmp" "$REGISTRY"; chmod 0600 "$REGISTRY"
+  echo "dropped $name"
+}
+
+db_password() {
+  local name="$1" user="$2" pw
+  valid_db_ident "$name" 64; valid_db_ident "$user" 32
+  registered "$name" "$user" || die "패널이 만든 DB가 아닙니다: $name"
+  pw="$(openssl rand -hex 24)"
+  sql "ALTER USER '$user'@'localhost' IDENTIFIED BY '$pw'; FLUSH PRIVILEGES;"
+  echo "$pw"
+}
+
+# ───────────────────────── 백업 ─────────────────────────
+
+BACKUPS="$DATA/backups"
+valid_stamp() { [[ "${1:-}" =~ ^[0-9]{8}-[0-9]{6}$ ]] || die "invalid stamp"; }
+valid_backup_file() { [[ "${1:-}" =~ ^[0-9]{8}-[0-9]{6}-(db-[a-z][a-z0-9_]+\.sql|data\.tar)\.gz$ ]] || die "invalid backup file name"; }
+
+backup_dir() {
+  install -d -o rpanel -g rpanel -m 0750 "$BACKUPS" "$BACKUPS/$1"
+  echo "$BACKUPS/$1"
+}
+
+finish_file() { chown rpanel:rpanel "$1"; chmod 0640 "$1"; stat -c %s "$1"; }
+
+backup_db() {
+  local slug="$1" name="$2" stamp="$3" dir out
+  valid_db_ident "$name" 64; valid_stamp "$stamp"
+  registered_db "$name" || die "패널이 만든 DB가 아닙니다: $name"
+  dir="$(backup_dir "$slug")"; out="$dir/$stamp-db-$name.sql.gz"
+  set -o pipefail
+  mariadb-dump --single-transaction --quick --routines --triggers --events "$name" | gzip -6 > "$out.part" \
+    || { rm -f "$out.part"; die "mariadb-dump 실패"; }
+  mv "$out.part" "$out"
+  finish_file "$out"
+}
+
+backup_data() {
+  local slug="$1" stamp="$2" dir out
+  valid_stamp "$stamp"
+  dir="$(backup_dir "$slug")"; out="$dir/$stamp-data.tar.gz"
+  install -d -o "$RUN_USER" -g "$RUN_USER" -m 0750 "$DATA/apps/$slug/data"
+  tar -C "$DATA/apps/$slug" -czf "$out.part" data || { rm -f "$out.part"; die "tar 실패"; }
+  mv "$out.part" "$out"
+  finish_file "$out"
+}
+
+restore_db() {
+  local slug="$1" name="$2" file="$3" path
+  valid_db_ident "$name" 64; valid_backup_file "$file"
+  [[ "$file" == *-db-"$name".sql.gz ]] || die "다른 DB의 백업입니다"
+  registered_db "$name" || die "패널이 만든 DB가 아닙니다: $name"
+  path="$BACKUPS/$slug/$file"; [[ -f "$path" && ! -L "$path" ]] || die "백업 파일이 없습니다"
+  set -o pipefail
+  gunzip -c "$path" | mariadb "$name" || die "복원 실패"
+  echo "restored $name from $file"
+}
+
+restore_data() {
+  local slug="$1" file="$2" path unit was_active=0 app="$DATA/apps/$1"
+  valid_backup_file "$file"; [[ "$file" == *-data.tar.gz ]] || die "data 백업이 아닙니다"
+  path="$BACKUPS/$slug/$file"; [[ -f "$path" && ! -L "$path" ]] || die "백업 파일이 없습니다"
+  # 아카이브 안 경로 검사: data/ 아래만, 절대경로·.. 금지
+  if tar -tzf "$path" | grep -Ev '^data(/|$)' | grep -q . ; then die "아카이브에 허용되지 않은 경로가 있습니다"; fi
+  if tar -tzf "$path" | grep -Eq '(^|/)\.\.(/|$)'; then die "아카이브에 .. 경로가 있습니다"; fi
+  if tar -tvzf "$path" | grep -Eq '^[lhbcp]| link to '; then die "아카이브에 링크·특수 파일이 있습니다"; fi
+  unit="$(unit_name "$slug")"
+  if systemctl is-active --quiet "$unit" 2>/dev/null; then was_active=1; systemctl stop "$unit"; fi
+  rm -rf --one-file-system "$app/data"
+  install -d -m 0750 "$app"
+  tar -C "$app" --no-same-owner --no-same-permissions -xzf "$path"
+  chown -R "$RUN_USER:$RUN_USER" "$app/data"; chmod 0750 "$app/data"
+  (( was_active )) && systemctl start "$unit"
+  echo "restored data from $file"
+}
+
+# ───────────────────────── Nginx 로그 ─────────────────────────
+
+nginx_log() {
+  local slug="$1" kind="$2" n="$3"
+  [[ "$kind" == access || "$kind" == error ]] || die "kind must be access|error"
+  [[ "$n" =~ ^[0-9]{1,5}$ ]] && (( n >= 1 && n <= 20000 )) || die "lines must be 1..20000"
+  tail -n "$n" "/var/log/nginx/rpanel-$slug-$kind.log" 2>/dev/null || true
+}
+
 # ───────────────────────── main ─────────────────────────
 
 main() {
@@ -211,16 +405,43 @@ case "$cmd" in
     [[ "$n" =~ ^[0-9]{1,4}$ ]] && (( n >= 1 && n <= 5000 )) || die "journal: lines must be 1..5000"
     journalctl -u "$(unit_name "$1")" -n "$n" --no-pager -o short-iso 2>/dev/null || true
     ;;
+  install-cron) valid_slug "${1:-}"; valid_id "${2:-}"; install_cron "$1" "$2" ;;
+  remove-cron)  valid_slug "${1:-}"; valid_id "${2:-}"; remove_cron "$1" "$2" ;;
+  run-cron)
+    valid_slug "${1:-}"; valid_id "${2:-}"
+    [[ -f "/etc/systemd/system/$(cron_unit "$1" "$2").service" ]] || die "cron not installed"
+    systemctl start --no-block "$(cron_unit "$1" "$2").service"; echo "started"
+    ;;
+  cron-status)
+    valid_slug "${1:-}"; valid_id "${2:-}"
+    systemctl show "$(cron_unit "$1" "$2").service" -p ActiveState -p Result -p ExecMainStatus -p ExecMainStartTimestamp -p ExecMainExitTimestamp 2>/dev/null || true
+    systemctl show "$(cron_unit "$1" "$2").timer" -p NextElapseUSecRealtime -p LastTriggerUSec 2>/dev/null || true
+    ;;
+  cron-log)
+    valid_slug "${1:-}"; valid_id "${2:-}"; n="${3:-100}"
+    [[ "$n" =~ ^[0-9]{1,4}$ ]] && (( n >= 1 && n <= 5000 )) || die "lines must be 1..5000"
+    journalctl -u "$(cron_unit "$1" "$2").service" -n "$n" --no-pager -o short-iso 2>/dev/null || true
+    ;;
+  db-create)   db_create "${1:-}" "${2:-}" ;;
+  db-drop)     db_drop "${1:-}" "${2:-}" ;;
+  db-password) db_password "${1:-}" "${2:-}" ;;
+  backup-db)   valid_slug "${1:-}"; backup_db "$1" "${2:-}" "${3:-}" ;;
+  backup-data) valid_slug "${1:-}"; backup_data "$1" "${2:-}" ;;
+  restore-db)  valid_slug "${1:-}"; restore_db "$1" "${2:-}" "${3:-}" ;;
+  restore-data) valid_slug "${1:-}"; restore_data "$1" "${2:-}" ;;
+  nginx-log)   valid_slug "${1:-}"; nginx_log "$1" "${2:-}" "${3:-200}" ;;
   purge-app)
     valid_slug "${1:-}"
+    remove_all_crons "$1"
     remove_unit "$1"
     remove_site "$1"
     rm -rf --one-file-system "$DATA/apps/$1" "$DATA/www/$1" "$DATA/builds/$1"
-    rm -f "$DATA/keys/$1" "$DATA/keys/$1.pub" "$STAGING/$1.service" "$STAGING/$1.conf"
+    rm -f "$DATA/keys/$1" "$DATA/keys/$1.pub" "$STAGING/$1.service" "$STAGING/$1.conf" "$STAGING"/cron-"$1"-*
+    # 백업 파일(/var/lib/rpanel/backups/<slug>)은 남겨 둡니다
     echo "purged $1"
     ;;
   *)
-    die "usage: rpanel-helper {prepare-app|install-unit|remove-unit|install-site|remove-site|purge-app} <slug> | svc {start|stop|restart} <slug> | status <slug> | journal <slug> <lines>"
+    die "usage: rpanel-helper {prepare-app|install-unit|remove-unit|install-site|remove-site|purge-app} <slug> | svc {start|stop|restart} <slug> | status|journal <slug> | {install,remove,run}-cron|cron-status|cron-log <slug> <id> | db-{create,drop,password} <db> <user> | backup-db <slug> <db> <stamp> | backup-data <slug> <stamp> | restore-db <slug> <db> <file> | restore-data <slug> <file> | nginx-log <slug> access|error <lines>"
     ;;
 esac
 }

@@ -1,11 +1,15 @@
 pub mod apps;
+pub mod backups;
+pub mod cron;
+pub mod databases;
 pub mod deployments;
 pub mod projects;
+pub mod sites;
 pub mod system;
 pub mod ws;
 
 use axum::{
-    routing::{get, post},
+    routing::{delete, get, post, put},
     Router,
 };
 use tower_http::{
@@ -60,6 +64,38 @@ pub fn router(state: AppState) -> Router {
             "/apps/{id}/webhook",
             get(apps::get_webhook).post(apps::rotate_webhook),
         )
+        // DB · Redis
+        .route("/databases", get(databases::list_all))
+        .route(
+            "/apps/{id}/databases",
+            get(databases::get_for_app).post(databases::create),
+        )
+        .route("/apps/{id}/databases/{db}", delete(databases::drop))
+        .route(
+            "/apps/{id}/databases/{db}/password",
+            post(databases::rotate_password),
+        )
+        .route(
+            "/apps/{id}/redis",
+            post(databases::redis_assign).delete(databases::redis_release),
+        )
+        .route("/apps/{id}/redis/flush", post(databases::redis_flush))
+        // 사이트
+        .route("/sites", get(sites::list))
+        .route("/apps/{id}/nginx-logs", get(sites::logs))
+        // 백업
+        .route("/backups", get(backups::list))
+        .route("/apps/{id}/backups", post(backups::create))
+        .route("/apps/{id}/backup-settings", put(backups::update_settings))
+        .route("/backups/{id}", delete(backups::delete))
+        .route("/backups/{id}/restore", post(backups::restore))
+        .route("/backups/{id}/download", get(backups::download))
+        // 크론
+        .route("/apps/{id}/cron", get(cron::list).post(cron::create))
+        .route("/cron/preview", post(cron::preview_route))
+        .route("/cron/{id}", put(cron::update).delete(cron::delete))
+        .route("/cron/{id}/run", post(cron::run_now))
+        .route("/cron/{id}/log", get(cron::log))
         .route("/apps/{id}/deploy", post(deployments::deploy))
         .route("/apps/{id}/deployments", get(deployments::list_for_app))
         // 배포

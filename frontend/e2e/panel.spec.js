@@ -113,3 +113,82 @@ test('환경변수 .env 붙여넣기·저장 + Deploy key·Webhook', async ({ pa
   await page.getByRole('button', { name: 'Deploy key 만들기' }).click()
   await expect(page.getByText('ssh-ed25519 AAAAC3NzaTEST rpanel-front')).toBeVisible()
 })
+
+function seededBackend() {
+  const backend = createMockBackend()
+  backend.db.projects.push({ id: 1, name: 'Beripick', description: '', created_at: '', updated_at: '' })
+  backend.db.apps.push({
+    id: 2, project_id: 1, name: 'Beripick API', slug: 'beripick-api', kind: 'rust', git_url: 'ssh://git@100.100.199.123:2222/b/api.git',
+    git_branch: 'main', root_dir: '', build_cmd: null, start_cmd: null, binary_name: 'beripick-api', output_dir: 'dist', port: 8100,
+    api_proxy_port: null, domains: 'api.beripick.com www.api.beripick.com', health_path: '/api/health', status: 'running',
+    current_commit: 'abc12345', current_release: 9, redis_db: null, backup_schedule: 'off', backup_keep: 7,
+  })
+  backend.db.env[2] = [{ key: 'RUST_LOG', value: 'info' }]
+  backend.db.seq = 20
+  backend.db.loggedIn = true
+  return backend
+}
+
+test('데이터베이스·Redis 생성 → 환경변수에 자동 주입 표시 → 전역 목록', async ({ page }) => {
+  const backend = seededBackend()
+  await backend.install(page)
+  await page.goto('/apps/2')
+  await page.getByRole('tab', { name: '데이터베이스' }).click()
+  await page.getByRole('button', { name: '+ 데이터베이스' }).click()
+  await expect(page.getByLabel('DB 이름', { exact: true })).toHaveValue('beripick_api')
+  await page.getByRole('button', { name: '만들기' }).click()
+  await expect(page.getByText('데이터베이스 beripick_api 생성됨')).toBeVisible()
+  // 비밀번호는 기본 마스킹
+  await expect(page.getByText('mysql://beripick_api:••••••@127.0.0.1:3306/beripick_api')).toBeVisible()
+  await page.getByRole('button', { name: 'Redis 배정' }).click()
+  await expect(page.getByText('DB 4')).toBeVisible()
+
+  await page.getByRole('tab', { name: '환경변수' }).click()
+  await expect(page.getByText('패널이 자동 주입')).toBeVisible()
+  await expect(page.getByText('MariaDB · beripick_api')).toBeVisible()
+  await expect(page.getByText('Redis · DB 4')).toBeVisible()
+
+  await page.getByRole('link', { name: '데이터베이스' }).click()
+  await expect(page.getByRole('cell', { name: 'beripick_api' }).first()).toBeVisible()
+})
+
+test('백업 → 목록, 크론 등록(잘못된 일정 거부), 사이트·Nginx 로그 통계', async ({ page }) => {
+  const backend = seededBackend()
+  backend.db.dbs.push({ id: 30, app_id: 2, name: 'beripick_api', username: 'beripick_api', env_key: 'DATABASE_URL', created_at: '' })
+  await backend.install(page)
+  await page.goto('/apps/2')
+
+  await page.getByRole('tab', { name: '백업' }).click()
+  await page.getByRole('button', { name: '지금 백업' }).click()
+  await expect(page.getByText('20.0 KB')).toBeVisible()
+  await page.getByLabel('예약').selectOption('daily')
+  await page.getByLabel('대상별 보관 개수').fill('5')
+  await page.getByRole('button', { name: '저장' }).click()
+  await expect(page.getByText('예약 백업: 매일 3시, 5개 보관')).toBeVisible()
+
+  await page.getByRole('tab', { name: '크론' }).click()
+  await page.getByRole('button', { name: '+ 작업' }).click()
+  await page.getByLabel('이름').fill('세션 정리')
+  await page.getByRole('button', { name: '5분마다' }).click()
+  await expect(page.getByText('다음 실행: Wed 2026-10-14 03:00:00 KST')).toBeVisible()
+  await page.getByLabel('일정 (systemd OnCalendar)').fill('daily; rm -rf /')
+  await page.getByLabel('명령').fill('./beripick-api --task cleanup')
+  await page.getByRole('button', { name: '저장' }).click()
+  await expect(page.getByRole('alert')).toContainText('일정 형식')
+  await page.getByLabel('일정 (systemd OnCalendar)').fill('*:0/5')
+  await page.getByRole('button', { name: '저장' }).click()
+  await expect(page.getByText('크론 작업을 등록했습니다')).toBeVisible()
+  await expect(page.getByText('$ ./beripick-api --task cleanup')).toBeVisible()
+
+  await page.getByRole('tab', { name: 'Nginx 로그' }).click()
+  await expect(page.getByTestId('stat-2xx')).toHaveText('3')
+  await expect(page.getByTestId('stat-5xx')).toHaveText('1')
+
+  await page.getByRole('link', { name: '사이트' }).click()
+  await expect(page.getByText('응답 이상 1개')).toBeVisible()
+  await expect(page.getByRole('cell', { name: /^200/ })).toBeVisible()
+
+  await page.getByRole('link', { name: '백업' }).click()
+  await expect(page.getByRole('heading', { name: '백업' })).toBeVisible()
+  await expect(page.getByRole('cell', { name: 'Beripick API' }).first()).toBeVisible()
+})

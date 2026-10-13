@@ -105,6 +105,9 @@ async fn full_flow() {
     let state = rpanel::build_state(cfg).await.expect("state");
     for t in [
         "app_env",
+        "cron_jobs",
+        "backups",
+        "app_databases",
         "deployments",
         "apps",
         "projects",
@@ -602,6 +605,316 @@ async fn full_flow() {
     ))
     .await
     .is_err());
+
+    // ── DB · Redis ──
+    let r = ctx
+        .post(&format!("/api/apps/{api_id}/databases"), &t, json!({}))
+        .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{:?}", r.body);
+    assert_eq!(r.body["name"], "beripick_api");
+    let db_id = r.body["id"].as_u64().unwrap();
+    assert_eq!(
+        ctx.post(&format!("/api/apps/{api_id}/databases"), &t, json!({}))
+            .await
+            .status,
+        StatusCode::CONFLICT
+    );
+    assert_eq!(
+        ctx.post(
+            &format!("/api/apps/{api_id}/databases"),
+            &t,
+            json!({"name":"mysql"})
+        )
+        .await
+        .status,
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        ctx.post(
+            &format!("/api/apps/{api_id}/databases"),
+            &t,
+            json!({"name":"x`; DROP"})
+        )
+        .await
+        .status,
+        StatusCode::BAD_REQUEST
+    );
+    let r = ctx
+        .post(&format!("/api/apps/{api_id}/redis"), &t, json!({}))
+        .await;
+    assert_eq!(r.body["db"], 4, "{:?}", r.body);
+    let r = ctx
+        .post(&format!("/api/apps/{front_id}/redis"), &t, json!({}))
+        .await;
+    assert_eq!(r.body["db"], 5);
+    let env = ctx.get(&format!("/api/apps/{api_id}/env"), &t).await.body;
+    let managed = env["managed"].as_array().unwrap();
+    let keys: Vec<&str> = managed.iter().map(|m| m["key"].as_str().unwrap()).collect();
+    assert_eq!(keys, ["DATABASE_URL", "REDIS_URL"]);
+    // 사용자가 직접 넣은 DATABASE_URL 이 우선 (배포 시)
+    assert!(managed[1]["value"].as_str().unwrap().ends_with("/4"));
+    let r = ctx.get("/api/databases", &t).await;
+    assert_eq!(r.body["databases"].as_array().unwrap().len(), 1);
+    assert_eq!(r.body["redis"].as_array().unwrap().len(), 2);
+    assert!(
+        r.body["databases"][0].get("password").is_none(),
+        "password must not be serialized"
+    );
+    assert_eq!(
+        ctx.post(
+            &format!("/api/apps/{api_id}/databases/{db_id}/password"),
+            &t,
+            json!({})
+        )
+        .await
+        .status,
+        StatusCode::OK
+    );
+    let d = ctx
+        .post(&format!("/api/apps/{api_id}/deploy"), &t, json!({}))
+        .await
+        .body["deployment_id"]
+        .as_u64()
+        .unwrap();
+    let d = wait_deploy(&ctx, &t, d).await;
+    assert!(
+        d["log"].as_str().unwrap().contains("(3개 변수)"),
+        "managed REDIS_URL + user 2 vars (DATABASE_URL overridden)"
+    );
+    assert_eq!(
+        ctx.req(
+            Method::DELETE,
+            &format!("/api/apps/{front_id}/redis"),
+            Some(&t),
+            None,
+            Some(json!({"flush":true}))
+        )
+        .await
+        .status,
+        StatusCode::NO_CONTENT
+    );
+
+    // ── 사이트 ──
+    let r = ctx.get("/api/sites", &t).await;
+    let domains: Vec<&str> = r
+        .body
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| s["domain"].as_str().unwrap())
+        .collect();
+    assert!(
+        domains.contains(&"api.beripick.com") && domains.contains(&"www.beripick.com"),
+        "{domains:?}"
+    );
+    assert_eq!(
+        ctx.get(&format!("/api/apps/{api_id}/nginx-logs?kind=access"), &t)
+            .await
+            .status,
+        StatusCode::OK
+    );
+    assert_eq!(
+        ctx.get(&format!("/api/apps/{api_id}/nginx-logs?kind=../x"), &t)
+            .await
+            .status,
+        StatusCode::BAD_REQUEST
+    );
+
+    // ── 백업 ──
+    let r = ctx
+        .post(&format!("/api/apps/{api_id}/backups"), &t, json!({}))
+        .await;
+    assert_eq!(r.status, StatusCode::ACCEPTED, "{:?}", r.body);
+    assert_eq!(
+        r.body["backup_ids"].as_array().unwrap().len(),
+        2,
+        "db + data"
+    );
+    let mut done = false;
+    for _ in 0..100 {
+        let list = ctx
+            .get(&format!("/api/backups?app_id={api_id}"), &t)
+            .await
+            .body;
+        if list
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|b| b["status"] == "success")
+        {
+            done = true;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert!(done, "backups did not finish");
+    let list = ctx
+        .get(&format!("/api/backups?app_id={api_id}"), &t)
+        .await
+        .body;
+    let db_backup = list
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|b| b["kind"] == "db")
+        .unwrap()
+        .clone();
+    assert!(db_backup["file"]
+        .as_str()
+        .unwrap()
+        .ends_with("-db-beripick_api.sql.gz"));
+    let bid = db_backup["id"].as_u64().unwrap();
+    assert_eq!(
+        ctx.post(&format!("/api/backups/{bid}/restore"), &t, json!({}))
+            .await
+            .status,
+        StatusCode::OK
+    );
+    assert_eq!(
+        ctx.get(&format!("/api/backups/{bid}/download"), &t)
+            .await
+            .status,
+        StatusCode::NOT_FOUND,
+        "dry-run has no file"
+    );
+    assert_eq!(
+        ctx.post(&format!("/api/apps/{front_id}/backups"), &t, json!({}))
+            .await
+            .status,
+        StatusCode::BAD_REQUEST,
+        "static app without DB has nothing to back up"
+    );
+    let r = ctx
+        .req(
+            Method::PUT,
+            &format!("/api/apps/{api_id}/backup-settings"),
+            Some(&t),
+            None,
+            Some(json!({"schedule":"daily","keep":3})),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK);
+    let r = ctx
+        .req(
+            Method::PUT,
+            &format!("/api/apps/{api_id}/backup-settings"),
+            Some(&t),
+            None,
+            Some(json!({"schedule":"hourly","keep":3})),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST);
+    assert_eq!(
+        ctx.req(
+            Method::DELETE,
+            &format!("/api/backups/{bid}"),
+            Some(&t),
+            None,
+            None
+        )
+        .await
+        .status,
+        StatusCode::NO_CONTENT
+    );
+
+    // ── 크론 ──
+    let cron_body =
+        json!({"name":"정리","schedule":"*-*-* 03:00:00","command":"./hello-api --cleanup"});
+    assert_eq!(
+        ctx.post(&format!("/api/apps/{front_id}/cron"), &t, cron_body.clone())
+            .await
+            .status,
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        ctx.post(
+            &format!("/api/apps/{api_id}/cron"),
+            &t,
+            json!({"name":"x","schedule":"daily; id","command":"true"})
+        )
+        .await
+        .status,
+        StatusCode::BAD_REQUEST
+    );
+    let r = ctx
+        .post(&format!("/api/apps/{api_id}/cron"), &t, cron_body)
+        .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{:?}", r.body);
+    let cid = r.body["id"].as_u64().unwrap();
+    assert_eq!(
+        ctx.get(&format!("/api/apps/{api_id}/cron"), &t)
+            .await
+            .body
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(
+        ctx.post(&format!("/api/cron/{cid}/run"), &t, json!({}))
+            .await
+            .status,
+        StatusCode::OK
+    );
+    let r = ctx
+        .req(
+            Method::PUT,
+            &format!("/api/cron/{cid}"),
+            Some(&t),
+            None,
+            Some(json!({"name":"정리","schedule":"hourly","command":"true","enabled":false})),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+    assert_eq!(
+        ctx.post(&format!("/api/cron/{cid}/run"), &t, json!({}))
+            .await
+            .status,
+        StatusCode::BAD_REQUEST,
+        "disabled"
+    );
+    let r = ctx
+        .post("/api/cron/preview", &t, json!({"schedule":"*:0/5"}))
+        .await;
+    assert_eq!(r.body["valid"], true);
+    assert_eq!(
+        ctx.req(
+            Method::DELETE,
+            &format!("/api/cron/{cid}"),
+            Some(&t),
+            None,
+            None
+        )
+        .await
+        .status,
+        StatusCode::NO_CONTENT
+    );
+
+    // DB 가 남아 있으면 앱 삭제 불가 → DB 삭제 후 진행
+    assert_eq!(
+        ctx.req(
+            Method::DELETE,
+            &format!("/api/apps/{api_id}"),
+            Some(&t),
+            None,
+            None
+        )
+        .await
+        .status,
+        StatusCode::CONFLICT
+    );
+    assert_eq!(
+        ctx.req(
+            Method::DELETE,
+            &format!("/api/apps/{api_id}/databases/{db_id}"),
+            Some(&t),
+            None,
+            None
+        )
+        .await
+        .status,
+        StatusCode::NO_CONTENT
+    );
 
     // ── 삭제 ──
     assert_eq!(

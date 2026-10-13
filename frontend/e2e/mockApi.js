@@ -11,6 +11,9 @@ export function createMockBackend({ needsSetup = false } = {}) {
     apps: [],
     env: {},
     deployments: [],
+    dbs: [],
+    backups: [],
+    crons: [],
     seq: 1,
   }
   const id = () => db.seq++
@@ -118,7 +121,52 @@ export function createMockBackend({ needsSetup = false } = {}) {
         Object.assign(a, body, { slug: a.slug, kind: a.kind })
         return json(route, 200, a)
       }
-      if (sub === '/env' && method === 'GET') return json(route, 200, { vars: db.env[a.id] })
+      const managed = () => [
+        ...db.dbs.filter((d) => d.app_id === a.id).map((d) => ({ key: d.env_key, value: `mysql://${d.username}:secretpw@127.0.0.1:3306/${d.name}`, source: `MariaDB · ${d.name}` })),
+        ...(a.redis_db != null ? [{ key: 'REDIS_URL', value: `redis://:pw@127.0.0.1:6379/${a.redis_db}`, source: `Redis · DB ${a.redis_db}` }] : []),
+      ]
+      if (sub === '/env' && method === 'GET') return json(route, 200, { vars: db.env[a.id], managed: managed() })
+      if (sub === '/databases' && method === 'GET')
+        return json(route, 200, {
+          databases: db.dbs.filter((d) => d.app_id === a.id).map((d) => ({ ...d, url: `mysql://${d.username}:secretpw@127.0.0.1:3306/${d.name}` })),
+          redis: a.redis_db != null ? { db: a.redis_db, url: `redis://:pw@127.0.0.1:6379/${a.redis_db}`, keys: 0 } : null,
+          suggested_name: a.slug.replace(/-/g, '_'),
+        })
+      if (sub === '/databases' && method === 'POST') {
+        const name = body.name || a.slug.replace(/-/g, '_')
+        if (db.dbs.some((d) => d.name === name)) return json(route, 409, { error: 'conflict', message: '이미 사용 중인 DB 이름입니다' })
+        const d = { id: id(), app_id: a.id, name, username: body.username || name, env_key: body.env_key || 'DATABASE_URL', created_at: now() }
+        db.dbs.push(d)
+        return json(route, 201, d)
+      }
+      if (sub === '/redis' && method === 'POST') {
+        a.redis_db = 4
+        return json(route, 200, { db: 4 })
+      }
+      if (sub === '/backups' && method === 'POST') {
+        const stamp = '20261013-030000'
+        for (const d of db.dbs.filter((x) => x.app_id === a.id))
+          db.backups.unshift({ id: id(), app_id: a.id, app_name: a.name, app_slug: a.slug, kind: 'db', target: d.name, file: `${stamp}-db-${d.name}.sql.gz`, size_bytes: 20480, status: 'success', error: null, trigger_by: 'manual', created_at: now(), finished_at: now() })
+        db.backups.unshift({ id: id(), app_id: a.id, app_name: a.name, app_slug: a.slug, kind: 'data', target: 'data', file: `${stamp}-data.tar.gz`, size_bytes: 1024, status: 'success', error: null, trigger_by: 'manual', created_at: now(), finished_at: now() })
+        return json(route, 202, { backup_ids: [] })
+      }
+      if (sub === '/backup-settings') {
+        Object.assign(a, { backup_schedule: body.schedule, backup_keep: body.keep })
+        return json(route, 200, { ...body, hour: 3 })
+      }
+      if (sub === '/cron' && method === 'GET') return json(route, 200, db.crons.filter((c) => c.app_id === a.id))
+      if (sub === '/cron' && method === 'POST') {
+        if (/[;$`]/.test(body.schedule)) return json(route, 400, { error: 'bad_request', message: '일정 형식이 올바르지 않습니다' })
+        const c = { id: id(), app_id: a.id, ...body, unit: `rpanel-cron-${a.slug}-x`, status: null }
+        db.crons.push(c)
+        return json(route, 201, { id: c.id })
+      }
+      if (sub === '/nginx-logs')
+        return json(route, 200, {
+          kind: 'access',
+          lines: ['203.0.113.5 - - [13/Oct/2026:11:00:00 +0900] "GET / HTTP/1.1" 200 512 "-" "Mozilla"'],
+          stats: { total: 4, by_class: { '2xx': 3, '5xx': 1 }, top_paths: [['/', 3], ['/api', 1]], top_ips: [['203.0.113.5', 4]], bytes: 2048 },
+        })
       if (sub === '/env' && method === 'PUT') {
         const bad = body.vars.find((v) => !/^[A-Za-z_][A-Za-z0-9_]*$/.test(v.key))
         if (bad) return json(route, 400, { error: 'bad_request', message: `환경변수 이름이 올바르지 않습니다: ${bad.key}` })
@@ -146,6 +194,31 @@ export function createMockBackend({ needsSetup = false } = {}) {
         return json(route, 202, { deployment_id: d.id })
       }
     }
+    if (path === '/backups') {
+      const appId = Number(url.searchParams.get('app_id'))
+      return json(route, 200, db.backups.filter((b) => !appId || b.app_id === appId))
+    }
+    if (path === '/cron/preview') return json(route, 200, { valid: !/[;$`]/.test(body.schedule), next: 'Wed 2026-10-14 03:00:00 KST', error: '일정 형식이 올바르지 않습니다' })
+    if (path === '/sites')
+      return json(
+        route,
+        200,
+        db.apps
+          .filter((a) => a.domains)
+          .flatMap((a) =>
+            a.domains.split(' ').map((d, i) => ({
+              domain: d, app_id: a.id, app_name: a.name, app_slug: a.slug, kind: a.kind, app_status: a.status, project_id: a.project_id,
+              http_status: i === 0 ? 200 : 502, latency_ms: i === 0 ? 12 : null, error: i === 0 ? null : 'Bad Gateway', last_deploy_status: null, last_deploy_at: null,
+            })),
+          ),
+      )
+    if (path === '/databases')
+      return json(route, 200, {
+        databases: db.dbs.map((d) => ({ ...d, app_name: db.apps.find((a) => a.id === d.app_id)?.name })),
+        redis: db.apps.filter((a) => a.redis_db != null).map((a) => ({ app_id: a.id, app_name: a.name, app_slug: a.slug, db: a.redis_db, keys: 0 })),
+        redis_range: [4, 15],
+        panel_redis_db: 10,
+      })
     m = path.match(/^\/deployments\/(\d+)$/)
     if (m) {
       const d = db.deployments.find((x) => x.id === Number(m[1]))

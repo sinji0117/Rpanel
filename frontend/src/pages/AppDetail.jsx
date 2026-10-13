@@ -7,6 +7,7 @@ import { useToast } from '../context/ToastContext'
 import { del, get, post, put } from '../lib/api'
 import { ago, duration, mergeEnv, parseDotenv, shortSha } from '../lib/format'
 import { useFetch, useInterval } from '../lib/useFetch'
+import { BackupTab, CronTab, DatabaseTab, NginxLogTab } from './AppTabs'
 
 export default function AppDetail() {
   const { id } = useParams()
@@ -38,7 +39,10 @@ export default function AppDetail() {
   const tabs = [
     { id: 'deployments', label: '배포' },
     { id: 'env', label: '환경변수' },
-    ...(isService ? [{ id: 'logs', label: '서비스 로그' }] : []),
+    { id: 'db', label: '데이터베이스' },
+    { id: 'backups', label: '백업' },
+    ...(isService ? [{ id: 'cron', label: '크론' }, { id: 'logs', label: '서비스 로그' }] : []),
+    ...(a.domains ? [{ id: 'nginx', label: 'Nginx 로그' }] : []),
     { id: 'git', label: 'Git · 웹훅' },
     { id: 'settings', label: '설정' },
   ]
@@ -97,6 +101,10 @@ export default function AppDetail() {
       <Tabs tabs={tabs} active={tab} onChange={setTab} />
       {tab === 'deployments' && <DeploymentsTab app={a} onChanged={() => app.reload(true)} />}
       {tab === 'env' && <EnvTab app={a} />}
+      {tab === 'db' && <DatabaseTab app={a} onChanged={() => app.reload(true)} />}
+      {tab === 'backups' && <BackupTab app={a} onChanged={() => app.reload(true)} />}
+      {tab === 'cron' && <CronTab app={a} />}
+      {tab === 'nginx' && <NginxLogTab app={a} />}
       {tab === 'logs' && <JournalTab app={a} />}
       {tab === 'git' && <GitTab app={a} />}
       {tab === 'settings' && <SettingsTab app={a} onSaved={(n) => app.setData(n)} />}
@@ -214,6 +222,7 @@ export function EnvTab({ app }) {
   const env = useFetch(() => get(`/apps/${app.id}/env`), [app.id])
   const [rows, setRows] = useState(null)
   const [reveal, setReveal] = useState(false)
+  const managed = env.data?.managed ?? []
   const [bulk, setBulk] = useState(null)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState(null)
@@ -247,6 +256,24 @@ export function EnvTab({ app }) {
           </button>
         </div>
       </div>
+
+      {managed.length > 0 && (
+        <div className="mb-4 rounded-lg border border-ink-700 bg-ink-950/60 p-3">
+          <p className="mb-2 text-xs text-ink-400">패널이 자동 주입 (데이터베이스 탭에서 관리) — 같은 키를 아래에 직접 넣으면 직접 넣은 값이 우선합니다</p>
+          <ul className="space-y-1">
+            {managed.map((m) => {
+              const overridden = rows.some((r) => r.key === m.key)
+              return (
+                <li key={m.key} className={`flex items-center gap-3 font-mono text-xs ${overridden ? 'text-ink-600 line-through' : ''}`}>
+                  <span className="w-2/5 truncate">{m.key}</span>
+                  <span className="truncate text-ink-400">{reveal ? m.value : m.value.replace(/:\/\/([^:]*):[^@]+@/, '://$1:••••••@')}</span>
+                  <span className="ml-auto shrink-0 font-sans text-[11px] text-ink-400">{m.source}</span>
+                </li>
+              )
+            })}
+          </ul>
+        </div>
+      )}
 
       {bulk !== null && (
         <div className="mb-4 space-y-2">

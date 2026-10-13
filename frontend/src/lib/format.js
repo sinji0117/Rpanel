@@ -75,3 +75,21 @@ export function mergeEnv(current, incoming) {
   for (const { key, value } of incoming) map.set(key, value)
   return [...map.entries()].map(([key, value]) => ({ key, value }))
 }
+
+/** HTTP 상태코드 → 색 클래스 */
+export function httpClass(code) {
+  if (code == null) return 'text-fail'
+  if (code < 300) return 'text-signal'
+  if (code < 400) return 'text-sky-300'
+  if (code < 500) return 'text-warn'
+  return 'text-fail'
+}
+
+export const CRON_PRESETS = [
+  { label: '5분마다', value: '*:0/5' },
+  { label: '매시간', value: 'hourly' },
+  { label: '매일 03:00', value: '*-*-* 03:00:00' },
+  { label: '평일 09:00', value: 'Mon..Fri *-*-* 09:00:00' },
+  { label: '매주 월 04:00', value: 'Mon *-*-* 04:00:00' },
+  { label: '매월 1일 05:00', value: '*-*-01 05:00:00' },
+]

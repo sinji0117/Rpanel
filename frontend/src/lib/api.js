@@ -122,3 +122,27 @@ export async function openSocket(path) {
   const proto = window.location.protocol === 'https:' ? 'wss' : 'ws'
   return new WebSocket(`${proto}://${window.location.host}/api${path}?ticket=${encodeURIComponent(ticket)}`)
 }
+
+/** 인증이 필요한 파일 다운로드 (백업 등) */
+export async function download(path, filename) {
+  const run = () =>
+    fetch(`/api${path}`, {
+      headers: { ...CSRF, ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}) },
+      credentials: 'same-origin',
+    })
+  let res = await run()
+  if (res.status === 401 && (await refreshSession())) res = await run()
+  if (!res.ok) {
+    const data = await parse(res)
+    throw new ApiError(res.status, data?.message || `다운로드 실패 (${res.status})`)
+  }
+  const blob = await res.blob()
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 1000)
+}

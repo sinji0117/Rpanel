@@ -44,6 +44,23 @@ pub async fn load_env(state: &AppState, app_id: u64) -> anyhow::Result<Vec<EnvVa
     .await?)
 }
 
+/// 배포에 쓰는 최종 환경변수: 패널이 관리하는 값(DB·Redis) + 사용자 값 (같은 키는 사용자 값 우선)
+pub async fn effective_env(state: &AppState, app: &App) -> anyhow::Result<Vec<EnvVar>> {
+    let user = load_env(state, app.id).await?;
+    let mut out: Vec<EnvVar> = crate::routes::databases::managed_env(state, app)
+        .await
+        .map_err(|e| anyhow::anyhow!("{e}"))?
+        .into_iter()
+        .filter(|m| !user.iter().any(|u| u.key == m.key))
+        .map(|m| EnvVar {
+            key: m.key,
+            value: m.value,
+        })
+        .collect();
+    out.extend(user);
+    Ok(out)
+}
+
 /// 배포를 백그라운드로 시작
 pub fn spawn(state: AppState, deploy_id: u64, app_id: u64) {
     let (tx, rx) = tokio::sync::watch::channel(false);
@@ -149,7 +166,7 @@ async fn run(
 ) -> anyhow::Result<String> {
     let exec = state.exec.as_ref();
     let app = load_app(state, app_id).await?;
-    let vars = load_env(state, app_id).await?;
+    let vars = effective_env(state, &app).await?;
     let kind = app.kind();
     let paths = AppPaths::new(&state.cfg.data_dir, &app.slug);
 
@@ -622,12 +639,17 @@ async fn health_check(state: &AppState, app: &App, log: &LogSink) -> anyhow::Res
 
 /// 의존성 없이 HTTP/1.0 GET 상태코드만 확인
 pub async fn http_status(port: u16, path: &str) -> anyhow::Result<u16> {
+    http_status_host(port, "127.0.0.1", path).await
+}
+
+/// Host 헤더를 지정한 GET (Nginx 가상 호스트 확인용)
+pub async fn http_status_host(port: u16, host: &str, path: &str) -> anyhow::Result<u16> {
     let fut = async {
         let mut s = TcpStream::connect(("127.0.0.1", port))
             .await
             .context("연결 실패")?;
         s.write_all(
-            format!("GET {path} HTTP/1.0\r\nHost: 127.0.0.1\r\nUser-Agent: rpanel-health\r\n\r\n")
+            format!("GET {path} HTTP/1.0\r\nHost: {host}\r\nUser-Agent: rpanel-health\r\nX-Forwarded-Proto: https\r\n\r\n")
                 .as_bytes(),
         )
         .await?;

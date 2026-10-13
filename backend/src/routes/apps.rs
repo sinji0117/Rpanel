@@ -367,10 +367,25 @@ pub async fn delete(
             "진행 중인 배포가 있습니다. 취소하거나 끝난 뒤 삭제하세요".into(),
         ));
     }
+    let dbs: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM app_databases WHERE app_id = ?")
+        .bind(id)
+        .fetch_one(&state.db)
+        .await?;
+    if dbs > 0 {
+        return Err(AppError::Conflict(format!(
+            "이 앱에 연결된 MariaDB 데이터베이스 {dbs}개가 있습니다. 데이터베이스 탭에서 먼저 삭제(필요하면 백업)하세요"
+        )));
+    }
     let log = LogSink::capture();
     helper::call(&state, &["purge-app", &app.slug], &log)
         .await
         .map_err(|e| AppError::Internal(e.context("서비스/사이트/파일 정리 실패")))?;
+    // 배정된 Redis DB 는 비워서 반납 (다음 앱이 남은 키를 물려받지 않도록)
+    if let Some(n) = app.redis_db {
+        if let Err(e) = crate::routes::databases::flush(&state, n).await {
+            tracing::warn!(error = %e, db = n, "redis flush on app delete failed");
+        }
+    }
     sqlx::query("DELETE FROM apps WHERE id = ?")
         .bind(id)
         .execute(&state.db)
@@ -384,6 +399,8 @@ pub async fn delete(
 #[derive(Serialize)]
 pub struct EnvResponse {
     pub vars: Vec<EnvVar>,
+    /// 패널이 자동 주입하는 값 (DB·Redis). 같은 키를 직접 넣으면 직접 넣은 값이 우선
+    pub managed: Vec<crate::routes::databases::ManagedVar>,
 }
 
 pub async fn get_env(
@@ -392,9 +409,10 @@ pub async fn get_env(
     Path(id): Path<u64>,
 ) -> AppResult<Json<EnvResponse>> {
     user.require_admin()?;
-    fetch(&state, id).await?;
+    let app = fetch(&state, id).await?;
     Ok(Json(EnvResponse {
         vars: runner::load_env(&state, id).await?,
+        managed: crate::routes::databases::managed_env(&state, &app).await?,
     }))
 }
 
@@ -449,6 +467,7 @@ pub async fn put_env(
     .await;
     Ok(Json(EnvResponse {
         vars: runner::load_env(&state, id).await?,
+        managed: crate::routes::databases::managed_env(&state, &app).await?,
     }))
 }
 

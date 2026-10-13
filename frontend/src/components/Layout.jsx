@@ -4,7 +4,10 @@ import { useAuth } from '../context/AuthContext'
 
 const NAV = [
   { to: '/', label: '대시보드', icon: 'M3 12h4l3-8 4 16 3-8h4', end: true },
+  { to: '/sites', label: '사이트', icon: 'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM3 12h18M12 3c2.5 2.7 2.5 15.3 0 18M12 3c-2.5 2.7-2.5 15.3 0 18' },
   { to: '/projects', label: '프로젝트', icon: 'M3 7h7l2 2h9v10H3z' },
+  { to: '/databases', label: '데이터베이스', icon: 'M4 6c0-1.7 3.6-3 8-3s8 1.3 8 3-3.6 3-8 3-8-1.3-8-3zm0 0v12c0 1.7 3.6 3 8 3s8-1.3 8-3V6M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3' },
+  { to: '/backups', label: '백업', icon: 'M4 7h16v13H4zM4 7l2-3h12l2 3M9 12h6' },
   { to: '/settings', label: '설정', icon: 'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM4 12h2m12 0h2M12 4v2m0 12v2' },
 ]
 

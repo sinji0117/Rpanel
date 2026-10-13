@@ -66,3 +66,14 @@ bad line
     ])
   })
 })
+
+import { httpClass } from './format'
+describe('httpClass', () => {
+  it('colors by status class', () => {
+    expect(httpClass(200)).toBe('text-signal')
+    expect(httpClass(301)).toBe('text-sky-300')
+    expect(httpClass(404)).toBe('text-warn')
+    expect(httpClass(502)).toBe('text-fail')
+    expect(httpClass(null)).toBe('text-fail')
+  })
+})

@@ -10,6 +10,8 @@ import DeploymentView from './pages/DeploymentView'
 import ProjectDetail from './pages/ProjectDetail'
 import Projects from './pages/Projects'
 import Settings from './pages/Settings'
+import Sites from './pages/Sites'
+import { BackupsPage, DatabasesPage } from './pages/DataPages'
 
 function NotFound() {
   return (
@@ -37,6 +39,9 @@ function Gate() {
     <Routes>
       <Route element={<Layout />}>
         <Route index element={<Dashboard />} />
+        <Route path="sites" element={<Sites />} />
+        <Route path="databases" element={<DatabasesPage />} />
+        <Route path="backups" element={<BackupsPage />} />
         <Route path="projects" element={<Projects />} />
         <Route path="projects/:id" element={<ProjectDetail />} />
         <Route path="apps/:id" element={<AppDetail />} />

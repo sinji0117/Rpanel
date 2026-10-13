@@ -35,6 +35,11 @@
 - **환경변수** 편집 (.env 붙여넣기 지원, 값 마스킹, 감사 로그에는 값 미기록)
 - **Deploy key** — 앱별 ed25519 키 생성 → GitLab Deploy keys에 등록 (Vol.6 §9.10.0의 수작업 대체)
 - **Webhook** — `POST /api/hooks/<slug>` + `X-Gitlab-Token` → push 시 자동 배포 (브랜치 필터)
+- **데이터베이스** — 앱마다 MariaDB DB·전용 계정 생성(그 DB에만 권한), 비밀번호 교체, 삭제. 접속 URL이 `DATABASE_URL`(키 변경 가능)로 자동 주입
+- **Redis** — 앱마다 Redis DB 번호 자동 배정(기본 4–15, 패널 DB·Vol.6 수동 앱 0–3 제외) → `REDIS_URL` 자동 주입, 키 개수 확인·FLUSHDB
+- **사이트** — 도메인별로 VM102 Nginx에 실제 요청해 응답코드·지연 확인, 앱별 Nginx 접속/에러 로그와 상태코드·경로·IP 통계
+- **백업·복원** — DB 덤프(.sql.gz) + 앱 `data/`(.tar.gz), 지금 백업 / 매일·매주 예약(기본 03시), 대상별 보관 개수, 다운로드, 원클릭 복원
+- **크론** — 앱별 예약 명령을 systemd timer로 등록(패널이 꺼져도 실행), 프리셋·일정 검증(다음 실행 시각 표시), 지금 실행, 실행 로그
 - **서비스 제어** (start/stop/restart), **journalctl** 조회
 - **대시보드** — CPU·메모리·디스크·load 실시간, 최근 배포
 - **보안** — 감사 로그, 로그인 rate limit, 리프레시 토큰 재사용 시 세션 전체 폐기, 비밀번호 변경 시 전 세션 로그아웃
@@ -46,7 +51,10 @@
   helper는 slug·인자를 다시 검증하고, 스테이징 파일을 **화이트리스트**로 검사합니다:
   - 유닛: `User=rpanel-app` 강제, `NoNewPrivileges=true` 필수, 허용된 키만, 경로는 해당 앱 디렉토리 안으로 고정
   - Nginx: `listen 80;`만, 허용된 지시어·location만, `root`/로그/`proxy_pass 127.0.0.1` 고정, **다른 사이트(Vol.6 수동 설정 포함)와 도메인이 겹치면 거부**
-  - 이 계약은 `backend/tests/helper_contract.rs`가 위험한 변형 17가지로 검증합니다.
+  - 크론 timer: `OnCalendar`는 `systemd-analyze`로 검증, `Unit=`은 해당 작업 서비스로 고정
+  - MariaDB: helper가 만든 DB만 `/etc/rpanel/managed-dbs`에 기록하고, **목록에 있는 DB만** 삭제·덤프·복원합니다. 이미 있는 DB(수동으로 만든 beripick 등)는 가져오거나 건드리지 않습니다. 시스템 DB·패널 DB 이름은 거부합니다.
+  - 백업 복원: 아카이브 안 경로가 `data/` 아래인지, `..`·링크·특수 파일이 없는지 검사한 뒤 풉니다.
+  - 이 계약은 `backend/tests/helper_contract.rs`가 생성 템플릿 통과 + 위험한 변형(유닛·사이트·타이머·DB 인자 등)으로 검증합니다.
 - 앱은 모두 `rpanel-app` 사용자로 실행됩니다 (systemd 하드닝: `ProtectSystem=strict`, `PrivateTmp`, `NoNewPrivileges` …). 앱끼리는 같은 사용자라 서로의 릴리스 파일을 읽을 수 있습니다 — 서로 신뢰하지 않는 앱을 한 VM에 섞지 마세요.
 - `env` 파일은 `0600 rpanel` 소유이며 systemd(root)가 읽어 주입합니다.
 - 패널 UI(:9000)는 **Tailscale(100.64.0.0/10)과 내부망에만** 엽니다. CT100에 패널 도메인을 등록해 인터넷에 노출하지 마세요.
@@ -137,8 +145,22 @@ curl -fsS -X POST -H "X-Gitlab-Token: $RPANEL_HOOK_TOKEN" http://10.0.0.12:9000/
 
 이 저장소는 실제 실행 모드(`RPANEL_EXEC_MODE=real`)로 **자기 자신을 배포**해 검증했습니다 (Ubuntu 24.04 + MariaDB 10.11 + Redis 7 + Nginx):
 GitHub에서 clone → `cargo build --release`(백엔드)·`npm ci && npm run build`(프런트) → `rpanel-app` 사용자로 서비스 기동 →
-헬스체크 → Nginx가 `Host` 헤더로 정적 파일과 `/api/` 프록시를 분기. 이어서 잘못된 환경변수로 재배포 → 헬스체크 실패 → 이전 릴리스·env로 자동 원복,
+헬스체크 → Nginx가 `Host` 헤더로 정적 파일과 `/api/` 프록시를 분기. DB·Redis·백업·크론 기능도 같은 방식으로 확인했습니다: 패널이 만든 MariaDB DB로 앱이 마이그레이션되고(전용 계정, 그 DB에만 권한), Redis는 배정된 번호에만 키가 쌓이며,
+DB 덤프·data 백업 → 데이터 삭제 → 복원으로 원상 복구, 다운로드 크기 일치, 크론 유닛 설치·제거, `systemd-analyze`로 잘못된 일정 거부, 기존 수동 DB 가져오기 거부까지.
+이어서 잘못된 환경변수로 재배포 → 헬스체크 실패 → 이전 릴리스·env로 자동 원복,
 수동 Nginx 설정과 도메인 충돌 시 helper 거부, 배포 취소, 서비스 stop/start, journal, Deploy key, 앱 삭제(유닛·사이트·파일 정리)까지 확인했습니다.
+
+### 이전 버전에서 업데이트할 때
+
+DB 스키마는 패널 시작 시 자동 마이그레이션됩니다(`0002_hosting.sql`). `./deploy/install.sh`를 다시 실행하면 새 helper도 설치됩니다.
+
+### beripick·bandiuri 를 패널 DB로 옮기려면
+
+패널은 기존 DB를 가져오지 않습니다(실수로 지우는 것을 막기 위해). 패널에서 새 DB를 만든 뒤 데이터를 옮기세요:
+```bash
+sudo mariadb-dump --single-transaction app_db | sudo mariadb beripick_api   # 기존 → 패널이 만든 DB
+```
+환경변수 탭에서 직접 넣었던 `DATABASE_URL`을 지우면 패널이 주입하는 값이 쓰입니다.
 
 ## 디렉토리 구조 (VM102)
 
@@ -156,6 +178,10 @@ GitHub에서 clone → `cargo build --release`(백엔드)·`npm ci && npm run bu
   apps/<slug>/data/                        앱이 쓸 수 있는 유일한 디렉토리
   www/<slug>/releases/<id>, current        정적 앱
   keys/<slug>(.pub), known_hosts           Deploy key
+  backups/<slug>/<시각>-db-<DB>.sql.gz      DB 백업 (rpanel 0640) — NAS가 가져가기 좋은 위치 (Vol.26)
+  backups/<slug>/<시각>-data.tar.gz         data/ 백업  ※ 앱을 삭제해도 백업 파일은 남깁니다
+/etc/rpanel/managed-dbs                    패널이 만든 DB 목록 (helper만 수정)
+/etc/systemd/system/rpanel-cron-<slug>-<id>.{service,timer}
   staging/                                 helper가 검사 후 설치할 유닛·사이트
 /etc/systemd/system/rpanel-app-<slug>.service
 /etc/nginx/sites-available/rpanel-<slug>.conf
@@ -209,6 +235,11 @@ npm run e2e
 | POST | `/api/deployments/{id}/cancel`, `/rollback` | 취소·롤백 |
 | GET/POST | `/api/apps/{id}/service`, `/journal`, `/deploy-key`, `/webhook` | 운영 |
 | POST | `/api/hooks/{slug}` | Webhook (토큰) |
+| GET | `/api/databases` · GET/POST `/api/apps/{id}/databases` · DELETE `…/databases/{db}` · POST `…/{db}/password` | MariaDB |
+| POST/DELETE | `/api/apps/{id}/redis`, POST `/api/apps/{id}/redis/flush` | Redis 배정 |
+| GET | `/api/sites`, `/api/apps/{id}/nginx-logs?kind=access\|error` | 사이트 |
+| GET/POST/PUT/DELETE | `/api/backups`, `/api/apps/{id}/backups`, `/api/apps/{id}/backup-settings`, `/api/backups/{id}/restore`, `/download` | 백업 |
+| GET/POST/PUT/DELETE | `/api/apps/{id}/cron`, `/api/cron/{id}`, `/run`, `/log`, POST `/api/cron/preview` | 크론 |
 | GET | `/api/system/info`, `/overview`, `/api/audit` | 시스템 |
 | WS | `/api/ws/metrics?ticket=`, `/api/ws/deployments/{id}?ticket=` | 실시간 |
 

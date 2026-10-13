@@ -37,6 +37,10 @@ fn app(kind: &str) -> App {
         current_commit: None,
         current_release: None,
         webhook_token: "x".into(),
+        redis_db: None,
+        backup_schedule: "off".into(),
+        backup_keep: 7,
+        backup_last_scheduled: None,
         created_at: Utc::now(),
         updated_at: Utc::now(),
     }
@@ -221,4 +225,129 @@ fn slug_validation_in_helper() {
         .output()
         .unwrap();
     assert!(!out.status.success());
+}
+
+fn cron_job() -> rpanel::models::CronJob {
+    rpanel::models::CronJob {
+        id: 42,
+        app_id: 1,
+        name: "정리 작업".into(),
+        schedule: "*-*-* 03:00:00".into(),
+        command: "./hello-api --cleanup \"old\" $HOME".into(),
+        enabled: true,
+        created_at: Utc::now(),
+        updated_at: Utc::now(),
+    }
+}
+
+fn validate_args(func: &str, content: &str, args: &str) -> (bool, String) {
+    let dir = std::env::temp_dir().join(format!(
+        "rpanel-helper-test-{}-{}",
+        std::process::id(),
+        rand_id()
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    let f = dir.join("file");
+    std::fs::write(&f, content).unwrap();
+    let script = format!(
+        "set -euo pipefail; source '{}'; {func} '{}' {args}",
+        helper(),
+        f.display()
+    );
+    let out = Command::new("bash")
+        .arg("-c")
+        .arg(script)
+        .output()
+        .expect("bash");
+    let _ = std::fs::remove_dir_all(&dir);
+    (
+        out.status.success(),
+        String::from_utf8_lossy(&out.stderr).into_owned(),
+    )
+}
+
+#[test]
+fn cron_units_pass_and_dangerous_rejected() {
+    use rpanel::deploy::templates::{cron_service, cron_timer};
+    let a = app("rust");
+    let p = AppPaths::new(Path::new(DATA), &a.slug);
+    let svc = cron_service(
+        &a,
+        &p,
+        &cron_job(),
+        "rpanel-app",
+        "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+    );
+    let tmr = cron_timer(&a, &cron_job());
+    let (ok, err) = validate_args("validate_unit", &svc, "beripick-api cron");
+    assert!(ok, "cron service rejected: {err}\n{svc}");
+    let (ok, err) = validate_args("validate_timer", &tmr, "beripick-api 42");
+    assert!(ok, "timer rejected: {err}\n{tmr}");
+
+    // 서비스 유닛 검증 모드로 cron 유닛을 넣으면 거부 (Type=oneshot)
+    assert!(!validate_args("validate_unit", &svc, "beripick-api service").0);
+    for bad in [
+        svc.replace("User=rpanel-app", "User=root"),
+        svc.replace("Type=oneshot", "Type=simple"),
+        format!("{svc}Restart=always\n"),
+    ] {
+        assert!(
+            !validate_args("validate_unit", &bad, "beripick-api cron").0,
+            "accepted:\n{bad}"
+        );
+    }
+    for bad in [
+        tmr.replace(
+            "Unit=rpanel-cron-beripick-api-42.service",
+            "Unit=ssh.service",
+        ),
+        tmr.replace("OnCalendar=*-*-* 03:00:00", "OnCalendar=$(id)"),
+        tmr.replace("WantedBy=timers.target", "WantedBy=multi-user.target"),
+        tmr.replace("Persistent=true", "Persistent=true\nOnBootSec=1"),
+    ] {
+        assert!(
+            !validate_args("validate_timer", &bad, "beripick-api 42").0,
+            "accepted:\n{bad}"
+        );
+    }
+    // 다른 id 로 검증하면 Unit= 불일치로 거부
+    assert!(!validate_args("validate_timer", &tmr, "beripick-api 43").0);
+}
+
+#[test]
+fn helper_rejects_bad_db_and_backup_args() {
+    let run = |args: &[&str]| {
+        Command::new("bash")
+            .arg(helper())
+            .args(args)
+            .output()
+            .unwrap()
+    };
+    for (a, b) in [
+        ("mysql", "x_user"),
+        ("Bad", "u_ser"),
+        ("ok_db", "root"),
+        ("a`b", "u_ser"),
+        ("db'x", "u_ser"),
+        ("rpanel", "u_ser"),
+    ] {
+        let out = run(&["db-create", a, b]);
+        assert!(!out.status.success(), "db-create {a} {b} accepted");
+        let out = run(&["db-drop", a, b]);
+        assert!(!out.status.success(), "db-drop {a} {b} accepted");
+    }
+    assert!(!run(&["backup-db", "app", "ok_db", "2026-10-13"])
+        .status
+        .success());
+    assert!(!run(&["restore-db", "app", "ok_db", "../../etc/passwd"])
+        .status
+        .success());
+    assert!(
+        !run(&["restore-data", "app", "20261013-030000-db-x.sql.gz"])
+            .status
+            .success()
+    );
+    assert!(!run(&["nginx-log", "app", "secret", "10"]).status.success());
+    assert!(!run(&["nginx-log", "../x", "access", "10"]).status.success());
+    assert!(!run(&["run-cron", "app", "1;id"]).status.success());
 }

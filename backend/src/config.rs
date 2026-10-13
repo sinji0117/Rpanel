@@ -39,6 +39,15 @@ pub struct Config {
     pub max_concurrent_builds: usize,
     /// 빌드 명령에 전달할 환경변수 이름 (기본: 없음). 예: HTTPS_PROXY,NO_PROXY,SSL_CERT_FILE
     pub pass_env: Vec<String>,
+    /// 앱에 주입할 Redis 접속 기본 URL (DB 번호 제외). 기본: REDIS_URL 에서 /<n> 을 뗀 값
+    pub app_redis_base: String,
+    /// 앱에 자동 배정할 Redis DB 번호 범위 (Vol.6 수동 앱이 0~3 사용)
+    pub redis_db_min: u32,
+    pub redis_db_max: u32,
+    /// 앱 DATABASE_URL 의 호스트:포트
+    pub app_db_host: String,
+    /// 예약 백업 실행 시각 (서버 로컬 시각, 0~23)
+    pub backup_hour: u32,
 }
 
 fn var(name: &str) -> Option<String> {
@@ -82,7 +91,7 @@ impl Config {
 
         Ok(Self {
             database_url,
-            redis_url,
+            redis_url: redis_url.clone(),
             bind_addr,
             jwt_secret,
             access_ttl_secs: var("ACCESS_TOKEN_TTL_SECS").map(|v| v.parse()).transpose()?.unwrap_or(900),
@@ -113,6 +122,11 @@ impl Config {
                 })
                 .unwrap_or_default(),
             max_concurrent_builds: var("RPANEL_MAX_CONCURRENT_BUILDS").map(|v| v.parse()).transpose()?.unwrap_or(2),
+            app_redis_base: var("RPANEL_APP_REDIS_BASE").unwrap_or_else(|| redis_base(&redis_url)),
+            redis_db_min: var("RPANEL_REDIS_DB_MIN").map(|v| v.parse()).transpose()?.unwrap_or(4),
+            redis_db_max: var("RPANEL_REDIS_DB_MAX").map(|v| v.parse()).transpose()?.unwrap_or(15),
+            app_db_host: var("RPANEL_APP_DB_HOST").unwrap_or_else(|| "127.0.0.1:3306".into()),
+            backup_hour: var("RPANEL_BACKUP_HOUR").map(|v| v.parse()).transpose()?.unwrap_or(3).min(23),
         })
     }
 
@@ -120,7 +134,7 @@ impl Config {
     pub fn for_tests(database_url: String, redis_url: String) -> Self {
         Self {
             database_url,
-            redis_url,
+            redis_url: redis_url.clone(),
             bind_addr: "127.0.0.1:0".parse().unwrap(),
             jwt_secret: "test-secret-test-secret-test-secret-0123".into(),
             access_ttl_secs: 900,
@@ -137,8 +151,31 @@ impl Config {
             build_path: "/usr/bin:/bin".into(),
             max_concurrent_builds: 2,
             pass_env: vec![],
+            app_redis_base: redis_base(&redis_url),
+            redis_db_min: 4,
+            redis_db_max: 15,
+            app_db_host: "127.0.0.1:3306".into(),
+            backup_hour: 3,
         }
     }
+}
+
+/// redis://:pw@host:6379/10 → redis://:pw@host:6379
+pub fn redis_base(url: &str) -> String {
+    let scheme_end = url.find("://").map(|i| i + 3).unwrap_or(0);
+    match url[scheme_end..].rfind('/') {
+        Some(i) => url[..scheme_end + i].to_string(),
+        None => url.to_string(),
+    }
+}
+
+/// REDIS_URL 의 DB 번호 (없으면 0)
+pub fn redis_db_index(url: &str) -> u32 {
+    let scheme_end = url.find("://").map(|i| i + 3).unwrap_or(0);
+    url[scheme_end..]
+        .rfind('/')
+        .and_then(|i| url[scheme_end + i + 1..].parse().ok())
+        .unwrap_or(0)
 }
 
 fn rand_suffix() -> u32 {
@@ -152,6 +189,20 @@ fn rand_suffix() -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn redis_url_parts() {
+        assert_eq!(
+            redis_base("redis://:pw@127.0.0.1:6379/10"),
+            "redis://:pw@127.0.0.1:6379"
+        );
+        assert_eq!(
+            redis_base("redis://127.0.0.1:6379"),
+            "redis://127.0.0.1:6379"
+        );
+        assert_eq!(redis_db_index("redis://:pw@127.0.0.1:6379/10"), 10);
+        assert_eq!(redis_db_index("redis://127.0.0.1:6379"), 0);
+    }
 
     #[test]
     fn bool_parsing() {

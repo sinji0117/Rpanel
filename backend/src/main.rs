@@ -18,6 +18,7 @@ async fn main() -> anyhow::Result<()> {
 
     let state = rpanel::build_state(cfg).await?;
     deployments::recover_orphans(&state).await?;
+    rpanel::backup::spawn_scheduler(state.clone());
 
     let app = routes::router(state);
     let listener = tokio::net::TcpListener::bind(bind).await?;

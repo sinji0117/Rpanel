@@ -3,7 +3,7 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::models::{App, AppKind, EnvVar};
+use crate::models::{App, AppKind, CronJob, EnvVar};
 
 pub const MANAGED_MARKER: &str = "# managed by rpanel";
 
@@ -191,6 +191,86 @@ WantedBy=multi-user.target
     ))
 }
 
+pub fn cron_unit_name(slug: &str, id: u64) -> String {
+    format!("rpanel-cron-{slug}-{id}")
+}
+
+pub fn cron_staging(data_dir: &Path, slug: &str, id: u64) -> (PathBuf, PathBuf) {
+    let base = data_dir.join("staging");
+    (
+        base.join(format!("cron-{slug}-{id}.service")),
+        base.join(format!("cron-{slug}-{id}.timer")),
+    )
+}
+
+/// 크론 작업 실행용 oneshot 서비스 (앱과 같은 사용자·env·작업 디렉토리)
+pub fn cron_service(
+    app: &App,
+    paths: &AppPaths,
+    job: &CronJob,
+    run_user: &str,
+    path_env: &str,
+) -> String {
+    format!(
+        "{MANAGED_MARKER} (cron {slug}#{id}) — 패널의 크론 탭에서 관리합니다.
+[Unit]
+Description=Rpanel cron {slug} #{id} ({name})
+
+[Service]
+Type=oneshot
+User={user}
+Group={user}
+WorkingDirectory={cwd}
+EnvironmentFile={env}
+Environment=PATH={path}
+ExecStart=/bin/bash -c {cmd}
+TimeoutStartSec=3600
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=true
+LockPersonality=true
+ReadWritePaths={data}
+",
+        slug = app.slug,
+        id = job.id,
+        name = job.name.replace(['\n', '\r', '%'], " "),
+        user = run_user,
+        cwd = paths.current.display(),
+        env = paths.env_file.display(),
+        path = path_env,
+        cmd = systemd_quote(&job.command),
+        data = paths.data_dir.display(),
+    )
+}
+
+pub fn cron_timer(app: &App, job: &CronJob) -> String {
+    format!(
+        "{MANAGED_MARKER} (cron {slug}#{id})
+[Unit]
+Description=Rpanel cron timer {slug} #{id}
+
+[Timer]
+OnCalendar={cal}
+Persistent=true
+Unit={unit}.service
+
+[Install]
+WantedBy=timers.target
+",
+        slug = app.slug,
+        id = job.id,
+        cal = job.schedule,
+        unit = cron_unit_name(&app.slug, job.id),
+    )
+}
+
 pub struct SiteInput<'a> {
     pub app: &'a App,
     pub paths: &'a AppPaths,
@@ -331,6 +411,10 @@ mod tests {
             current_commit: None,
             current_release: None,
             webhook_token: "t".into(),
+            redis_db: None,
+            backup_schedule: "off".into(),
+            backup_keep: 7,
+            backup_last_scheduled: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
         }

@@ -61,60 +61,66 @@
 
 ---
 
-## 설치 (VM102)
+## 설치 (VM102) — OS 설치 후 바로
 
-> 전제: Vol.6 §9.1–§9.9, §9.13까지 완료 (Ubuntu 24.04, Nginx, MariaDB 10.11, Redis 7, NodeSource 22.x).
-> Tailscale 서브넷 라우터의 `--snat-subnet-routes=false`(Vol.3 §4.5.1)가 적용되어 있어야 ufw의 100.64.0.0/10 규칙이 맞게 동작합니다.
+Ubuntu Server 24.04 설치(Vol.6 §9.1–§9.2: 고정 IP `10.0.0.12`, OpenSSH, 계정 `sysadmin`)만 끝났으면 됩니다.
+Nginx·MariaDB·Redis·Node.js·Rust 설치와 보안 설정, 비밀번호 생성까지 스크립트가 전부 합니다.
 
-### 1. 소스 받기
+### 1. 설치 (한 줄)
 
 ```bash
 ssh sysadmin@10.0.0.12
-sudo mkdir -p /srv/build && sudo chown $(whoami):$(whoami) /srv/build
-cd /srv/build
-git clone https://github.com/sinji0117/Rpanel.git rpanel
+curl -fsSL https://raw.githubusercontent.com/sinji0117/Rpanel/main/deploy/bootstrap.sh | sudo bash
 ```
 
-### 2. DB·Redis 준비
+> **저장소가 private 이면** 위 주소가 404가 납니다. GitHub 토큰(PAT, `repo` 읽기 권한)으로 받으세요:
+> ```bash
+> sudo git clone https://<토큰>@github.com/sinji0117/Rpanel.git /opt/rpanel-src
+> sudo /opt/rpanel-src/deploy/install.sh
+> ```
+> 이후 업데이트(`sudo rpanel-update`)도 같은 주소로 받아옵니다.
 
-```bash
-sudo mariadb
+10분 안팎(대부분 Rust 빌드) 뒤 아래처럼 끝납니다.
+
 ```
-```sql
-CREATE DATABASE rpanel CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-CREATE USER 'rpanel'@'localhost' IDENTIFIED BY '<openssl rand -hex 24 로 만든 값>';
-GRANT ALL PRIVILEGES ON rpanel.* TO 'rpanel'@'localhost';   -- 테이블은 패널이 시작할 때 마이그레이션으로 생성
-FLUSH PRIVILEGES;
-```
-Redis는 §9.7.1에서 만든 `requirepass`를 그대로 쓰고, DB 번호는 **10** (앱들이 0–3 사용).
-
-### 3. 설치 스크립트
-
-```bash
-sudo -i
-cd /srv/build/rpanel
-./deploy/install.sh
-```
-처음 실행하면 `/etc/rpanel/rpanel.env`가 생성되고(`JWT_SECRET` 자동) 멈춥니다. 비밀번호를 채우고 다시 시작합니다.
-
-```bash
-nano /etc/rpanel/rpanel.env      # DATABASE_URL, REDIS_URL 의 <…> 부분
-systemctl restart rpanel
-curl -s http://127.0.0.1:8090/api/health    # {"db":true,"redis":true,"status":"ok"}
+✔ Rpanel 설치 완료
+  접속      http://10.0.0.12:9000   (Tailscale 이 켜진 PC에서) → 첫 관리자 계정 생성
+  설정·비밀  /etc/rpanel/rpanel.env
+  업데이트   sudo rpanel-update
 ```
 
-### 4. 접속
+### 2. 접속
 
-Tailscale이 켜진 관리 PC 브라우저에서 **`http://10.0.0.12:9000`** → 첫 화면에서 관리자 계정 생성.
+Tailscale이 켜진 관리 PC에서 **`http://10.0.0.12:9000`** → 첫 화면에서 관리자 계정을 만듭니다.
 
-> 처음엔 `RPANEL_EXEC_MODE=dry-run`으로 둘러보면 실제 명령 없이 배포 흐름(로그)만 볼 수 있습니다.
+### 스크립트가 하는 일
+
+| 단계 | 내용 |
+|---|---|
+| 기본 | 패키지, 시간대 Asia/Seoul, qemu-guest-agent |
+| MariaDB 10.11 | `127.0.0.1` 바인딩(`z-rpanel-bind.cnf`), 익명 계정·test DB·원격 root 제거, RAM 기준 튜닝(없을 때만), 패널 DB·계정 생성 |
+| Redis 7 | `bind 127.0.0.1`, `protected-mode`, `requirepass` 생성(이미 있으면 유지), `maxmemory 1gb` |
+| Node.js 22 | NodeSource (이미 20.19+/22.12+ 면 그대로) |
+| 패널 | `rpanel`·`rpanel-app` 사용자, Rust 툴체인, 빌드·설치, helper+sudoers, systemd, Nginx :9000 |
+| 비밀값 | `/etc/rpanel/rpanel.env` 에 DB·Redis 비밀번호, JWT 키 자동 생성 (재실행해도 유지) |
+| ufw | 22·9000 ← `10.0.0.0/24`·`100.64.0.0/10`, 80 ← CT100(`10.0.0.10`), **지금 SSH로 접속 중인 주소도 자동 허용** |
+
+옵션: `--no-firewall`(ufw 직접 관리), `--dry-run-mode`(실제 배포 없이 둘러보기), `--no-build`.
+옵션은 한 줄 설치에도 붙일 수 있습니다: `curl … | sudo bash -s -- --dry-run-mode`
+
+> 이미 Vol.6대로 MariaDB·Redis를 손으로 설치한 서버에서 실행해도 됩니다. 기존 Redis 비밀번호와 MariaDB 데이터는 유지되고,
+> 패널용 DB(`rpanel`)와 설정만 추가됩니다.
 
 ### 업데이트
 
 ```bash
-cd /srv/build/rpanel && git pull
-sudo ./deploy/install.sh
+sudo rpanel-update        # 최신 소스 받기 → 증분 빌드 → 재시작 (DB 스키마는 자동 마이그레이션)
 ```
+
+### 서버 밖에서 할 일
+
+- z820: `tailscale set --snat-subnet-routes=false` (Vol.3 §4.5.1) — 안 하면 :9000·SSH 접속이 막힙니다
+- CT100(NPM): 서비스할 도메인마다 Proxy Host → `10.0.0.12:80` (Vol.4 §10.2)
 
 ---
 

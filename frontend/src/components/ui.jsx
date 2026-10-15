@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from 'react'
 const STATUS = {
   running: { label: '실행 중', cls: 'text-signal bg-signal/10 border-signal/30', dot: 'bg-signal' },
   success: { label: '성공', cls: 'text-signal bg-signal/10 border-signal/30', dot: 'bg-signal' },
-  deploying: { label: '배포 중', cls: 'text-sky-300 bg-sky-400/10 border-sky-400/30', dot: 'bg-sky-400 animate-pulse' },
+  deploying: { label: '진행 중', cls: 'text-sky-300 bg-sky-400/10 border-sky-400/30', dot: 'bg-sky-400 animate-pulse' },
   running_deploy: { label: '진행 중', cls: 'text-sky-300 bg-sky-400/10 border-sky-400/30', dot: 'bg-sky-400 animate-pulse' },
   queued: { label: '대기', cls: 'text-ink-300 bg-ink-700/40 border-ink-600', dot: 'bg-ink-400 animate-pulse' },
   failed: { label: '실패', cls: 'text-fail bg-fail/10 border-fail/30', dot: 'bg-fail' },
@@ -24,8 +24,8 @@ export function StatusBadge({ status, deployment = false }) {
   )
 }
 
-export function KindBadge({ kind }) {
-  const map = { rust: 'Rust', static: 'Static', node: 'Node' }
+export function KindBadge({ kind, source }) {
+  const map = { rust: 'Rust', static: source === 'files' ? 'HTML' : 'Static', node: 'Node', php: 'PHP', proxy: 'Proxy' }
   return <span className="kbd uppercase">{map[kind] || kind}</span>
 }
 

@@ -17,7 +17,7 @@ use crate::{
         templates::AppPaths,
     },
     error::{AppError, AppResult},
-    models::{App, AppKind, EnvVar, APP_COLUMNS},
+    models::{App, AppKind, EnvVar, Source, APP_COLUMNS},
     routes::projects,
     state::AppState,
     validate,
@@ -29,7 +29,8 @@ pub struct AppInput {
     #[serde(default)]
     pub slug: Option<String>,
     pub kind: Option<String>,
-    pub git_url: String,
+    #[serde(default)]
+    pub git_url: Option<String>,
     #[serde(default)]
     pub git_branch: Option<String>,
     #[serde(default)]
@@ -48,6 +49,13 @@ pub struct AppInput {
     pub api_proxy_port: Option<u32>,
     #[serde(default)]
     pub health_path: Option<String>,
+    // ── 파일 기반 사이트 · 프록시 ──
+    #[serde(default)]
+    pub web_root: Option<String>,
+    #[serde(default)]
+    pub proxy_target: Option<String>,
+    #[serde(default)]
+    pub client_max_body_mb: Option<u32>,
 }
 
 /// 검증·정규화된 입력
@@ -75,7 +83,7 @@ fn opt(s: &Option<String>) -> Option<String> {
 fn clean(input: &AppInput, kind: AppKind) -> AppResult<Clean> {
     let bad = AppError::BadRequest;
     validate::name(&input.name).map_err(bad)?;
-    let git_url = input.git_url.trim().to_string();
+    let git_url = input.git_url.as_deref().unwrap_or("").trim().to_string();
     validate::git_url(&git_url).map_err(bad)?;
     let git_branch = opt(&input.git_branch).unwrap_or_else(|| "main".into());
     validate::branch(&git_branch).map_err(bad)?;
@@ -148,7 +156,7 @@ pub async fn fetch(state: &AppState, id: u64) -> AppResult<App> {
 }
 
 /// 다른 앱이 이미 쓰는 도메인 거부
-async fn check_domain_conflicts(
+pub async fn check_domain_conflicts(
     state: &AppState,
     domains: &str,
     exclude_id: Option<u64>,
@@ -238,7 +246,10 @@ pub async fn create(
         .kind
         .as_deref()
         .and_then(AppKind::parse)
-        .ok_or_else(|| AppError::bad("kind 는 rust / static / node 중 하나여야 합니다"))?;
+        .filter(|k| matches!(k, AppKind::Rust | AppKind::Static | AppKind::Node))
+        .ok_or_else(|| {
+            AppError::bad("Git 앱의 kind 는 rust / static / node 중 하나입니다 (PHP·HTML·프록시는 사이트 만들기에서)")
+        })?;
     let c = clean(&input, kind)?;
     let slug = match opt(&input.slug) {
         Some(s) => s.to_ascii_lowercase(),
@@ -324,6 +335,9 @@ pub async fn update(
             return Err(AppError::bad("앱 종류(kind)는 생성 후 바꿀 수 없습니다"));
         }
     }
+    if app.source() != Source::Git {
+        return update_site(state, user, ip, app, input).await;
+    }
     let c = clean(&input, app.kind())?;
     check_domain_conflicts(&state, &c.domains, Some(id)).await?;
     sqlx::query(
@@ -346,6 +360,74 @@ pub async fn update(
     .await?;
     audit::log(&state, Some(user.id), "app.update", &app.slug, &ip).await;
     Ok(Json(fetch(&state, id).await?))
+}
+
+/// 파일 기반 사이트 · 프록시 설정 변경 → 저장 후 바로 적용
+async fn update_site(
+    state: AppState,
+    user: AuthUser,
+    ip: String,
+    app: App,
+    input: AppInput,
+) -> AppResult<Json<App>> {
+    let bad = AppError::BadRequest;
+    validate::name(&input.name).map_err(bad)?;
+    let domains = validate::domains(input.domains.as_deref().unwrap_or("")).map_err(bad)?;
+    if domains.is_empty() {
+        return Err(AppError::bad("사이트에는 도메인이 하나 이상 필요합니다"));
+    }
+    check_domain_conflicts(&state, &domains, Some(app.id)).await?;
+    let web_root = opt(&input.web_root)
+        .unwrap_or_default()
+        .trim_matches('/')
+        .to_string();
+    validate::rel_path(&web_root).map_err(bad)?;
+    let build_cmd = opt(&input.build_cmd);
+    if let Some(c) = &build_cmd {
+        validate::command(c).map_err(bad)?;
+    }
+    let start_cmd = match app.kind() {
+        AppKind::Node => {
+            let c = opt(&input.start_cmd).ok_or_else(|| AppError::bad("시작 명령이 필요합니다"))?;
+            validate::command(&c).map_err(bad)?;
+            Some(c)
+        }
+        _ => None,
+    };
+    let proxy_target = match app.kind() {
+        AppKind::Proxy => {
+            let t = opt(&input.proxy_target)
+                .ok_or_else(|| AppError::bad("프록시 대상 URL 이 필요합니다"))?;
+            crate::routes::site_admin::valid_proxy_target(&t).map_err(bad)?;
+            Some(t)
+        }
+        _ => None,
+    };
+    let health_path = opt(&input.health_path).unwrap_or_else(|| "/".into());
+    validate::url_path(&health_path).map_err(bad)?;
+    let body_mb = input.client_max_body_mb.unwrap_or(app.client_max_body_mb);
+    if !(1..=10240).contains(&body_mb) {
+        return Err(AppError::bad("업로드 크기 제한은 1~10240MB"));
+    }
+    sqlx::query(
+        "UPDATE apps SET name = ?, domains = ?, web_root = ?, build_cmd = ?, start_cmd = ?, proxy_target = ?, \
+         health_path = ?, client_max_body_mb = ? WHERE id = ?",
+    )
+    .bind(input.name.trim())
+    .bind(&domains)
+    .bind(&web_root)
+    .bind(&build_cmd)
+    .bind(&start_cmd)
+    .bind(&proxy_target)
+    .bind(&health_path)
+    .bind(body_mb)
+    .bind(app.id)
+    .execute(&state.db)
+    .await?;
+    audit::log(&state, Some(user.id), "site.update", &app.slug, &ip).await;
+    // 설정 즉시 적용 (진행 중인 적용이 있으면 건너뜀)
+    let _ = crate::routes::deployments::enqueue(&state, app.id, Some(user.id)).await;
+    Ok(Json(fetch(&state, app.id).await?))
 }
 
 pub async fn delete(
@@ -683,7 +765,7 @@ mod tests {
             name: "Beripick API".into(),
             slug: None,
             kind: Some("rust".into()),
-            git_url: "ssh://git@100.100.199.123:2222/beri/backend.git".into(),
+            git_url: Some("ssh://git@100.100.199.123:2222/beri/backend.git".into()),
             git_branch: None,
             root_dir: Some("/backend/".into()),
             build_cmd: Some("  ".into()),
@@ -693,6 +775,9 @@ mod tests {
             domains: Some("API.beripick.com, api.beripick.com".into()),
             api_proxy_port: Some(8080),
             health_path: Some("/api/health".into()),
+            web_root: None,
+            proxy_target: None,
+            client_max_body_mb: None,
         }
     }
 
@@ -718,7 +803,7 @@ mod tests {
         i.start_cmd = None;
         assert!(clean(&i, AppKind::Node).is_err());
         let mut i = input();
-        i.git_url = "file:///etc".into();
+        i.git_url = Some("file:///etc".into());
         assert!(clean(&i, AppKind::Rust).is_err());
         let mut i = input();
         i.root_dir = Some("../../etc".into());

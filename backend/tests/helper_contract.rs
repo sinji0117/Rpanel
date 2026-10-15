@@ -18,11 +18,11 @@ fn helper() -> String {
 fn app(kind: &str) -> App {
     App {
         id: 1,
-        project_id: 1,
+        project_id: Some(1),
         name: "Beripick API".into(),
         slug: "beripick-api".into(),
         kind: kind.into(),
-        git_url: "ssh://git@100.100.199.123:2222/beri/backend.git".into(),
+        git_url: Some("ssh://git@100.100.199.123:2222/beri/backend.git".into()),
         git_branch: "main".into(),
         root_dir: "".into(),
         build_cmd: None,
@@ -41,6 +41,19 @@ fn app(kind: &str) -> App {
         backup_schedule: "off".into(),
         backup_keep: 7,
         backup_last_scheduled: None,
+        source: "git".into(),
+        site_user: None,
+        site_root: None,
+        web_root: "".into(),
+        php_version: None,
+        php_memory_mb: 256,
+        php_upload_mb: 64,
+        php_max_exec: 60,
+        php_max_children: 10,
+        proxy_target: None,
+        ssl_mode: "none".into(),
+        force_https: false,
+        client_max_body_mb: 64,
         created_at: Utc::now(),
         updated_at: Utc::now(),
     }
@@ -99,6 +112,7 @@ fn site(kind: &str) -> String {
         app: &a,
         paths: &p,
         trusted_proxy: "10.0.0.10",
+        ipv6: true,
     })
     .unwrap()
 }
@@ -176,7 +190,7 @@ fn dangerous_sites_rejected() {
         ),
         base.replace(
             "proxy_pass http://127.0.0.1:8101;",
-            "proxy_pass http://169.254.169.254;",
+            "proxy_pass http://unix:/var/run/docker.sock:/;",
         ),
         base.replace(
             "access_log /var/log/nginx/rpanel-beripick-api-access.log;",
@@ -187,8 +201,8 @@ fn dangerous_sites_rejected() {
             "server_name beripick.com; return 301 http://evil;",
         ),
         base.replace(
-            "client_max_body_size 20m;",
-            "client_max_body_size 20m;\n    load_module /tmp/x.so;",
+            "client_max_body_size 64m;",
+            "client_max_body_size 64m;\n    load_module /tmp/x.so;",
         ),
     ];
     for (i, c) in cases.iter().enumerate() {
@@ -350,4 +364,233 @@ fn helper_rejects_bad_db_and_backup_args() {
     assert!(!run(&["nginx-log", "app", "secret", "10"]).status.success());
     assert!(!run(&["nginx-log", "../x", "access", "10"]).status.success());
     assert!(!run(&["run-cron", "app", "1;id"]).status.success());
+}
+
+// ───────────── 파일 사이트 · SSL · PHP 풀 ─────────────
+
+fn files_app(kind: &str) -> App {
+    let mut a = app(kind);
+    a.source = "files".into();
+    a.git_url = None;
+    a.site_user = Some("beripick".into());
+    a.site_root = Some("/home/beripick/htdocs/beripick.com".into());
+    a.php_version = Some("8.3".into());
+    a
+}
+
+/// 레지스트리를 임시 파일로 두고 helper 함수 실행
+fn validate_site_reg(func: &str, content: &str, args: &str) -> (bool, String) {
+    let dir = std::env::temp_dir().join(format!(
+        "rpanel-helper-reg-{}-{}",
+        std::process::id(),
+        rand_id()
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    let f = dir.join("file");
+    let reg = dir.join("site-users");
+    std::fs::write(&f, content).unwrap();
+    std::fs::write(
+        &reg,
+        "beripick-api beripick /home/beripick/htdocs/beripick.com\n",
+    )
+    .unwrap();
+    let script = format!(
+        "set -euo pipefail; export RPANEL_TEST_SITES_REG='{}'; source '{}'; {func} '{}' {args}",
+        reg.display(),
+        helper(),
+        f.display()
+    );
+    let out = Command::new("bash")
+        .arg("-c")
+        .arg(script)
+        .output()
+        .expect("bash");
+    let _ = std::fs::remove_dir_all(&dir);
+    (
+        out.status.success(),
+        String::from_utf8_lossy(&out.stderr).into_owned(),
+    )
+}
+
+fn site_of(a: &App) -> String {
+    let p = AppPaths::new(Path::new(DATA), &a.slug);
+    nginx_site(&SiteInput {
+        app: a,
+        paths: &p,
+        trusted_proxy: "",
+        ipv6: true,
+    })
+    .unwrap()
+}
+
+#[test]
+fn file_sites_pass() {
+    for kind in ["php", "static", "node"] {
+        for (ssl, force) in [("none", false), ("letsencrypt", true), ("custom", false)] {
+            let mut a = files_app(kind);
+            a.ssl_mode = ssl.into();
+            a.force_https = force;
+            a.web_root = if kind == "php" {
+                "public".into()
+            } else {
+                "".into()
+            };
+            let conf = site_of(&a);
+            let (ok, err) = validate_site_reg("validate_site", &conf, "beripick-api");
+            assert!(ok, "{kind}/{ssl} rejected: {err}\n{conf}");
+        }
+    }
+    let mut p = app("proxy");
+    p.source = "none".into();
+    p.proxy_target = Some("https://10.0.0.11:8443/app".into());
+    let (ok, err) = validate_site_reg("validate_site", &site_of(&p), "beripick-api");
+    assert!(ok, "proxy rejected: {err}");
+}
+
+#[test]
+fn dangerous_file_sites_rejected() {
+    let mut a = files_app("php");
+    a.ssl_mode = "letsencrypt".into();
+    let base = site_of(&a);
+    let cases = [
+        base.replace(
+            "root /home/beripick/htdocs/beripick.com;",
+            "root /home/otheruser/htdocs/x;",
+        ),
+        base.replace("root /home/beripick/htdocs/beripick.com;", "root /etc;"),
+        base.replace(
+            "root /home/beripick/htdocs/beripick.com;",
+            "root /home/beripick/htdocs/beripick.com/../../..;",
+        ),
+        base.replace(
+            "fastcgi_pass unix:/run/php/rpanel-beripick-api.sock;",
+            "fastcgi_pass 127.0.0.1:9000;",
+        ),
+        base.replace(
+            "fastcgi_pass unix:/run/php/rpanel-beripick-api.sock;",
+            "fastcgi_pass unix:/run/php/rpanel-other.sock;",
+        ),
+        base.replace("include fastcgi_params;", "include /etc/passwd;"),
+        base.replace(
+            "fastcgi_param HTTPS $rpanel_https if_not_empty;",
+            "fastcgi_param PHP_VALUE \"auto_prepend_file=/tmp/x\";",
+        ),
+        base.replace(
+            "ssl_certificate /etc/letsencrypt/live/rpanel-beripick-api/fullchain.pem;",
+            "ssl_certificate /etc/letsencrypt/live/rpanel-other/fullchain.pem;",
+        ),
+        base.replace(
+            "listen 443 ssl http2;",
+            "listen 443 ssl http2 default_server;",
+        ),
+        base.replace("deny all;", "allow all;"),
+        format!("{base}\nserver {{\n    listen 80;\n    return 302 http://evil;\n}}\n"),
+    ];
+    for (i, c) in cases.iter().enumerate() {
+        assert_ne!(c, &base, "case {i} did not change");
+        let (ok, _) = validate_site_reg("validate_site", c, "beripick-api");
+        assert!(!ok, "dangerous file-site case {i} accepted:\n{c}");
+    }
+    // 레지스트리에 없는 slug 의 사이트 루트는 거부
+    let (ok, _) = validate_site_reg("validate_site", &base, "other-app");
+    assert!(!ok);
+}
+
+#[test]
+fn php_pool_contract() {
+    use rpanel::{deploy::templates::php_pool, models::EnvVar};
+    let a = files_app("php");
+    let vars = vec![EnvVar {
+        key: "DB_HOST".into(),
+        value: "127.0.0.1".into(),
+    }];
+    let (pool, _) = php_pool(&a, &vars).unwrap();
+    let (ok, err) = validate_site_reg("validate_pool", &pool, "beripick-api beripick");
+    assert!(ok, "pool rejected: {err}\n{pool}");
+    for bad in [
+        pool.replace("user = beripick", "user = root"),
+        pool.replace(
+            "listen = /run/php/rpanel-beripick-api.sock",
+            "listen = 0.0.0.0:9000",
+        ),
+        format!("{pool}php_admin_value[auto_prepend_file] = /tmp/x.php\n"),
+        format!("{pool}php_admin_value[disable_functions] = \n"),
+        format!("{pool}env[X] = \"$(id)\"\n"),
+        format!("{pool}[other-pool]\nuser = root\n"),
+        format!("{pool}include = /etc/passwd\n"),
+    ] {
+        let (ok, _) = validate_site_reg("validate_pool", &bad, "beripick-api beripick");
+        assert!(!ok, "dangerous pool accepted:\n{bad}");
+    }
+}
+
+#[test]
+fn site_units_contract() {
+    let a = files_app("node");
+    let p = AppPaths::new(Path::new(DATA), &a.slug);
+    let u = systemd_unit(&UnitInput {
+        app: &a,
+        paths: &p,
+        run_user: "rpanel-app",
+        path_env: "/usr/bin:/bin",
+    })
+    .unwrap();
+    let (ok, err) = validate_site_reg("validate_unit", &u, "beripick-api");
+    assert!(ok, "site unit rejected: {err}\n{u}");
+    for bad in [
+        u.replace("User=beripick", "User=root"),
+        u.replace("User=beripick", "User=rpanel-app"),
+        u.replace("ReadWritePaths=/home/beripick", "ReadWritePaths=/"),
+        u.replace(
+            "WorkingDirectory=/home/beripick/htdocs/beripick.com",
+            "WorkingDirectory=/root",
+        ),
+    ] {
+        let (ok, _) = validate_site_reg("validate_unit", &bad, "beripick-api");
+        assert!(!ok, "dangerous site unit accepted:\n{bad}");
+    }
+}
+
+#[test]
+fn helper_rejects_bad_site_args() {
+    let run = |args: &[&str]| {
+        Command::new("bash")
+            .arg(helper())
+            .args(args)
+            .output()
+            .unwrap()
+    };
+    for (user, domain) in [
+        ("root", "a.com"),
+        ("www-data", "a.com"),
+        ("Ab", "a.com"),
+        ("ok-user", "bad_domain"),
+        ("ok-user", "a.com;id"),
+        ("x;id", "a.com"),
+    ] {
+        assert!(
+            !run(&["site-create", "app", user, domain, "php"])
+                .status
+                .success(),
+            "site-create {user} {domain}"
+        );
+    }
+    assert!(!run(&["site-create", "app", "okuser", "a.com", "shell"])
+        .status
+        .success());
+    assert!(!run(&["install-php-pool", "app", "8.3;id"]).status.success());
+    assert!(!run(&["install-php-pool", "app", "9.9"]).status.success());
+    assert!(!run(&["ssl-issue", "app", "not-an-email", "a.com"])
+        .status
+        .success());
+    assert!(
+        !run(&["ssl-issue", "app", "a@b.com", "a.com", "--deploy-hook=id"])
+            .status
+            .success()
+    );
+    assert!(
+        !run(&["restore-files", "app", "20261013-030000-data.tar.gz"])
+            .status
+            .success()
+    );
 }

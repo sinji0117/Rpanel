@@ -50,7 +50,7 @@ export function DatabasesPage() {
       </section>
       <section className="card">
         <h2 className="border-b border-ink-700/70 px-5 py-3.5 text-sm font-medium">
-          Redis <span className="ml-2 text-xs font-normal text-ink-400">자동 배정 범위 DB {redis_range.join('–')} · 패널 DB {panel_redis_db} · Vol.6 수동 앱 0–3</span>
+          Redis <span className="ml-2 text-xs font-normal text-ink-400">자동 배정 범위 DB {redis_range.join('–')} · 패널 DB {panel_redis_db} · 0–3 은 수동용으로 비워 둠</span>
         </h2>
         {redis.length === 0 ? (
           <p className="px-5 py-8 text-center text-sm text-ink-400">배정된 Redis DB가 없습니다</p>

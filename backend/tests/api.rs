@@ -694,6 +694,297 @@ async fn full_flow() {
         StatusCode::NO_CONTENT
     );
 
+    // ── CloudPanel 방식 사이트 만들기 ──
+    let r = ctx
+        .post(
+            "/api/sites",
+            &t,
+            json!({"type":"html","domains":"Static-Site.example.com www.static-site.example.com"}),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{:?}", r.body);
+    assert_eq!(r.body["site_user"], "static-site");
+    assert_eq!(r.body["app"]["source"], "files");
+    assert_eq!(r.body["app"]["kind"], "static");
+    assert_eq!(
+        r.body["app"]["site_root"],
+        "/home/static-site/htdocs/static-site.example.com"
+    );
+    assert!(r.body["generated_password"].as_str().unwrap().len() >= 16);
+    let html_id = r.body["app"]["id"].as_u64().unwrap();
+    let d = wait_deploy(&ctx, &t, r.body["deployment_id"].as_u64().unwrap()).await;
+    assert_eq!(d["status"], "success", "{d:?}");
+    let log = d["log"].as_str().unwrap();
+    assert!(
+        log.contains("install-site static-site-example-com"),
+        "{log}"
+    );
+    assert!(log.contains("✔ 적용 완료"));
+    assert!(d["commit_sha"].is_null());
+
+    let r = ctx
+        .post(
+            "/api/sites",
+            &t,
+            json!({"type":"php","domains":"shop.example.com","password":"site-password-1"}),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{:?}", r.body);
+    assert!(
+        r.body["generated_password"].is_null(),
+        "given password is not echoed"
+    );
+    assert_eq!(r.body["app"]["php_version"], "8.3");
+    let php_id = r.body["app"]["id"].as_u64().unwrap();
+    let d = wait_deploy(&ctx, &t, r.body["deployment_id"].as_u64().unwrap()).await;
+    assert!(
+        d["log"]
+            .as_str()
+            .unwrap()
+            .contains("install-php-pool shop-example-com 8.3"),
+        "{d:?}"
+    );
+
+    assert_eq!(
+        ctx.post(
+            "/api/sites",
+            &t,
+            json!({"type":"php","domains":"x.example.com","php_version":"5.6"})
+        )
+        .await
+        .status,
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        ctx.post(
+            "/api/sites",
+            &t,
+            json!({"type":"proxy","domains":"p.example.com"})
+        )
+        .await
+        .status,
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        ctx.post(
+            "/api/sites",
+            &t,
+            json!({"type":"html","domains":"shop.example.com"})
+        )
+        .await
+        .status,
+        StatusCode::CONFLICT
+    );
+    assert_eq!(
+        ctx.post(
+            "/api/sites",
+            &t,
+            json!({"type":"html","domains":"y.example.com","site_user":"root"})
+        )
+        .await
+        .status,
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        ctx.post(
+            "/api/sites",
+            &t,
+            json!({"type":"shell","domains":"y.example.com"})
+        )
+        .await
+        .status,
+        StatusCode::BAD_REQUEST
+    );
+
+    let r = ctx.post("/api/sites", &t, json!({"type":"proxy","domains":"grafana.example.com","proxy_target":"http://10.0.0.20:3000"})).await;
+    assert_eq!(r.status, StatusCode::CREATED, "{:?}", r.body);
+    assert!(r.body["app"]["site_user"].is_null());
+    let proxy_id = r.body["app"]["id"].as_u64().unwrap();
+    let r = ctx
+        .post(
+            "/api/sites",
+            &t,
+            json!({"type":"node","domains":"node.example.com"}),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::CREATED);
+    assert!(r.body["app"]["port"].as_u64().is_some());
+    assert_eq!(r.body["app"]["start_cmd"], "node server.js");
+    let node_id = r.body["app"]["id"].as_u64().unwrap();
+    wait_deploy(&ctx, &t, r.body["deployment_id"].as_u64().unwrap()).await;
+
+    // 사이트 설정 변경 → 바로 적용
+    let r = ctx
+        .req(Method::PUT, &format!("/api/apps/{php_id}"), Some(&t), None, Some(json!({"name":"Shop","domains":"shop.example.com www.shop.example.com","web_root":"public"})))
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+    assert_eq!(r.body["web_root"], "public");
+    let r = ctx
+        .req(
+            Method::PUT,
+            &format!("/api/apps/{php_id}"),
+            Some(&t),
+            None,
+            Some(json!({"name":"Shop","domains":"shop.example.com","web_root":"../etc"})),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST);
+    for _ in 0..50 {
+        if ctx.get(&format!("/api/apps/{php_id}"), &t).await.body["status"] != "deploying" {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    let r = ctx.req(Method::PUT, &format!("/api/apps/{php_id}/php"), Some(&t), None, Some(json!({"version":"8.3","memory_mb":512,"upload_mb":128,"max_exec":120,"max_children":8}))).await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+    assert_eq!(r.body["client_max_body_mb"], 128);
+    assert_eq!(ctx.req(Method::PUT, &format!("/api/apps/{html_id}/php"), Some(&t), None, Some(json!({"version":"8.3","memory_mb":512,"upload_mb":128,"max_exec":120,"max_children":8}))).await.status, StatusCode::BAD_REQUEST);
+
+    // 사이트 유저 · SSL · 파일 (dry-run 에서는 파일 관리자 비활성)
+    assert_eq!(
+        ctx.req(
+            Method::PUT,
+            &format!("/api/apps/{html_id}/site-user/password"),
+            Some(&t),
+            None,
+            Some(json!({"password":"short"}))
+        )
+        .await
+        .status,
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        ctx.req(
+            Method::PUT,
+            &format!("/api/apps/{html_id}/site-user/password"),
+            Some(&t),
+            None,
+            Some(json!({"password":"another-password-9"}))
+        )
+        .await
+        .status,
+        StatusCode::OK
+    );
+    assert_eq!(
+        ctx.req(
+            Method::PUT,
+            &format!("/api/apps/{proxy_id}/site-user/password"),
+            Some(&t),
+            None,
+            Some(json!({"password":"another-password-9"}))
+        )
+        .await
+        .status,
+        StatusCode::BAD_REQUEST
+    );
+    let r = ctx.get(&format!("/api/apps/{html_id}/ssl"), &t).await;
+    assert_eq!(r.body["mode"], "none");
+    assert_eq!(r.body["edge_mode"], "direct");
+    assert_eq!(
+        ctx.req(
+            Method::PUT,
+            &format!("/api/apps/{html_id}/ssl/force"),
+            Some(&t),
+            None,
+            Some(json!({"force_https":true}))
+        )
+        .await
+        .status,
+        StatusCode::BAD_REQUEST
+    );
+    let r = ctx
+        .post(
+            &format!("/api/apps/{html_id}/ssl/letsencrypt"),
+            &t,
+            json!({"email":"admin@example.com"}),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+    assert_eq!(
+        ctx.get(&format!("/api/apps/{html_id}"), &t).await.body["ssl_mode"],
+        "letsencrypt"
+    );
+    assert_eq!(
+        ctx.post(
+            &format!("/api/apps/{html_id}/ssl/custom"),
+            &t,
+            json!({"certificate":"x","private_key":"y"})
+        )
+        .await
+        .status,
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        ctx.req(
+            Method::DELETE,
+            &format!("/api/apps/{html_id}/ssl"),
+            Some(&t),
+            None,
+            None
+        )
+        .await
+        .status,
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(
+        ctx.get(&format!("/api/apps/{html_id}/files?path=htdocs"), &t)
+            .await
+            .status,
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        ctx.get(&format!("/api/apps/{proxy_id}/files"), &t)
+            .await
+            .status,
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        ctx.get("/api/system/php", &t).await.body["versions"],
+        json!(["8.3"])
+    );
+    // 파일 사이트 백업은 htdocs
+    let r = ctx
+        .post(&format!("/api/apps/{html_id}/backups"), &t, json!({}))
+        .await;
+    assert_eq!(r.status, StatusCode::ACCEPTED, "{:?}", r.body);
+    for _ in 0..50 {
+        let l = ctx
+            .get(&format!("/api/backups?app_id={html_id}"), &t)
+            .await
+            .body;
+        if l.as_array()
+            .unwrap()
+            .iter()
+            .all(|b| b["status"] != "running")
+        {
+            assert_eq!(l[0]["kind"], "files");
+            assert!(l[0]["file"].as_str().unwrap().ends_with("-files.tar.gz"));
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    // 파일 사이트 크론 허용
+    let r = ctx
+        .post(
+            &format!("/api/apps/{php_id}/cron"),
+            &t,
+            json!({"name":"wp-cron","schedule":"*:0/5","command":"php wp-cron.php"}),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{:?}", r.body);
+    for id in [html_id, php_id, proxy_id, node_id] {
+        let r = ctx
+            .req(
+                Method::DELETE,
+                &format!("/api/apps/{id}"),
+                Some(&t),
+                None,
+                None,
+            )
+            .await;
+        assert_eq!(r.status, StatusCode::NO_CONTENT, "{:?}", r.body);
+    }
+
     // ── 사이트 ──
     let r = ctx.get("/api/sites", &t).await;
     let domains: Vec<&str> = r

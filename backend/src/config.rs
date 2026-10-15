@@ -18,7 +18,7 @@ pub struct Config {
     pub jwt_secret: String,
     pub access_ttl_secs: i64,
     pub refresh_ttl_secs: i64,
-    /// 리프레시 쿠키에 Secure 플래그. CT100(NPM)에서 HTTPS 종료 시 true.
+    /// 리프레시 쿠키에 Secure 플래그. 패널을 HTTPS 로 서비스하면 true.
     /// Tailscale로 http://10.0.0.12:9000 에 직접 접속한다면 false.
     pub cookie_secure: bool,
     pub exec_mode: ExecMode,
@@ -31,7 +31,7 @@ pub struct Config {
     pub app_port_min: u16,
     pub app_port_max: u16,
     pub redis_prefix: String,
-    /// 앱 Nginx 설정의 set_real_ip_from (CT100 프록시 IP)
+    /// 앱 Nginx 설정의 set_real_ip_from (앞단 프록시 IP, 없으면 빈 값)
     pub trusted_proxy: String,
     /// 빌드 명령 실행 시 PATH
     pub build_path: String,
@@ -41,13 +41,27 @@ pub struct Config {
     pub pass_env: Vec<String>,
     /// 앱에 주입할 Redis 접속 기본 URL (DB 번호 제외). 기본: REDIS_URL 에서 /<n> 을 뗀 값
     pub app_redis_base: String,
-    /// 앱에 자동 배정할 Redis DB 번호 범위 (Vol.6 수동 앱이 0~3 사용)
+    /// 앱에 자동 배정할 Redis DB 번호 범위 (0~3 은 수동 앱용으로 비워 둠)
     pub redis_db_min: u32,
     pub redis_db_max: u32,
     /// 앱 DATABASE_URL 의 호스트:포트
     pub app_db_host: String,
     /// 예약 백업 실행 시각 (서버 로컬 시각, 0~23)
     pub backup_hour: u32,
+    /// direct: 이 서버의 Nginx 가 80/443 을 직접 받음 (SSL 도 여기서, Let's Encrypt)
+    /// proxy : 앞단 리버스 프록시(예: Nginx Proxy Manager)가 SSL 을 처리하고 :80 으로 전달
+    pub edge_mode: EdgeMode,
+    /// 사이트 파일 관리 도구 (사이트 유저 권한으로 sudo 실행)
+    pub files_bin: PathBuf,
+    /// IPv6 로도 리스닝 (서버에 IPv6 가 없으면 install.sh 가 false 로 설정)
+    pub ipv6: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum EdgeMode {
+    Direct,
+    Proxy,
 }
 
 fn var(name: &str) -> Option<String> {
@@ -109,7 +123,7 @@ impl Config {
             app_port_min,
             app_port_max,
             redis_prefix: var("REDIS_PREFIX").unwrap_or_else(|| "rpanel".into()),
-            trusted_proxy: var("RPANEL_TRUSTED_PROXY").unwrap_or_else(|| "10.0.0.10".into()),
+            trusted_proxy: var("RPANEL_TRUSTED_PROXY").unwrap_or_default(),
             build_path: var("RPANEL_BUILD_PATH").unwrap_or_else(|| {
                 "/var/lib/rpanel/.cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin".into()
             }),
@@ -127,6 +141,15 @@ impl Config {
             redis_db_max: var("RPANEL_REDIS_DB_MAX").map(|v| v.parse()).transpose()?.unwrap_or(15),
             app_db_host: var("RPANEL_APP_DB_HOST").unwrap_or_else(|| "127.0.0.1:3306".into()),
             backup_hour: var("RPANEL_BACKUP_HOUR").map(|v| v.parse()).transpose()?.unwrap_or(3).min(23),
+            edge_mode: match var("RPANEL_EDGE_MODE").as_deref() {
+                Some("proxy") => EdgeMode::Proxy,
+                Some("direct") | None => EdgeMode::Direct,
+                Some(o) => bail!("RPANEL_EDGE_MODE must be 'direct' or 'proxy', got {o}"),
+            },
+            files_bin: var("RPANEL_FILES_BIN")
+                .unwrap_or_else(|| "/usr/local/lib/rpanel/rpanel-files".into())
+                .into(),
+            ipv6: var("RPANEL_IPV6").map(|v| parse_bool(&v)).unwrap_or(true),
         })
     }
 
@@ -156,6 +179,9 @@ impl Config {
             redis_db_max: 15,
             app_db_host: "127.0.0.1:3306".into(),
             backup_hour: 3,
+            edge_mode: EdgeMode::Direct,
+            files_bin: "/bin/false".into(),
+            ipv6: true,
         }
     }
 }

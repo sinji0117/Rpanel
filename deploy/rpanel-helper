@@ -1,5 +1,5 @@
 #!/bin/bash
-# rpanel-helper — Rpanel이 sudo로 호출하는 유일한 권한 작업 스크립트.
+# rpanel-helper — Rpanel 이 sudo 로 호출하는 유일한 root 권한 작업 스크립트.
 #
 #   설치: /usr/local/lib/rpanel/rpanel-helper  (root:root 0755)
 #   sudoers: rpanel ALL=(root) NOPASSWD: /usr/local/lib/rpanel/rpanel-helper
@@ -8,6 +8,9 @@
 # 모든 인자와 스테이징 파일 내용을 화이트리스트로 검사합니다.
 #   - systemd 유닛: rpanel-app 사용자로만 실행, 허용된 키만, 경로는 앱 디렉토리 안
 #   - Nginx 사이트: 허용된 지시어만, root/로그/프록시 대상 경로 고정, 다른 사이트와 도메인 중복 금지
+#   - 사이트 유저: rpanel-sites 그룹, /home/<user> 만, 레지스트리(/etc/rpanel/site-users)에 있는 것만 삭제
+#   - PHP-FPM 풀: 레지스트리의 사이트 유저로만, 허용된 키만
+#   - SSL: Let's Encrypt(webroot) / 사용자 인증서(키 일치 검사)
 set -euo pipefail
 umask 022
 export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
@@ -15,6 +18,7 @@ export LC_ALL=C
 
 DATA=/var/lib/rpanel
 STAGING="$DATA/staging"
+ACME_ROOT="$DATA/acme"
 RUN_USER=rpanel-app
 MARK="# managed by rpanel"
 AVAIL=/etc/nginx/sites-available
@@ -29,14 +33,48 @@ valid_slug() {
 unit_name() { echo "rpanel-app-$1.service"; }
 site_name() { echo "rpanel-$1.conf"; }
 
-staged_file() {
+staged_raw() {
   # 심볼릭 링크·다른 소유자 파일 거부
   local f="$1"
   [[ -f "$f" && ! -L "$f" ]] || die "staging file missing: $f"
   [[ "$(stat -c %U "$f")" == "rpanel" ]] || die "staging file not owned by rpanel: $f"
-  head -n1 "$f" | grep -q "^$MARK" || die "staging file is not rpanel-managed: $f"
   local size; size=$(stat -c %s "$f")
   (( size < 65536 )) || die "staging file too large"
+}
+
+staged_file() {
+  local f="$1"
+  staged_raw "$f"
+  head -n1 "$f" | grep -Eq "^[#;] managed by rpanel" || die "staging file is not rpanel-managed: $f"
+  local size; size=$(stat -c %s "$f")
+  (( size < 65536 )) || die "staging file too large"
+}
+
+
+# ───────────────────────── 사이트 유저 레지스트리 ─────────────────────────
+# /etc/rpanel/site-users : "<slug> <user> <site_root>" 한 줄씩 (helper 만 수정)
+
+SITES_REG="${RPANEL_TEST_SITES_REG:-/etc/rpanel/site-users}"   # 테스트용 덮어쓰기 (sudo env_reset 으로 운영에선 불가)
+SITES_GROUP=rpanel-sites
+RESERVED_USERS=" root daemon bin sys sync games man lp mail news uucp proxy www-data backup list irc nobody systemd-network systemd-resolve messagebus sshd syslog ubuntu admin administrator sysadmin mysql redis nginx rpanel rpanel-app postfix "
+
+site_user_of() { [[ -f $SITES_REG ]] && awk -v s="$1" '$1==s {print $2; exit}' "$SITES_REG" || true; }
+site_root_of() { [[ -f $SITES_REG ]] && awk -v s="$1" '$1==s {print $3; exit}' "$SITES_REG" || true; }
+
+valid_site_user() {
+  local u="${1:-}"
+  [[ "$u" =~ ^[a-z][a-z0-9-]{2,31}$ ]] || die "invalid site user: '$u' (소문자로 시작, 소문자·숫자·- 3~32자)"
+  [[ "$RESERVED_USERS" != *" $u "* ]] || die "reserved user name: $u"
+}
+
+valid_domain() {
+  local d="${1:-}"
+  [[ ${#d} -le 253 && "$d" =~ ^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$ ]] || die "invalid domain: '$d'"
+}
+
+registered_site_user() {
+  local u="$1"
+  [[ -f $SITES_REG ]] && awk -v u="$u" '$2==u {f=1} END {exit !f}' "$SITES_REG"
 }
 
 # ───────────────────────── systemd ─────────────────────────
@@ -45,6 +83,10 @@ validate_unit() {
   local f="$1" slug="$2" appdir="$DATA/apps/$2" mode="${3:-service}"
   local line key val section=""
   local saw_user=0 saw_nnp=0
+  # 실행 사용자·경로: 파일 기반 사이트면 사이트 유저, 아니면 rpanel-app
+  local run_user="$RUN_USER" cwd="$appdir/current" rw="$appdir/data" suser sroot
+  suser="$(site_user_of "$slug")"; sroot="$(site_root_of "$slug")"
+  if [[ -n "$suser" ]]; then run_user="$suser"; cwd="$sroot"; rw="/home/$suser"; fi
   while IFS= read -r line || [[ -n "$line" ]]; do
     [[ -z "$line" || "$line" == \#* ]] && continue
     if [[ "$line" =~ ^\[(Unit|Service|Install)\]$ ]]; then section="${BASH_REMATCH[1]}"; continue; fi
@@ -56,27 +98,28 @@ validate_unit() {
         if [[ "$mode" == cron ]]; then [[ "$val" == oneshot ]] || die "unit: cron Type must be oneshot"
         else [[ "$val" == simple ]] || die "unit: Type must be simple"; fi ;;
       Service:TimeoutStartSec) [[ "$mode" == cron && "$val" =~ ^[0-9]{1,6}$ ]] || die "unit: TimeoutStartSec only for cron" ;;
-      Service:User|Service:Group) [[ "$val" == "$RUN_USER" ]] || die "unit: $key must be $RUN_USER"; saw_user=1 ;;
-      Service:WorkingDirectory) [[ "$val" == "$appdir/current" ]] || die "unit: bad WorkingDirectory" ;;
+      Service:User|Service:Group) [[ "$val" == "$run_user" ]] || die "unit: $key must be $run_user"; saw_user=1 ;;
+      Service:WorkingDirectory) [[ "$val" == "$cwd" ]] || die "unit: bad WorkingDirectory" ;;
       Service:EnvironmentFile) [[ "$val" == "$appdir/app.env" ]] || die "unit: bad EnvironmentFile" ;;
-      Service:ReadWritePaths) [[ "$val" == "$appdir/data" ]] || die "unit: bad ReadWritePaths" ;;
+      Service:ReadWritePaths) [[ "$val" == "$rw" ]] || die "unit: bad ReadWritePaths" ;;
       Service:Environment) [[ "$val" =~ ^PATH=[A-Za-z0-9/:._-]+$ ]] || die "unit: only PATH= Environment allowed" ;;
       Service:ExecStart)
         if [[ "$val" == /bin/bash\ -c\ * ]]; then :
-        elif [[ "$val" =~ ^"$appdir/current/"[A-Za-z0-9_][A-Za-z0-9_.-]*$ ]]; then :
+        elif [[ -z "$suser" && "$val" =~ ^"$appdir/current/"[A-Za-z0-9_][A-Za-z0-9_.-]*$ ]]; then :
         else die "unit: ExecStart must be the app binary or /bin/bash -c"; fi ;;
       Service:NoNewPrivileges) [[ "$val" == true ]] || die "unit: NoNewPrivileges must be true"; saw_nnp=1 ;;
       Service:Restart|Service:RestartSec)
         [[ "$mode" == service ]] || die "unit: $key not allowed for cron" ;;
+      Service:ProtectHome) [[ -z "$suser" ]] || die "unit: ProtectHome not allowed for site users" ;;
       Service:TimeoutStopSec|Service:PrivateTmp|Service:PrivateDevices|\
-      Service:ProtectSystem|Service:ProtectHome|Service:ProtectKernelTunables|Service:ProtectKernelModules|\
+      Service:ProtectSystem|Service:ProtectKernelTunables|Service:ProtectKernelModules|\
       Service:ProtectControlGroups|Service:RestrictAddressFamilies|Service:RestrictNamespaces|\
       Service:LockPersonality|Service:MemoryDenyWriteExecute|Service:LimitNOFILE) ;;
       Install:WantedBy) [[ "$mode" == service && "$val" == multi-user.target ]] || die "unit: bad WantedBy" ;;
       *) die "unit: key not allowed: [$section] $key" ;;
     esac
   done < "$f"
-  (( saw_user && saw_nnp )) || die "unit: User=$RUN_USER and NoNewPrivileges=true are required"
+  (( saw_user && saw_nnp )) || die "unit: User=$run_user and NoNewPrivileges=true are required"
 }
 
 install_unit() {
@@ -104,37 +147,68 @@ remove_unit() {
 
 validate_site() {
   local f="$1" slug="$2" line d
-  local www="$DATA/www/$slug/current"
-  local in_gzip_types=0
+  local www="$DATA/www/$slug/current" sroot suser
+  sroot="$(site_root_of "$slug")"; suser="$(site_user_of "$slug")"
+  local in_gzip_types=0 re
   while IFS= read -r line || [[ -n "$line" ]]; do
     line="${line#"${line%%[![:space:]]*}"}"   # ltrim
     [[ -z "$line" || "$line" == \#* || "$line" == "}" ]] && continue
     if (( in_gzip_types )); then
-      local re='^[a-z0-9/+. -]+;?$'
+      re='^[a-z0-9/+. -]+;?$'
       [[ "$line" =~ $re ]] || die "site: bad gzip_types continuation"
       [[ "$line" == *\; ]] && in_gzip_types=0
       continue
     fi
     d="${line%%[[:space:]]*}"
     case "$d" in
-      try_files|proxy_set_header|location) ;;
+      try_files|proxy_set_header|location|fastcgi_param|fastcgi_split_path_info|return) ;;
       *) [[ "$line" == *'$'* || "$line" == *'\'* || "$line" == *'`'* ]] && die "site: unexpected characters: $line" ;;
     esac
+    [[ "$line" == *'`'* ]] && die "site: unexpected characters: $line"
     case "$d" in
       server) [[ "$line" == "server {" ]] || die "site: bad server line" ;;
-      listen) [[ "$line" == "listen 80;" ]] || die "site: only 'listen 80;' allowed" ;;
+      listen)
+        [[ "$line" == "listen 80;" || "$line" == "listen [::]:80;" || "$line" == "listen 443 ssl http2;" || "$line" == "listen [::]:443 ssl http2;" ]] \
+          || die "site: listen not allowed: $line" ;;
       server_name) [[ "$line" =~ ^server_name(\ [a-z0-9.-]+)+\;$ ]] || die "site: bad server_name" ;;
       set_real_ip_from) [[ "$line" =~ ^set_real_ip_from\ [0-9a-f.:/]+\;$ ]] || die "site: bad set_real_ip_from" ;;
-      real_ip_header|real_ip_recursive|client_max_body_size|index|expires|gzip|gzip_vary|gzip_min_length|\
+      ssl_certificate|ssl_certificate_key)
+        [[ "$line" == "ssl_certificate /etc/letsencrypt/live/rpanel-$slug/fullchain.pem;" || \
+           "$line" == "ssl_certificate_key /etc/letsencrypt/live/rpanel-$slug/privkey.pem;" || \
+           "$line" == "ssl_certificate /etc/rpanel/certs/$slug/fullchain.pem;" || \
+           "$line" == "ssl_certificate_key /etc/rpanel/certs/$slug/key.pem;" ]] || die "site: bad certificate path" ;;
+      ssl_protocols) [[ "$line" == "ssl_protocols TLSv1.2 TLSv1.3;" ]] || die "site: bad ssl_protocols" ;;
+      ssl_session_cache) [[ "$line" == "ssl_session_cache shared:rpanel_ssl:10m;" ]] || die "site: bad ssl_session_cache" ;;
+      ssl_session_timeout) [[ "$line" == "ssl_session_timeout 1d;" ]] || die "site: bad ssl_session_timeout" ;;
+      return) [[ "$line" == 'return 301 https://$host$request_uri;' ]] || die "site: return not allowed: $line" ;;
+      real_ip_header|real_ip_recursive|index|expires|gzip|gzip_vary|gzip_min_length|default_type|\
       proxy_http_version|proxy_connect_timeout|proxy_read_timeout|proxy_send_timeout|proxy_buffering|add_header|proxy_set_header|try_files)
         [[ "$line" == *\; ]] || die "site: missing ';' in $d" ;;
+      client_max_body_size) [[ "$line" =~ ^client_max_body_size\ [0-9]{1,5}m\;$ ]] || die "site: bad client_max_body_size" ;;
+      proxy_ssl_server_name) [[ "$line" == "proxy_ssl_server_name on;" ]] || die "site: bad proxy_ssl_server_name" ;;
+      deny) [[ "$line" == "deny all;" ]] || die "site: bad deny" ;;
       gzip_types) [[ "$line" == *\; ]] || in_gzip_types=1 ;;
       access_log|error_log)
         [[ "$line" =~ ^(access|error)_log\ +(/var/log/nginx/rpanel-$slug-(access|error)\.log|off)\;$ ]] || die "site: bad log path" ;;
-      root) [[ "$line" == "root $www;" ]] || die "site: root must be $www" ;;
-      proxy_pass) [[ "$line" =~ ^proxy_pass\ http://127\.0\.0\.1:[0-9]{1,5}\;$ ]] || die "site: proxy_pass must target 127.0.0.1" ;;
+      root)
+        if [[ "$line" == "root $www;" || "$line" == "root $ACME_ROOT;" ]]; then :
+        elif [[ -n "$sroot" && ( "$line" == "root $sroot;" || "$line" =~ ^root\ "$sroot"/[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*\;$ ) && "$line" != *..* ]]; then :
+        else die "site: root not allowed: $line"; fi ;;
+      proxy_pass)
+        re='^proxy_pass https?://[A-Za-z0-9.-]+(:[0-9]{1,5})?(/[A-Za-z0-9._~/-]*)?;$'
+        [[ "$line" =~ $re ]] || die "site: bad proxy_pass" ;;
+      fastcgi_pass) [[ -n "$suser" && "$line" == "fastcgi_pass unix:/run/php/rpanel-$slug.sock;" ]] || die "site: bad fastcgi_pass" ;;
+      fastcgi_index) [[ "$line" == "fastcgi_index index.php;" ]] || die "site: bad fastcgi_index" ;;
+      fastcgi_read_timeout) [[ "$line" =~ ^fastcgi_read_timeout\ [0-9]{1,5}s\;$ ]] || die "site: bad fastcgi_read_timeout" ;;
+      fastcgi_split_path_info) [[ "$line" == 'fastcgi_split_path_info ^(.+\.php)(/.+)$;' ]] || die "site: bad fastcgi_split_path_info" ;;
+      fastcgi_param)
+        [[ "$line" == 'fastcgi_param SCRIPT_FILENAME $realpath_root$fastcgi_script_name;' || \
+           "$line" == 'fastcgi_param HTTPS $rpanel_https if_not_empty;' ]] || die "site: fastcgi_param not allowed: $line" ;;
+      include) [[ "$line" == "include fastcgi_params;" ]] || die "site: include not allowed" ;;
       location)
         [[ "$line" == "location / {" || "$line" == "location /api/ {" || "$line" == "location = /index.html {" || \
+           "$line" == "location ^~ /.well-known/acme-challenge/ {" || "$line" == 'location ~ \.php$ {' || \
+           "$line" == 'location ~ /\.(?!well-known).* {' || \
            "$line" == 'location ~* \.(?:js|css|woff2?|ttf|eot|svg|png|jpe?g|gif|webp|avif|ico)$ {' ]] || die "site: location not allowed: $line" ;;
       *) die "site: directive not allowed: $d" ;;
     esac
@@ -151,7 +225,7 @@ check_domain_conflicts() {
       target=$(readlink -f "$f")
       [[ "$target" == "$own" ]] && continue
       if grep -Eq "^[[:space:]]*server_name[^;]*[[:space:]]${n//./\\.}([[:space:];]|$)" "$target"; then
-        die "domain '$n' is already served by $target — 수동 설정(Vol.6 §9.13/§9.14.6)과 겹칩니다. 기존 파일을 정리하거나 다른 도메인을 쓰세요"
+        die "domain '$n' is already served by $target — 다른 Nginx 설정과 겹칩니다. 기존 파일을 정리하거나 다른 도메인을 쓰세요"
       fi
     done
   done
@@ -307,7 +381,7 @@ db_password() {
 
 BACKUPS="$DATA/backups"
 valid_stamp() { [[ "${1:-}" =~ ^[0-9]{8}-[0-9]{6}$ ]] || die "invalid stamp"; }
-valid_backup_file() { [[ "${1:-}" =~ ^[0-9]{8}-[0-9]{6}-(db-[a-z][a-z0-9_]+\.sql|data\.tar)\.gz$ ]] || die "invalid backup file name"; }
+valid_backup_file() { [[ "${1:-}" =~ ^[0-9]{8}-[0-9]{6}-(db-[a-z][a-z0-9_]+\.sql|data\.tar|files\.tar)\.gz$ ]] || die "invalid backup file name"; }
 
 backup_dir() {
   install -d -o rpanel -g rpanel -m 0750 "$BACKUPS" "$BACKUPS/$1"
@@ -365,6 +439,254 @@ restore_data() {
   chown -R "$RUN_USER:$RUN_USER" "$app/data"; chmod 0750 "$app/data"
   (( was_active )) && systemctl start "$unit"
   echo "restored data from $file"
+}
+
+
+# ───────────────────────── 사이트 유저 · 파일 사이트 ─────────────────────────
+
+site_create() {
+  local slug="$1" user="$2" domain="$3" kind="$4" home root
+  valid_site_user "$user"; valid_domain "$domain"
+  [[ "$kind" =~ ^(static|php|node)$ ]] || die "invalid kind"
+  [[ -z "$(site_user_of "$slug")" ]] || die "이미 사이트 유저가 있는 앱입니다: $slug"
+  id "$user" >/dev/null 2>&1 && die "시스템에 이미 있는 사용자입니다: $user"
+  getent group "$SITES_GROUP" >/dev/null || groupadd --system "$SITES_GROUP"
+  home="/home/$user"; root="$home/htdocs/$domain"
+  [[ ! -e "$home" ]] || die "$home 이(가) 이미 있습니다"
+  useradd --create-home --home-dir "$home" --shell /bin/bash --user-group --groups "$SITES_GROUP" "$user"
+  chmod 0750 "$home"
+  # Nginx(www-data) 가 정적 파일을 읽도록 사이트 그룹에 추가
+  usermod -aG "$user" www-data
+  install -d -o "$user" -g "$user" -m 0750 "$home/htdocs" "$root"
+  install -d -o "$user" -g "$user" -m 0750 "$home/logs"
+  install -d -o "$user" -g "$user" -m 0700 "$home/.ssh"
+  install -m 0600 -o "$user" -g "$user" /dev/null "$home/.ssh/authorized_keys"
+  case "$kind" in
+    php)
+      cat > "$root/index.php" <<EOF
+<?php
+// $domain — Rpanel 로 만든 PHP 사이트. 이 파일을 지우고 사이트 파일을 올리세요.
+echo '<h1>$domain</h1><p>PHP ' . PHP_VERSION . ' 동작 중</p>';
+EOF
+      ;;
+    static)
+      cat > "$root/index.html" <<EOF
+<!doctype html><html lang="ko"><meta charset="utf-8"><title>$domain</title>
+<body style="font-family:sans-serif;padding:4rem"><h1>$domain</h1><p>Rpanel 로 만든 사이트입니다. 이 파일을 지우고 사이트 파일을 올리세요.</p></body></html>
+EOF
+      ;;
+    node)
+      cat > "$root/server.js" <<'EOF'
+// Rpanel 로 만든 Node.js 사이트 예시 — PORT 환경변수로 받은 포트에서 실행하세요.
+const http = require('http');
+const port = process.env.PORT || 3000;
+http.createServer((req, res) => {
+  res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+  res.end('<h1>Node.js ' + process.version + ' 동작 중</h1>');
+}).listen(port, '127.0.0.1', () => console.log('listening on ' + port));
+EOF
+      ;;
+  esac
+  chown -R "$user:$user" "$root"
+  install -d -m 0750 -o root -g rpanel /etc/rpanel
+  touch "$SITES_REG"; chmod 0644 "$SITES_REG"
+  echo "$slug $user $root" >> "$SITES_REG"
+  systemctl reload nginx 2>/dev/null || true   # www-data 그룹 변경 반영
+  echo "$root"
+}
+
+site_password() {
+  local slug="$1" user pw
+  user="$(site_user_of "$slug")"; [[ -n "$user" ]] || die "사이트 유저가 없는 앱입니다: $slug"
+  IFS= read -r pw || true
+  [[ ${#pw} -ge 10 && ${#pw} -le 128 ]] || die "비밀번호는 10~128자여야 합니다"
+  [[ "$pw" != *:* ]] || die "비밀번호에 ':' 를 쓸 수 없습니다"
+  printf '%s:%s\n' "$user" "$pw" | chpasswd
+  echo "password updated for $user"
+}
+
+site_delete() {
+  local slug="$1" user
+  user="$(site_user_of "$slug")"
+  [[ -n "$user" ]] || return 0
+  valid_site_user "$user"
+  id -nG "$user" 2>/dev/null | tr ' ' '\n' | grep -qx "$SITES_GROUP" || die "$user 는 rpanel 사이트 유저가 아닙니다"
+  remove_php_pools "$slug"
+  pkill -u "$user" 2>/dev/null || true
+  sleep 0.5
+  gpasswd -d www-data "$user" >/dev/null 2>&1 || true
+  userdel --remove "$user" 2>/dev/null || userdel "$user"
+  rm -rf --one-file-system "/home/$user"
+  awk -v s="$slug" '$1!=s' "$SITES_REG" > "$SITES_REG.tmp"; mv "$SITES_REG.tmp" "$SITES_REG"; chmod 0644 "$SITES_REG"
+  echo "deleted site user $user"
+}
+
+# ───────────────────────── PHP-FPM ─────────────────────────
+
+valid_php_version() {
+  [[ "${1:-}" =~ ^(5\.6|7\.[0-4]|8\.[0-9])$ ]] || die "invalid php version: '${1:-}'"
+  [[ -d "/etc/php/$1/fpm/pool.d" ]] || die "PHP $1 FPM 이 설치되어 있지 않습니다 (설치: install.sh --php=$1)"
+}
+
+validate_pool() {
+  local f="$1" slug="$2" user="$3" line key val
+  local line_re='^([a-z_.]+(\[[A-Za-z_.][A-Za-z0-9_.]*\])?) = (.*)$'
+  local env_key_re='^env\[[A-Za-z_][A-Za-z0-9_]*\]$'
+  local env_val_re='^"[^"\\$`]*"$'
+  local seen_section=0
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    [[ -z "$line" || "$line" == \;* ]] && continue
+    if [[ "$line" == "[rpanel-$slug]" ]]; then seen_section=1; continue; fi
+    (( seen_section )) || die "pool: section [rpanel-$slug] must come first"
+    [[ "$line" =~ $line_re ]] || die "pool: bad line: $line"
+    key="${BASH_REMATCH[1]}"; val="${BASH_REMATCH[3]}"
+    case "$key" in
+      user|group) [[ "$val" == "$user" ]] || die "pool: $key must be $user" ;;
+      listen) [[ "$val" == "/run/php/rpanel-$slug.sock" ]] || die "pool: bad listen" ;;
+      listen.owner|listen.group) [[ "$val" == www-data ]] || die "pool: bad $key" ;;
+      listen.mode) [[ "$val" == 0660 ]] || die "pool: bad listen.mode" ;;
+      pm) [[ "$val" == ondemand || "$val" == dynamic ]] || die "pool: bad pm" ;;
+      pm.max_children|pm.max_requests|pm.start_servers|pm.min_spare_servers|pm.max_spare_servers)
+        [[ "$val" =~ ^[0-9]{1,4}$ ]] || die "pool: bad $key" ;;
+      pm.process_idle_timeout) [[ "$val" =~ ^[0-9]{1,4}s$ ]] || die "pool: bad $key" ;;
+      'php_admin_value[memory_limit]'|'php_admin_value[upload_max_filesize]'|'php_admin_value[post_max_size]')
+        [[ "$val" =~ ^[0-9]{1,5}M$ ]] || die "pool: bad $key" ;;
+      'php_admin_value[max_execution_time]'|'php_admin_value[max_input_time]')
+        [[ "$val" =~ ^[0-9]{1,5}$ ]] || die "pool: bad $key" ;;
+      'php_admin_flag[log_errors]') [[ "$val" == on || "$val" == off ]] || die "pool: bad $key" ;;
+      'php_admin_value[error_log]') [[ "$val" == "/home/$user/logs/php-error.log" ]] || die "pool: bad error_log" ;;
+      env\[*\])
+        [[ "$key" =~ $env_key_re ]] || die "pool: bad env key"
+        [[ "$val" =~ $env_val_re ]] || die "pool: bad env value for $key" ;;
+      *) die "pool: key not allowed: $key" ;;
+    esac
+  done < "$f"
+}
+
+remove_php_pools() {
+  local slug="$1" f v
+  for f in /etc/php/*/fpm/pool.d/rpanel-"$slug".conf; do
+    [[ -e "$f" ]] || continue
+    v="$(echo "$f" | cut -d/ -f4)"
+    rm -f "$f"
+    systemctl reload "php$v-fpm" 2>/dev/null || systemctl restart "php$v-fpm" 2>/dev/null || true
+  done
+}
+
+install_php_pool() {
+  local slug="$1" version="$2" src="$STAGING/$1.php.conf" user dst backup="" f v
+  valid_php_version "$version"
+  user="$(site_user_of "$slug")"; [[ -n "$user" ]] || die "사이트 유저가 없는 앱입니다: $slug"
+  staged_file "$src"
+  validate_pool "$src" "$slug" "$user"
+  # 다른 버전에 있던 풀은 제거 (버전 변경)
+  for f in /etc/php/*/fpm/pool.d/rpanel-"$slug".conf; do
+    [[ -e "$f" ]] || continue
+    v="$(echo "$f" | cut -d/ -f4)"
+    [[ "$v" == "$version" ]] && continue
+    rm -f "$f"; systemctl reload "php$v-fpm" 2>/dev/null || true
+  done
+  dst="/etc/php/$version/fpm/pool.d/rpanel-$slug.conf"
+  if [[ -f "$dst" ]]; then backup=$(mktemp); cp -p "$dst" "$backup"; fi
+  install -m 0644 -o root -g root "$src" "$dst"
+  if ! "php-fpm$version" -t >/tmp/rpanel-fpm-test.$$ 2>&1; then
+    cat /tmp/rpanel-fpm-test.$$ >&2; rm -f /tmp/rpanel-fpm-test.$$
+    if [[ -n "$backup" ]]; then mv "$backup" "$dst"; else rm -f "$dst"; fi
+    die "php-fpm$version -t 실패 — 이전 설정으로 되돌렸습니다"
+  fi
+  rm -f /tmp/rpanel-fpm-test.$$ "${backup:-/nonexistent}"
+  systemctl enable "php$version-fpm" >/dev/null 2>&1 || true
+  if systemctl is-active --quiet "php$version-fpm"; then systemctl reload "php$version-fpm"; else systemctl start "php$version-fpm"; fi
+  for _ in $(seq 1 20); do [[ -S "/run/php/rpanel-$slug.sock" ]] && break; sleep 0.25; done
+  [[ -S "/run/php/rpanel-$slug.sock" ]] || die "PHP-FPM 소켓이 만들어지지 않았습니다: journalctl -u php$version-fpm"
+  echo "installed $dst (php$version-fpm reloaded)"
+}
+
+php_versions() {
+  local d
+  for d in /etc/php/*/fpm/pool.d; do
+    [[ -d "$d" ]] && echo "$d" | cut -d/ -f4
+  done | sort -V
+}
+
+# ───────────────────────── SSL ─────────────────────────
+
+valid_email() {
+  [[ ${#1} -le 190 && "$1" =~ ^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$ ]] || die "invalid email: '$1'"
+}
+
+ssl_issue() {
+  local slug="$1" email="$2"; shift 2
+  valid_email "$email"
+  (( $# >= 1 && $# <= 20 )) || die "도메인이 필요합니다"
+  local args=() d
+  for d in "$@"; do valid_domain "$d"; args+=(-d "$d"); done
+  command -v certbot >/dev/null || die "certbot 이 설치되어 있지 않습니다 (apt install certbot)"
+  install -d -m 0755 "$ACME_ROOT"
+  certbot certonly --webroot -w "$ACME_ROOT" --cert-name "rpanel-$slug" \
+    --non-interactive --agree-tos -m "$email" --keep-until-expiring --expand "${args[@]}" 2>&1 \
+    || die "Let's Encrypt 발급 실패 — 도메인 DNS 가 이 서버를 가리키는지, 80 포트가 열려 있는지 확인하세요"
+  echo "issued rpanel-$slug"
+}
+
+ssl_custom() {
+  local slug="$1" crt="$STAGING/$1.crt" key="$STAGING/$1.key" dir="/etc/rpanel/certs/$1"
+  staged_raw "$crt"; staged_raw "$key"
+  openssl x509 -in "$crt" -noout >/dev/null 2>&1 || { rm -f "$crt" "$key"; die "인증서(PEM)를 읽을 수 없습니다"; }
+  openssl pkey -in "$key" -noout >/dev/null 2>&1 || { rm -f "$crt" "$key"; die "개인키(PEM)를 읽을 수 없습니다 (암호가 걸린 키는 지원하지 않습니다)"; }
+  if [[ "$(openssl x509 -in "$crt" -noout -pubkey | openssl sha256)" != "$(openssl pkey -in "$key" -pubout | openssl sha256)" ]]; then
+    rm -f "$crt" "$key"; die "인증서와 개인키가 서로 맞지 않습니다"
+  fi
+  install -d -m 0700 -o root -g root "$dir"
+  install -m 0644 -o root -g root "$crt" "$dir/fullchain.pem"
+  install -m 0600 -o root -g root "$key" "$dir/key.pem"
+  rm -f "$crt" "$key"
+  echo "installed custom certificate for $slug"
+}
+
+ssl_info() {
+  local slug="$1" f
+  for f in "/etc/letsencrypt/live/rpanel-$slug/fullchain.pem" "/etc/rpanel/certs/$slug/fullchain.pem"; do
+    [[ -f "$f" ]] || continue
+    echo "path=$f"
+    openssl x509 -in "$f" -noout -enddate -issuer -subject 2>/dev/null | sed -E 's/^notAfter=/not_after=/; s/^issuer=/issuer=/; s/^subject=/subject=/'
+    openssl x509 -in "$f" -noout -ext subjectAltName 2>/dev/null | tail -n +2 | tr -d ' ' | sed 's/^/san=/'
+  done
+}
+
+ssl_remove() {
+  local slug="$1"
+  if command -v certbot >/dev/null && [[ -d "/etc/letsencrypt/live/rpanel-$slug" ]]; then
+    certbot delete --cert-name "rpanel-$slug" --non-interactive >/dev/null 2>&1 || true
+  fi
+  rm -rf "/etc/rpanel/certs/$slug"
+  echo "removed certificates for $slug"
+}
+
+# ───────────────────────── 파일 사이트 백업 ─────────────────────────
+
+backup_files() {
+  local slug="$1" stamp="$2" dir out user
+  valid_stamp "$stamp"
+  user="$(site_user_of "$slug")"; [[ -n "$user" ]] || die "사이트 유저가 없는 앱입니다"
+  dir="$(backup_dir "$slug")"; out="$dir/$stamp-files.tar.gz"
+  tar -C "/home/$user" -czf "$out.part" htdocs || { rm -f "$out.part"; die "tar 실패"; }
+  mv "$out.part" "$out"
+  finish_file "$out"
+}
+
+restore_files() {
+  local slug="$1" file="$2" path user
+  valid_backup_file "$file"; [[ "$file" == *-files.tar.gz ]] || die "파일 백업이 아닙니다"
+  user="$(site_user_of "$slug")"; [[ -n "$user" ]] || die "사이트 유저가 없는 앱입니다"
+  path="$BACKUPS/$slug/$file"; [[ -f "$path" && ! -L "$path" ]] || die "백업 파일이 없습니다"
+  if tar -tzf "$path" | grep -Ev '^htdocs(/|$)' | grep -q . ; then die "아카이브에 허용되지 않은 경로가 있습니다"; fi
+  if tar -tzf "$path" | grep -Eq '(^|/)\.\.(/|$)'; then die "아카이브에 .. 경로가 있습니다"; fi
+  if tar -tvzf "$path" | grep -Eq '^[lhbcp]| link to '; then die "아카이브에 링크·특수 파일이 있습니다"; fi
+  rm -rf --one-file-system "/home/$user/htdocs"
+  # 사이트 유저 권한으로 풀어 소유권을 맞춤 (백업 파일은 사이트 유저가 못 읽으므로 root 가 stdin 으로 넘김)
+  runuser -u "$user" -- tar -C "/home/$user" --no-same-owner -xzf - < "$path"
+  echo "restored files from $file"
 }
 
 # ───────────────────────── Nginx 로그 ─────────────────────────
@@ -430,18 +752,31 @@ case "$cmd" in
   restore-db)  valid_slug "${1:-}"; restore_db "$1" "${2:-}" "${3:-}" ;;
   restore-data) valid_slug "${1:-}"; restore_data "$1" "${2:-}" ;;
   nginx-log)   valid_slug "${1:-}"; nginx_log "$1" "${2:-}" "${3:-200}" ;;
+  site-create)   valid_slug "${1:-}"; site_create "$1" "${2:-}" "${3:-}" "${4:-}" ;;
+  site-password) valid_slug "${1:-}"; site_password "$1" ;;
+  install-php-pool) valid_slug "${1:-}"; install_php_pool "$1" "${2:-}" ;;
+  remove-php-pool)  valid_slug "${1:-}"; remove_php_pools "$1" ;;
+  php-versions) php_versions ;;
+  ssl-issue)   valid_slug "${1:-}"; slug="$1"; shift; ssl_issue "$slug" "$@" ;;
+  ssl-custom)  valid_slug "${1:-}"; ssl_custom "$1" ;;
+  ssl-info)    valid_slug "${1:-}"; ssl_info "$1" ;;
+  ssl-remove)  valid_slug "${1:-}"; ssl_remove "$1" ;;
+  backup-files)  valid_slug "${1:-}"; backup_files "$1" "${2:-}" ;;
+  restore-files) valid_slug "${1:-}"; restore_files "$1" "${2:-}" ;;
   purge-app)
     valid_slug "${1:-}"
     remove_all_crons "$1"
     remove_unit "$1"
     remove_site "$1"
+    ssl_remove "$1" >/dev/null
+    site_delete "$1"
     rm -rf --one-file-system "$DATA/apps/$1" "$DATA/www/$1" "$DATA/builds/$1"
-    rm -f "$DATA/keys/$1" "$DATA/keys/$1.pub" "$STAGING/$1.service" "$STAGING/$1.conf" "$STAGING"/cron-"$1"-*
+    rm -f "$DATA/keys/$1" "$DATA/keys/$1.pub" "$STAGING/$1.service" "$STAGING/$1.conf" "$STAGING/$1.php.conf" "$STAGING"/cron-"$1"-*
     # 백업 파일(/var/lib/rpanel/backups/<slug>)은 남겨 둡니다
     echo "purged $1"
     ;;
   *)
-    die "usage: rpanel-helper {prepare-app|install-unit|remove-unit|install-site|remove-site|purge-app} <slug> | svc {start|stop|restart} <slug> | status|journal <slug> | {install,remove,run}-cron|cron-status|cron-log <slug> <id> | db-{create,drop,password} <db> <user> | backup-db <slug> <db> <stamp> | backup-data <slug> <stamp> | restore-db <slug> <db> <file> | restore-data <slug> <file> | nginx-log <slug> access|error <lines>"
+    die "usage: rpanel-helper {prepare-app|install-unit|remove-unit|install-site|remove-site|purge-app} <slug> | svc {start|stop|restart} <slug> | status|journal <slug> | {install,remove,run}-cron|cron-status|cron-log <slug> <id> | db-{create,drop,password} <db> <user> | backup-db <slug> <db> <stamp> | backup-data <slug> <stamp> | restore-db <slug> <db> <file> | restore-data <slug> <file> | nginx-log <slug> access|error <lines> | site-create <slug> <user> <domain> <static|php|node> | site-password <slug> (stdin) | install-php-pool <slug> <ver> | php-versions | ssl-issue <slug> <email> <domain>... | ssl-custom|ssl-info|ssl-remove <slug> | backup-files <slug> <stamp> | restore-files <slug> <file>"
     ;;
 esac
 }

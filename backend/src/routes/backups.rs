@@ -134,6 +134,8 @@ pub async fn restore(
             3600,
         )
         .await
+    } else if b.kind == "files" {
+        helper::call_long(&state, &["restore-files", &app.slug, &b.file], &log, 3600).await
     } else {
         helper::call_long(&state, &["restore-data", &app.slug, &b.file], &log, 3600).await
     }

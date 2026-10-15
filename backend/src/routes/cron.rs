@@ -145,9 +145,9 @@ fn yes() -> bool {
 }
 
 async fn check_input(state: &AppState, app: &App, i: &CronInput) -> AppResult<Option<String>> {
-    if !app.kind().is_service() {
+    if !app.kind().is_service() && app.site_user.is_none() {
         return Err(AppError::bad(
-            "크론은 Rust/Node 앱에서만 쓸 수 있습니다 (앱의 env·작업 디렉토리를 사용)",
+            "크론은 Rust·Node 앱과 파일 사이트(HTML·PHP·Node)에서 쓸 수 있습니다",
         ));
     }
     validate::name(&i.name).map_err(AppError::BadRequest)?;

@@ -114,14 +114,14 @@ export default function AppForm({ initial, mode = 'create', onSubmit, submitting
         </Field>
       </div>
 
-      <Field label="Git 저장소" htmlFor="app-git" hint="private 저장소는 ssh://git@<GitLab Tailscale IP>:<포트>/그룹/저장소.git + 생성 후 Deploy key 등록">
+      <Field label="Git 저장소" htmlFor="app-git" hint="private 저장소는 ssh://git@<호스트>:<포트>/그룹/저장소.git 형식 + 생성 후 Deploy key 등록">
         <input
           id="app-git"
           className="input font-mono"
           required
           value={v.git_url}
           onChange={set('git_url')}
-          placeholder="ssh://git@100.100.199.123:2222/beripick/backend.git"
+          placeholder="https://github.com/me/app.git"
         />
       </Field>
 
@@ -160,7 +160,7 @@ export default function AppForm({ initial, mode = 'create', onSubmit, submitting
       )}
 
       <div className={`grid gap-4 ${isService ? 'sm:grid-cols-[1fr_180px]' : ''}`}>
-        <Field label="도메인" htmlFor="app-domains" hint="공백/쉼표로 구분 — 네이키드와 www 둘 다 넣으세요. CT100(NPM)에도 Proxy Host → 10.0.0.12:80 등록 필요">
+        <Field label="도메인" htmlFor="app-domains" hint="공백/쉼표로 구분 — 네이키드와 www 둘 다 넣으세요. DNS 가 이 서버(또는 앞단 프록시)를 가리켜야 합니다">
           <input id="app-domains" className="input font-mono" value={v.domains} onChange={set('domains')} placeholder="beripick.com www.beripick.com" />
         </Field>
         {isService && (

@@ -50,3 +50,23 @@ pub async fn call_long(
     )
     .await
 }
+
+/// 표준입력으로 비밀값을 넘기는 호출 (명령줄·로그에 남지 않음)
+pub async fn call_stdin(
+    state: &AppState,
+    args: &[&str],
+    stdin: &str,
+    log: &LogSink,
+) -> anyhow::Result<CmdOutput> {
+    let helper = state.cfg.helper_path.display().to_string();
+    let mut full: Vec<&str> = vec!["-n", &helper];
+    full.extend_from_slice(args);
+    run_ok(
+        state.exec.as_ref(),
+        CmdSpec::new("sudo", &full)
+            .timeout(60)
+            .stdin_data(format!("{stdin}\n")),
+        log,
+    )
+    .await
+}

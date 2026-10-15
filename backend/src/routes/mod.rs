@@ -3,12 +3,15 @@ pub mod backups;
 pub mod cron;
 pub mod databases;
 pub mod deployments;
+pub mod files;
 pub mod projects;
+pub mod site_admin;
 pub mod sites;
 pub mod system;
 pub mod ws;
 
 use axum::{
+    extract::DefaultBodyLimit,
     routing::{delete, get, post, put},
     Router,
 };
@@ -80,8 +83,37 @@ pub fn router(state: AppState) -> Router {
             post(databases::redis_assign).delete(databases::redis_release),
         )
         .route("/apps/{id}/redis/flush", post(databases::redis_flush))
-        // 사이트
-        .route("/sites", get(sites::list))
+        // 사이트 (CloudPanel 방식)
+        .route("/sites", get(sites::list).post(site_admin::create))
+        .route("/system/php", get(site_admin::php_list))
+        .route("/system/edge", get(site_admin::edge))
+        .route(
+            "/apps/{id}/site-user/password",
+            put(site_admin::set_password),
+        )
+        .route(
+            "/apps/{id}/ssl",
+            get(site_admin::ssl_get).delete(site_admin::ssl_delete),
+        )
+        .route(
+            "/apps/{id}/ssl/letsencrypt",
+            post(site_admin::ssl_letsencrypt),
+        )
+        .route("/apps/{id}/ssl/custom", post(site_admin::ssl_custom))
+        .route("/apps/{id}/ssl/force", put(site_admin::ssl_force))
+        .route("/apps/{id}/php", put(site_admin::php_update))
+        // 파일 관리자
+        .route("/apps/{id}/files", get(files::list))
+        .route(
+            "/apps/{id}/files/content",
+            get(files::read).put(files::write),
+        )
+        .route(
+            "/apps/{id}/files/upload",
+            post(files::upload).layer(DefaultBodyLimit::max(2 * 1024 * 1024 * 1024)),
+        )
+        .route("/apps/{id}/files/download", get(files::download))
+        .route("/apps/{id}/files/op", post(files::op))
         .route("/apps/{id}/nginx-logs", get(sites::logs))
         // 백업
         .route("/backups", get(backups::list))

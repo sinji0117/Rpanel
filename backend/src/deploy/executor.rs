@@ -1,5 +1,5 @@
 //! 부수효과(명령 실행·파일 쓰기)를 한 곳으로 모은 추상화.
-//! - `RealExecutor`: 실제 실행 (VM102 운영)
+//! - `RealExecutor`: 실제 실행 (운영)
 //! - `DryRunExecutor`: 무엇을 할지 로그만 남김 (개발·테스트·UI 시연)
 //!
 //! 명령은 항상 프로그램 + 인자 배열로 실행합니다. 사용자 정의 빌드/시작 명령만
@@ -32,6 +32,8 @@ pub struct CmdSpec {
     pub stream: bool,
     /// 로그에 표시할 명령 (민감정보 가리기용). None이면 program+args.
     pub display: Option<String>,
+    /// 표준입력으로 넘길 데이터 (비밀번호 등 — 명령줄에 남기지 않기 위해)
+    pub stdin: Option<Vec<u8>>,
 }
 
 impl CmdSpec {
@@ -44,7 +46,12 @@ impl CmdSpec {
             timeout: Duration::from_secs(600),
             stream: true,
             display: None,
+            stdin: None,
         }
+    }
+    pub fn stdin_data(mut self, data: impl Into<Vec<u8>>) -> Self {
+        self.stdin = Some(data.into());
+        self
     }
     pub fn cwd(mut self, p: impl Into<PathBuf>) -> Self {
         self.cwd = Some(p.into());
@@ -199,7 +206,11 @@ impl Executor for RealExecutor {
                 .env("NO_COLOR", "1")
                 .env("CI", "1")
                 .envs(self.pass_env.iter().map(|(k, v)| (k.as_str(), v.as_str())))
-                .stdin(Stdio::null())
+                .stdin(if spec.stdin.is_some() {
+                    Stdio::piped()
+                } else {
+                    Stdio::null()
+                })
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped())
                 .kill_on_drop(true);
@@ -212,6 +223,13 @@ impl Executor for RealExecutor {
             let mut child = cmd
                 .spawn()
                 .with_context(|| format!("실행 실패: {}", spec.program))?;
+            if let (Some(data), Some(mut sin)) = (spec.stdin.clone(), child.stdin.take()) {
+                tokio::spawn(async move {
+                    use tokio::io::AsyncWriteExt;
+                    let _ = sin.write_all(&data).await;
+                    let _ = sin.shutdown().await;
+                });
+            }
             let stdout = child.stdout.take().unwrap();
             let stderr = child.stderr.take().unwrap();
             let stream = spec.stream;

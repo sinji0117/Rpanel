@@ -89,7 +89,7 @@ test('환경변수 .env 붙여넣기·저장 + Deploy key·Webhook', async ({ pa
   backend.db.apps.push({
     id: 2, project_id: 1, name: 'Front', slug: 'front', kind: 'static', git_url: 'https://github.com/a/b.git', git_branch: 'main',
     root_dir: '', build_cmd: null, start_cmd: null, binary_name: null, output_dir: 'dist', port: null, api_proxy_port: 8100,
-    domains: 'beripick.com www.beripick.com', health_path: '/', status: 'idle', current_commit: null, current_release: null,
+    domains: 'beripick.com www.beripick.com', health_path: '/', status: 'idle', current_commit: null, current_release: null, source: 'git', ssl_mode: 'none',
   })
   backend.db.env[2] = []
   backend.db.seq = 10
@@ -121,7 +121,7 @@ function seededBackend() {
     id: 2, project_id: 1, name: 'Beripick API', slug: 'beripick-api', kind: 'rust', git_url: 'ssh://git@100.100.199.123:2222/b/api.git',
     git_branch: 'main', root_dir: '', build_cmd: null, start_cmd: null, binary_name: 'beripick-api', output_dir: 'dist', port: 8100,
     api_proxy_port: null, domains: 'api.beripick.com www.api.beripick.com', health_path: '/api/health', status: 'running',
-    current_commit: 'abc12345', current_release: 9, redis_db: null, backup_schedule: 'off', backup_keep: 7,
+    current_commit: 'abc12345', current_release: 9, redis_db: null, backup_schedule: 'off', backup_keep: 7, source: 'git', ssl_mode: 'none',
   })
   backend.db.env[2] = [{ key: 'RUST_LOG', value: 'info' }]
   backend.db.seq = 20
@@ -191,4 +191,60 @@ test('백업 → 목록, 크론 등록(잘못된 일정 거부), 사이트·Ngin
   await page.getByRole('link', { name: '백업' }).click()
   await expect(page.getByRole('heading', { name: '백업' })).toBeVisible()
   await expect(page.getByRole('cell', { name: 'Beripick API' }).first()).toBeVisible()
+})
+
+
+test('CloudPanel 방식 PHP 사이트 만들기 → 접속 정보 → 파일 편집·업로드 → SSL 인증서', async ({ page }) => {
+  const backend = createMockBackend()
+  backend.db.loggedIn = true
+  await backend.install(page)
+  await page.goto('/sites')
+  await page.getByRole('button', { name: '첫 사이트 만들기' }).click()
+  const dialog = page.getByRole('dialog', { name: '사이트 추가' })
+  await expect(dialog.getByRole('radio', { name: /PHP/ })).toHaveAttribute('aria-checked', 'true')
+  await dialog.getByLabel('도메인').fill('Shop.example.com www.shop.example.com')
+  await expect(dialog.getByLabel('사이트 유저')).toHaveValue('shop')
+  await expect(dialog.getByLabel('PHP 버전')).toHaveValue('8.3')
+  await dialog.getByRole('button', { name: '사이트 만들기' }).click()
+
+  const done = page.getByRole('dialog', { name: '사이트를 만들었습니다' })
+  await expect(done.getByTestId('generated-password')).toHaveText('Gen3ratedPassw0rd')
+  await expect(done.getByText('/home/shop/htdocs/shop.example.com')).toBeVisible()
+  await done.getByRole('button', { name: '사이트로 이동' }).click()
+
+  // 파일 관리자가 기본 탭
+  await expect(page.getByRole('tab', { name: '파일' })).toHaveAttribute('aria-selected', 'true')
+  await expect(page.getByRole('button', { name: '적용', exact: true })).toBeVisible()
+  await page.getByRole('button', { name: '· index.php', exact: true }).click()
+  const editor = page.getByLabel('파일 내용')
+  await expect(editor).toHaveValue('<?php echo "hi";')
+  await editor.fill('<?php echo "hello";')
+  await editor.press('Control+s')
+  await expect(page.getByText('저장했습니다')).toBeVisible()
+  expect(backend.db.files[Object.keys(backend.db.files)[0]]['htdocs/shop.example.com']['index.php']).toBe('<?php echo "hello";')
+  await page.getByRole('button', { name: '닫기' }).click()
+
+  await page.getByLabel('파일 업로드').setInputFiles({ name: 'about.html', mimeType: 'text/html', buffer: Buffer.from('<h1>about</h1>') })
+  await expect(page.getByRole('button', { name: '· about.html', exact: true })).toBeVisible()
+
+  // SSL: 잘못된 PEM → 오류, 올바른 PEM → 상태 표시
+  await page.getByRole('tab', { name: 'SSL' }).click()
+  await expect(page.getByText('HTTPS 없음')).toBeVisible()
+  await page.getByRole('button', { name: '인증서 붙여넣기' }).click()
+  await page.getByLabel('인증서 (체인 포함)').fill('-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----')
+  await page.getByLabel('개인키').fill('-----BEGIN PRIVATE KEY-----\nMIIE\n-----END PRIVATE KEY-----')
+  await page.getByRole('button', { name: '설치' }).click()
+  await expect(page.getByText('직접 올린 인증서')).toBeVisible()
+  await expect(page.getByText('Jan 14 00:00:00 2027 GMT')).toBeVisible()
+
+  // SSH · SFTP
+  await page.getByRole('tab', { name: 'SSH · SFTP' }).click()
+  await expect(page.getByText('sftp shop@')).toBeVisible()
+  await page.getByLabel('새 비밀번호 (10자 이상)').fill('new-site-password')
+  await page.getByRole('button', { name: '비밀번호 변경' }).click()
+  await expect(page.getByText('비밀번호를 바꿨습니다')).toBeVisible()
+
+  // PHP 탭
+  await page.getByRole('tab', { name: 'PHP', exact: true }).click()
+  await expect(page.getByLabel('버전')).toHaveValue('8.3')
 })

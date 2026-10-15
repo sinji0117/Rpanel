@@ -8,13 +8,14 @@ import { del, get, post, put } from '../lib/api'
 import { ago, duration, mergeEnv, parseDotenv, shortSha } from '../lib/format'
 import { useFetch, useInterval } from '../lib/useFetch'
 import { BackupTab, CronTab, DatabaseTab, NginxLogTab } from './AppTabs'
+import { FileManager, PhpTab, SiteSettings, SshTab, SslTab } from './SiteTabs'
 
 export default function AppDetail() {
   const { id } = useParams()
   const nav = useNavigate()
   const toast = useToast()
   const app = useFetch(() => get(`/apps/${id}`), [id])
-  const [tab, setTab] = useState('deployments')
+  const [tabState, setTab] = useState(null)
   const [deploying, setDeploying] = useState(false)
 
   useInterval(() => app.reload(true), 4000, app.data?.status === 'deploying')
@@ -22,7 +23,10 @@ export default function AppDetail() {
   if (app.loading) return <Spinner className="text-ink-400" />
   if (app.error) return <ErrorBox error={app.error} />
   const a = app.data
-  const isService = a.kind !== 'static'
+  const isService = a.kind === 'rust' || a.kind === 'node'
+  const isGit = a.source === 'git'
+  const isFiles = a.source === 'files'
+  const tab = tabState ?? (isGit ? 'deployments' : isFiles ? 'files' : 'settings')
 
   const deploy = async () => {
     setDeploying(true)
@@ -36,53 +40,105 @@ export default function AppDetail() {
     }
   }
 
-  const tabs = [
-    { id: 'deployments', label: '배포' },
-    { id: 'env', label: '환경변수' },
-    { id: 'db', label: '데이터베이스' },
-    { id: 'backups', label: '백업' },
-    ...(isService ? [{ id: 'cron', label: '크론' }, { id: 'logs', label: '서비스 로그' }] : []),
-    ...(a.domains ? [{ id: 'nginx', label: 'Nginx 로그' }] : []),
-    { id: 'git', label: 'Git · 웹훅' },
-    { id: 'settings', label: '설정' },
-  ]
+  const tabs = isGit
+    ? [
+        { id: 'deployments', label: '배포' },
+        { id: 'env', label: '환경변수' },
+        { id: 'db', label: '데이터베이스' },
+        { id: 'backups', label: '백업' },
+        ...(isService ? [{ id: 'cron', label: '크론' }, { id: 'logs', label: '서비스 로그' }] : []),
+        ...(a.domains ? [{ id: 'ssl', label: 'SSL' }, { id: 'nginx', label: 'Nginx 로그' }] : []),
+        { id: 'git', label: 'Git · 웹훅' },
+        { id: 'settings', label: '설정' },
+      ]
+    : isFiles
+      ? [
+          { id: 'files', label: '파일' },
+          { id: 'ssl', label: 'SSL' },
+          ...(a.kind === 'php' ? [{ id: 'php', label: 'PHP' }] : []),
+          { id: 'ssh', label: 'SSH · SFTP' },
+          { id: 'db', label: '데이터베이스' },
+          { id: 'backups', label: '백업' },
+          { id: 'cron', label: '크론' },
+          ...(a.kind !== 'static' ? [{ id: 'env', label: '환경변수' }] : []),
+          ...(a.kind === 'node' ? [{ id: 'logs', label: '서비스 로그' }] : []),
+          { id: 'nginx', label: 'Nginx 로그' },
+          { id: 'deployments', label: '적용 기록' },
+          { id: 'settings', label: '설정' },
+        ]
+      : [
+          { id: 'settings', label: '설정' },
+          { id: 'ssl', label: 'SSL' },
+          { id: 'nginx', label: 'Nginx 로그' },
+          { id: 'deployments', label: '적용 기록' },
+        ]
 
   return (
     <>
       <nav className="mb-3 text-xs text-ink-400">
-        <Link to="/projects" className="hover:text-ink-100">
-          프로젝트
-        </Link>{' '}
-        /{' '}
-        <Link to={`/projects/${a.project_id}`} className="hover:text-ink-100">
-          #{a.project_id}
-        </Link>{' '}
+        {a.project_id ? (
+          <>
+            <Link to="/projects" className="hover:text-ink-100">
+              프로젝트
+            </Link>{' '}
+            /{' '}
+            <Link to={`/projects/${a.project_id}`} className="hover:text-ink-100">
+              #{a.project_id}
+            </Link>
+          </>
+        ) : (
+          <Link to="/sites" className="hover:text-ink-100">
+            사이트
+          </Link>
+        )}{' '}
         / {a.slug}
       </nav>
       <PageHeader
         title={
           <span className="flex items-center gap-3">
-            {a.name} <KindBadge kind={a.kind} /> <StatusBadge status={a.status} />
+            {a.name} <KindBadge kind={a.kind} source={a.source} /> <StatusBadge status={a.status} />
           </span>
         }
         actions={
           <>
             {isService && <ServiceButtons app={a} onDone={() => app.reload(true)} />}
-            <button className="btn-primary" onClick={deploy} disabled={deploying || a.status === 'deploying'}>
-              {a.status === 'deploying' ? '배포 중…' : '배포'}
+            <button className="btn-primary" onClick={deploy} disabled={deploying || a.status === 'deploying'} title={isGit ? '' : '설정(Nginx·PHP·서비스)을 다시 적용합니다'}>
+              {a.status === 'deploying' ? (isGit ? '배포 중…' : '적용 중…') : isGit ? '배포' : '적용'}
             </button>
           </>
         }
       >
         <dl className="mt-3 flex flex-wrap gap-x-6 gap-y-1 text-xs text-ink-400">
-          <div>
-            <dt className="inline">브랜치 </dt>
-            <dd className="inline font-mono text-ink-300">{a.git_branch}</dd>
-          </div>
-          <div>
-            <dt className="inline">커밋 </dt>
-            <dd className="inline font-mono text-ink-300">{shortSha(a.current_commit)}</dd>
-          </div>
+          {isGit && (
+            <>
+              <div>
+                <dt className="inline">브랜치 </dt>
+                <dd className="inline font-mono text-ink-300">{a.git_branch}</dd>
+              </div>
+              <div>
+                <dt className="inline">커밋 </dt>
+                <dd className="inline font-mono text-ink-300">{shortSha(a.current_commit)}</dd>
+              </div>
+            </>
+          )}
+          {a.site_user && (
+            <div>
+              <dt className="inline">사이트 유저 </dt>
+              <dd className="inline font-mono text-ink-300">{a.site_user}</dd>
+            </div>
+          )}
+          {a.php_version && a.kind === 'php' && (
+            <div>
+              <dt className="inline">PHP </dt>
+              <dd className="inline font-mono text-ink-300">{a.php_version}</dd>
+            </div>
+          )}
+          {a.proxy_target && (
+            <div>
+              <dt className="inline">→ </dt>
+              <dd className="inline font-mono text-ink-300">{a.proxy_target}</dd>
+            </div>
+          )}
           {a.port && (
             <div>
               <dt className="inline">포트 </dt>
@@ -91,7 +147,7 @@ export default function AppDetail() {
           )}
           {a.domains &&
             a.domains.split(' ').map((d) => (
-              <a key={d} href={`https://${d}`} target="_blank" rel="noreferrer" className="font-mono text-signal hover:underline">
+              <a key={d} href={`${a.ssl_mode !== 'none' ? 'https' : 'http'}://${d}`} target="_blank" rel="noreferrer" className="font-mono text-signal hover:underline">
                 {d} ↗
               </a>
             ))}
@@ -107,7 +163,11 @@ export default function AppDetail() {
       {tab === 'nginx' && <NginxLogTab app={a} />}
       {tab === 'logs' && <JournalTab app={a} />}
       {tab === 'git' && <GitTab app={a} />}
-      {tab === 'settings' && <SettingsTab app={a} onSaved={(n) => app.setData(n)} />}
+      {tab === 'files' && <FileManager app={a} />}
+      {tab === 'ssl' && <SslTab app={a} onChanged={() => app.reload(true)} />}
+      {tab === 'php' && <PhpTab app={a} onSaved={(n) => app.setData(n)} />}
+      {tab === 'ssh' && <SshTab app={a} />}
+      {tab === 'settings' && (isGit ? <SettingsTab app={a} onSaved={(n) => app.setData(n)} /> : <SiteSettings app={a} onSaved={(n) => app.setData(n)} />)}
     </>
   )
 }
@@ -440,8 +500,7 @@ function GitTab({ app }) {
           {key.data?.public_key ? '키 다시 만들기' : 'Deploy key 만들기'}
         </button>
         <p className="mt-4 text-xs text-ink-400">
-          Git URL 예: <span className="font-mono">ssh://git@&lt;GitLab Tailscale IP&gt;:2222/그룹/저장소.git</span> — VM102에서 192.168.0.102로는 경로가 없으니
-          Tailscale IP를 쓰세요 (Vol.6 §9.10.0-A).
+          Git URL 예: <span className="font-mono">ssh://git@gitlab.example.com:2222/그룹/저장소.git</span> — 이 서버에서 접속할 수 있는 주소를 쓰세요.
         </p>
       </section>
 
@@ -483,8 +542,8 @@ function GitTab({ app }) {
           </div>
         )}
         <p className="mt-4 text-xs text-ink-400">
-          GitLab(ML110)이 이 패널에 닿아야 합니다: 패널은 Tailscale 전용이므로 GitLab 노드에서 서브넷 라우트를 받도록(
-          <span className="font-mono">--accept-routes</span>) 하거나, CI에서 <span className="font-mono">curl -X POST -H "X-Gitlab-Token: …"</span>로 호출하세요.
+          Git 서버가 이 패널 주소(8443)에 접속할 수 있어야 합니다. 닿지 않으면 CI 에서{' '}
+          <span className="font-mono">curl -X POST -H "X-Gitlab-Token: …"</span> 로 호출하세요.
         </p>
       </section>
     </div>

@@ -44,6 +44,8 @@ pub enum AppKind {
     Rust,
     Static,
     Node,
+    Php,
+    Proxy,
 }
 
 impl AppKind {
@@ -52,6 +54,8 @@ impl AppKind {
             AppKind::Rust => "rust",
             AppKind::Static => "static",
             AppKind::Node => "node",
+            AppKind::Php => "php",
+            AppKind::Proxy => "proxy",
         }
     }
     pub fn parse(s: &str) -> Option<Self> {
@@ -59,23 +63,55 @@ impl AppKind {
             "rust" => Some(Self::Rust),
             "static" => Some(Self::Static),
             "node" => Some(Self::Node),
+            "php" => Some(Self::Php),
+            "proxy" => Some(Self::Proxy),
             _ => None,
         }
     }
     /// systemd 서비스로 상주하는 앱인가 (포트 필요)
     pub fn is_service(&self) -> bool {
-        !matches!(self, AppKind::Static)
+        matches!(self, AppKind::Rust | AppKind::Node)
+    }
+}
+
+/// 앱 소스
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum Source {
+    /// Git 저장소에서 빌드
+    Git,
+    /// 사이트 유저 홈의 파일을 그대로 서비스 (CloudPanel 방식)
+    Files,
+    /// 파일 없음 (리버스 프록시)
+    None,
+}
+
+impl Source {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Source::Git => "git",
+            Source::Files => "files",
+            Source::None => "none",
+        }
+    }
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "git" => Some(Self::Git),
+            "files" => Some(Self::Files),
+            "none" => Some(Self::None),
+            _ => None,
+        }
     }
 }
 
 #[derive(Debug, Clone, Serialize, sqlx::FromRow)]
 pub struct App {
     pub id: u64,
-    pub project_id: u64,
+    pub project_id: Option<u64>,
     pub name: String,
     pub slug: String,
     pub kind: String,
-    pub git_url: String,
+    pub git_url: Option<String>,
     pub git_branch: String,
     pub root_dir: String,
     pub build_cmd: Option<String>,
@@ -98,6 +134,20 @@ pub struct App {
     pub backup_schedule: String,
     pub backup_keep: u32,
     pub backup_last_scheduled: Option<DateTime<Utc>>,
+    pub source: String,
+    pub site_user: Option<String>,
+    pub site_root: Option<String>,
+    pub web_root: String,
+    pub php_version: Option<String>,
+    pub php_memory_mb: u32,
+    pub php_upload_mb: u32,
+    pub php_max_exec: u32,
+    pub php_max_children: u32,
+    pub proxy_target: Option<String>,
+    /// none | letsencrypt | custom
+    pub ssl_mode: String,
+    pub force_https: bool,
+    pub client_max_body_mb: u32,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -105,6 +155,24 @@ pub struct App {
 impl App {
     pub fn kind(&self) -> AppKind {
         AppKind::parse(&self.kind).unwrap_or(AppKind::Static)
+    }
+    pub fn source(&self) -> Source {
+        Source::parse(&self.source).unwrap_or(Source::Git)
+    }
+    pub fn git_url(&self) -> &str {
+        self.git_url.as_deref().unwrap_or("")
+    }
+    /// Nginx 가 서비스하는 디렉토리 (파일 기반 사이트)
+    pub fn document_root(&self) -> Option<String> {
+        let root = self.site_root.as_deref()?;
+        Some(if self.web_root.is_empty() {
+            root.to_string()
+        } else {
+            format!("{root}/{}", self.web_root)
+        })
+    }
+    pub fn has_ssl(&self) -> bool {
+        self.ssl_mode == "letsencrypt" || self.ssl_mode == "custom"
     }
     pub fn domain_list(&self) -> Vec<&str> {
         self.domains.split_whitespace().collect()
@@ -142,7 +210,9 @@ pub struct AuditLog {
 }
 
 pub const APP_COLUMNS: &str = "id, project_id, name, slug, kind, git_url, git_branch, root_dir, build_cmd, start_cmd, \
-     binary_name, output_dir, port, api_proxy_port, domains, health_path, status, current_commit, current_release, webhook_token, redis_db, backup_schedule, backup_keep, backup_last_scheduled, created_at, updated_at";
+     binary_name, output_dir, port, api_proxy_port, domains, health_path, status, current_commit, current_release, webhook_token, redis_db, backup_schedule, backup_keep, backup_last_scheduled, source, site_user, site_root, web_root, php_version, \
+     php_memory_mb, php_upload_mb, php_max_exec, php_max_children, proxy_target, ssl_mode, force_https, client_max_body_mb, \
+     created_at, updated_at";
 
 pub const DEPLOY_COLUMNS: &str =
     "id, app_id, status, triggered_by, commit_sha, error, started_at, finished_at, created_at";

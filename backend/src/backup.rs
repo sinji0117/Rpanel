@@ -26,7 +26,8 @@ pub fn stamp_now() -> String {
 /// 파일 이름 검증 (helper 와 같은 규칙)
 pub fn valid_file_name(f: &str) -> bool {
     static RE: once_cell::sync::Lazy<regex::Regex> = once_cell::sync::Lazy::new(|| {
-        regex::Regex::new(r"^[0-9]{8}-[0-9]{6}-(db-[a-z][a-z0-9_]+\.sql|data\.tar)\.gz$").unwrap()
+        regex::Regex::new(r"^[0-9]{8}-[0-9]{6}-(db-[a-z][a-z0-9_]+\.sql|data\.tar|files\.tar)\.gz$")
+            .unwrap()
     });
     RE.is_match(f)
 }
@@ -61,7 +62,13 @@ pub async fn start(state: &AppState, app: &App, trigger: &str) -> AppResult<Vec<
         let file = format!("{stamp}-db-{}.sql.gz", db.name);
         jobs.push(("db", db.name.clone(), file));
     }
-    if app.kind().is_service() {
+    if app.site_user.is_some() {
+        jobs.push((
+            "files",
+            "htdocs".to_string(),
+            format!("{stamp}-files.tar.gz"),
+        ));
+    } else if app.kind().is_service() {
         jobs.push(("data", "data".to_string(), format!("{stamp}-data.tar.gz")));
     }
     if jobs.is_empty() {
@@ -104,6 +111,10 @@ pub async fn start(state: &AppState, app: &App, trigger: &str) -> AppResult<Vec<
                         3600,
                     )
                     .await
+                }
+                "files" => {
+                    helper::call_long(&state, &["backup-files", &app.slug, &stamp], &log, 3600)
+                        .await
                 }
                 _ => {
                     helper::call_long(&state, &["backup-data", &app.slug, &stamp], &log, 3600).await
@@ -255,6 +266,7 @@ mod tests {
     fn file_names() {
         assert!(valid_file_name("20261013-030000-db-beripick_api.sql.gz"));
         assert!(valid_file_name("20261013-030000-data.tar.gz"));
+        assert!(valid_file_name("20261013-030000-files.tar.gz"));
         assert!(!valid_file_name("../etc/passwd"));
         assert!(!valid_file_name("20261013-030000-db-x.sql.gz/../../a"));
         assert!(!valid_file_name("20261013-030000-other.tar.gz"));

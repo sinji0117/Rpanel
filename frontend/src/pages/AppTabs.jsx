@@ -222,7 +222,7 @@ export function BackupTab({ app, onChanged }) {
     <div className="space-y-4">
       <Section
         title="백업"
-        desc={`연결된 DB 덤프(.sql.gz)와 ${app.kind === 'static' ? '' : '앱 data 디렉토리(.tar.gz)를 '}/var/lib/rpanel/backups/${app.slug}/ 에 저장합니다. NAS가 이 폴더를 가져가도록(Vol.26) 해두면 오프사이트 백업이 됩니다.`}
+        desc={`연결된 DB 덤프(.sql.gz)와 ${app.site_user ? '사이트 파일(htdocs, .tar.gz)을 ' : app.kind === 'rust' || app.kind === 'node' ? '앱 data 디렉토리(.tar.gz)를 ' : ''}/var/lib/rpanel/backups/${app.slug}/ 에 저장합니다. NAS·다른 서버가 이 폴더를 가져가도록(rsync 등) 해두면 오프사이트 백업이 됩니다.`}
         actions={
           <button
             className="btn-primary"
@@ -297,7 +297,7 @@ export function BackupTable({ rows, loading, onChanged, showApp = false }) {
             <tr key={b.id} className="hover:bg-ink-850">
               {showApp && <td className="px-5 py-3 font-medium">{b.app_name}</td>}
               <td className="px-5 py-3">
-                <span className="kbd mr-2">{b.kind === 'db' ? 'DB' : 'data'}</span>
+                <span className="kbd mr-2">{b.kind === 'db' ? 'DB' : b.kind === 'files' ? '파일' : 'data'}</span>
                 <span className="font-mono text-xs">{b.target}</span>
                 {b.trigger_by === 'schedule' && <span className="ml-2 text-[11px] text-ink-400">예약</span>}
                 {b.error && <p className="mt-1 max-w-md text-xs text-red-300">{b.error}</p>}
@@ -321,7 +321,7 @@ export function BackupTable({ rows, loading, onChanged, showApp = false }) {
                     <button
                       className="btn-ghost mr-1.5 px-2.5 py-1 text-xs"
                       onClick={async () => {
-                        const what = b.kind === 'db' ? `DB ${b.target} 의 현재 데이터를 이 백업으로 덮어씁니다` : 'data 디렉토리를 이 백업으로 교체합니다 (서비스 잠시 중지)'
+                        const what = b.kind === 'db' ? `DB ${b.target} 의 현재 데이터를 이 백업으로 덮어씁니다` : b.kind === 'files' ? '사이트 파일(htdocs)을 이 백업으로 통째로 교체합니다' : 'data 디렉토리를 이 백업으로 교체합니다 (서비스 잠시 중지)'
                         if (!window.confirm(`${what}. 계속할까요?`)) return
                         try {
                           await post(`/backups/${b.id}/restore`)

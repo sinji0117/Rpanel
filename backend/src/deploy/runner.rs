@@ -19,7 +19,7 @@ use super::{
     templates::{self, AppPaths},
 };
 use crate::{
-    models::{App, AppKind, EnvVar, APP_COLUMNS},
+    models::{App, AppKind, EnvVar, Source, APP_COLUMNS},
     state::AppState,
 };
 
@@ -95,6 +95,7 @@ async fn finish(
         Err(e) => ("failed", Some(format!("{e:#}"))),
     };
     match &result {
+        Ok(sha) if sha.is_empty() => log.line("✔ 적용 완료").await,
         Ok(sha) => log.line(format!("✔ 배포 완료 ({})", short(sha))).await,
         Err(e) => log.line(format!("✘ {status}: {e:#}")).await,
     }
@@ -106,7 +107,7 @@ async fn finish(
     .bind(status)
     .bind(error.as_deref().map(|e| e.chars().take(1000).collect::<String>()))
     .bind(log.contents())
-    .bind(result.as_ref().ok())
+    .bind(result.as_ref().ok().filter(|s| !s.is_empty()))
     .bind(deploy_id)
     .execute(db)
     .await
@@ -206,6 +207,10 @@ async fn run(
         .execute(&state.db)
         .await?;
 
+    if app.source() != Source::Git {
+        return apply_site(state, deploy_id, &app, &vars, &paths, log).await;
+    }
+
     // 1) 디렉토리
     log.step("작업 디렉토리 준비").await;
     for d in [
@@ -231,7 +236,7 @@ async fn run(
                 &paths,
                 CmdSpec::new(
                     "git",
-                    &["-C", &repo, "remote", "set-url", "origin", &app.git_url],
+                    &["-C", &repo, "remote", "set-url", "origin", app.git_url()],
                 ),
             ),
             log,
@@ -299,7 +304,7 @@ async fn run(
                         "--branch",
                         &app.git_branch,
                         "--",
-                        &app.git_url,
+                        app.git_url(),
                         &repo,
                     ],
                 )
@@ -338,6 +343,9 @@ async fn run(
     let release_dir: PathBuf;
 
     match kind {
+        AppKind::Php | AppKind::Proxy => {
+            bail!("Git 배포는 rust / static / node 만 지원합니다")
+        }
         AppKind::Rust => {
             let cmd = app
                 .build_cmd
@@ -509,23 +517,7 @@ async fn run(
         }
 
         // 5) Nginx
-        log.step("Nginx 사이트").await;
-        match templates::nginx_site(&templates::SiteInput {
-            app: &app,
-            paths: &paths,
-            trusted_proxy: &state.cfg.trusted_proxy,
-        }) {
-            Some(conf) => {
-                exec.write_file(&paths.staging_site, &conf, 0o644, log)
-                    .await?;
-                helper::call(state, &["install-site", &app.slug], log).await?;
-            }
-            None => {
-                log.line("도메인이 없어 Nginx 사이트를 만들지 않습니다 (내부 포트로만 접근 가능)")
-                    .await;
-                helper::call(state, &["remove-site", &app.slug], log).await?;
-            }
-        }
+        apply_nginx(state, &app, log).await?;
         Ok(())
     }
     .await;
@@ -603,6 +595,143 @@ async fn revert(
             log.line("이전 릴리스가 정상 동작 중입니다").await;
         }
     }
+}
+
+/// Nginx 사이트 설정 생성 → helper 가 검증·설치 (도메인 없으면 제거)
+pub async fn apply_nginx(state: &AppState, app: &App, log: &LogSink) -> anyhow::Result<()> {
+    let paths = AppPaths::new(&state.cfg.data_dir, &app.slug);
+    log.step("Nginx 사이트").await;
+    match templates::nginx_site(&templates::SiteInput {
+        app,
+        paths: &paths,
+        trusted_proxy: &state.cfg.trusted_proxy,
+        ipv6: state.cfg.ipv6,
+    }) {
+        Some(conf) => {
+            state
+                .exec
+                .write_file(&paths.staging_site, &conf, 0o644, log)
+                .await?;
+            helper::call(state, &["install-site", &app.slug], log).await?;
+        }
+        None => {
+            log.line("도메인이 없어 Nginx 사이트를 만들지 않습니다 (내부 포트로만 접근 가능)")
+                .await;
+            helper::call(state, &["remove-site", &app.slug], log).await?;
+        }
+    }
+    Ok(())
+}
+
+/// PHP-FPM 풀 생성 → helper 가 검증·설치하고 php-fpm reload
+pub async fn apply_php(
+    state: &AppState,
+    app: &App,
+    vars: &[EnvVar],
+    log: &LogSink,
+) -> anyhow::Result<()> {
+    let version = app
+        .php_version
+        .clone()
+        .ok_or_else(|| anyhow!("PHP 버전이 지정되지 않았습니다"))?;
+    log.step(&format!("PHP {version} FPM 풀")).await;
+    let (pool, skipped) = templates::php_pool(app, vars)?;
+    if !skipped.is_empty() {
+        log.line(format!(
+            "※ PHP 환경변수에 넣을 수 없는 문자(\" \\ $ `)가 있어 건너뛴 변수: {}",
+            skipped.join(", ")
+        ))
+        .await;
+    }
+    let path = state
+        .cfg
+        .data_dir
+        .join("staging")
+        .join(format!("{}.php.conf", app.slug));
+    state.exec.write_file(&path, &pool, 0o644, log).await?;
+    helper::call(state, &["install-php-pool", &app.slug, &version], log).await?;
+    Ok(())
+}
+
+/// 파일 기반 사이트 · 리버스 프록시: 빌드 없이 설정만 적용
+async fn apply_site(
+    state: &AppState,
+    deploy_id: u64,
+    app: &App,
+    vars: &[EnvVar],
+    paths: &AppPaths,
+    log: &LogSink,
+) -> anyhow::Result<String> {
+    let exec = state.exec.as_ref();
+    let kind = app.kind();
+    exec.mkdirs(&state.cfg.data_dir.join("staging"), log)
+        .await?;
+    exec.mkdirs(&paths.app_dir, log).await?;
+
+    if app.source() == Source::Files {
+        let user = app
+            .site_user
+            .as_deref()
+            .ok_or_else(|| anyhow!("사이트 유저가 없습니다"))?;
+        log.line(format!(
+            "사이트 유저 {user} · 문서 루트 {}",
+            app.document_root().unwrap_or_default()
+        ))
+        .await;
+        // 크론·서비스가 함께 쓰는 env 파일
+        exec.write_file(
+            &paths.env_file,
+            &templates::env_file(vars, app.port),
+            0o600,
+            log,
+        )
+        .await?;
+        if let Some(cmd) = app.build_cmd.as_deref().filter(|c| !c.trim().is_empty()) {
+            log.step("빌드 명령 (사이트 유저 권한)").await;
+            crate::files::run_command(state, app, cmd, vars, log).await?;
+        }
+    }
+
+    match kind {
+        AppKind::Php => apply_php(state, app, vars, log).await?,
+        AppKind::Node => {
+            log.step("서비스").await;
+            let unit = templates::systemd_unit(&templates::UnitInput {
+                app,
+                paths,
+                run_user: RUN_USER,
+                path_env: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+            })?;
+            exec.write_file(&paths.staging_unit, &unit, 0o644, log)
+                .await?;
+            helper::call(state, &["install-unit", &app.slug], log).await?;
+            helper::call(state, &["svc", "restart", &app.slug], log).await?;
+            log.step("헬스체크").await;
+            if let Err(e) = health_check(state, app, log).await {
+                if let Ok(j) = helper::call_quiet(state, &["journal", &app.slug, "30"]).await {
+                    log.line("── 최근 서비스 로그 (journalctl) ──").await;
+                    for l in j.stdout.lines() {
+                        log.line(l).await;
+                    }
+                }
+                return Err(
+                    e.context("서비스가 응답하지 않습니다. 시작 명령과 PORT 사용을 확인하세요")
+                );
+            }
+        }
+        _ => {}
+    }
+
+    apply_nginx(state, app, log).await?;
+
+    sqlx::query(
+        "UPDATE apps SET status = 'running', current_commit = NULL, current_release = ? WHERE id = ?",
+    )
+    .bind(deploy_id)
+    .bind(app.id)
+    .execute(&state.db)
+    .await?;
+    Ok(String::new())
 }
 
 async fn health_check(state: &AppState, app: &App, log: &LogSink) -> anyhow::Result<()> {

@@ -1,4 +1,4 @@
-//! Rpanel — VM102(Ubuntu 24.04)용 셀프호스팅 배포 패널
+//! Rpanel — 셀프호스팅 웹 호스팅 패널 (Ubuntu 24.04)
 //!
 //! Rust(Axum/Tokio) + SQLx(MySQL/MariaDB) + Redis + JWT(액세스) & Redis 리프레시 세션 + WebSocket
 
@@ -8,6 +8,7 @@ pub mod backup;
 pub mod config;
 pub mod deploy;
 pub mod error;
+pub mod files;
 pub mod metrics;
 pub mod models;
 pub mod routes;

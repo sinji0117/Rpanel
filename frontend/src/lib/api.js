@@ -146,3 +146,31 @@ export async function download(path, filename) {
   a.remove()
   setTimeout(() => URL.revokeObjectURL(url), 1000)
 }
+
+/** 파일 업로드 (진행률). path 는 사이트 유저 홈 기준 "폴더/파일명" */
+export function uploadFile(appId, path, file, onProgress) {
+  const send = () =>
+    new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest()
+      xhr.open('POST', `/api/apps/${appId}/files/upload?path=${encodeURIComponent(path)}`)
+      xhr.setRequestHeader('X-Requested-With', 'rpanel')
+      if (accessToken) xhr.setRequestHeader('Authorization', `Bearer ${accessToken}`)
+      xhr.upload.onprogress = (e) => e.lengthComputable && onProgress?.(e.loaded / e.total)
+      xhr.onload = () => {
+        let data = null
+        try {
+          data = JSON.parse(xhr.responseText)
+        } catch {
+          /* ignore */
+        }
+        if (xhr.status >= 200 && xhr.status < 300) resolve(data)
+        else reject(new ApiError(xhr.status, data?.message || `업로드 실패 (${xhr.status})`))
+      }
+      xhr.onerror = () => reject(new ApiError(0, '업로드 중 연결이 끊겼습니다'))
+      xhr.send(file)
+    })
+  return send().catch(async (e) => {
+    if (e.status === 401 && (await refreshSession())) return send()
+    throw e
+  })
+}

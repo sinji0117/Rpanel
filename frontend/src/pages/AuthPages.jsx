@@ -15,7 +15,7 @@ function Shell({ title, subtitle, children }) {
           {subtitle && <p className="mt-1 text-sm text-ink-400">{subtitle}</p>}
           <div className="mt-6">{children}</div>
         </div>
-        <p className="mt-6 text-center text-xs text-ink-600">VM102 · app-server</p>
+        <p className="mt-6 text-center text-xs text-ink-600">Rpanel — self-hosted web panel</p>
       </div>
     </div>
   )

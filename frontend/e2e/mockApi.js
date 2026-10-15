@@ -14,6 +14,8 @@ export function createMockBackend({ needsSetup = false } = {}) {
     dbs: [],
     backups: [],
     crons: [],
+    files: {},
+    ssl: {},
     seq: 1,
   }
   const id = () => db.seq++
@@ -27,7 +29,12 @@ export function createMockBackend({ needsSetup = false } = {}) {
     const url = new URL(req.url())
     const path = url.pathname.replace(/^\/api/, '')
     const method = req.method()
-    const body = req.postData() ? JSON.parse(req.postData()) : undefined
+    let body
+    try {
+      body = req.postData() ? JSON.parse(req.postData()) : undefined
+    } catch {
+      body = undefined // 파일 업로드 (원본 바이트)
+    }
     const authed = req.headers()['authorization'] === 'Bearer test-access-token'
 
     // ── auth ──
@@ -96,6 +103,8 @@ export function createMockBackend({ needsSetup = false } = {}) {
         slug: body.slug || body.name.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
         port: body.kind === 'static' ? null : 8100 + db.apps.length,
         status: 'idle',
+        source: 'git',
+        ssl_mode: 'none',
         current_commit: null,
         current_release: null,
         created_at: now(),
@@ -106,10 +115,71 @@ export function createMockBackend({ needsSetup = false } = {}) {
       return json(route, 201, a)
     }
 
+    if (path === '/system/php') return json(route, 200, { versions: ['8.2', '8.3'] })
+    if (path === '/system/edge') return json(route, 200, { edge_mode: 'direct', trusted_proxy: '', ssl_available: true })
+    if (path === '/sites' && method === 'POST') {
+      const domains = body.domains.trim().toLowerCase().split(/[\s,]+/)
+      if (db.apps.some((a) => (a.domains || '').split(' ').some((d) => domains.includes(d))))
+        return json(route, 409, { error: 'conflict', message: `도메인 ${domains[0]} 은(는) 이미 사용 중입니다` })
+      const kind = body.type === 'html' ? 'static' : body.type
+      const user = body.type === 'proxy' ? null : body.site_user || domains[0].split('.')[0]
+      const a = {
+        id: id(), project_id: null, name: domains[0], slug: domains[0].replace(/\./g, '-'), kind,
+        source: body.type === 'proxy' ? 'none' : 'files', git_url: null, git_branch: 'main', domains: domains.join(' '),
+        site_user: user, site_root: user ? `/home/${user}/htdocs/${domains[0]}` : null, web_root: '',
+        php_version: body.php_version || null, php_memory_mb: 256, php_upload_mb: 64, php_max_exec: 60, php_max_children: 10,
+        proxy_target: body.proxy_target || null, start_cmd: body.start_cmd || null, build_cmd: null, health_path: '/',
+        port: kind === 'node' ? 8150 : null, status: 'running', ssl_mode: 'none', force_https: false, client_max_body_mb: 64,
+        current_release: 1, redis_db: null, backup_schedule: 'off', backup_keep: 7,
+      }
+      db.apps.push(a)
+      db.env[a.id] = []
+      db.files[a.id] = { [`htdocs/${domains[0]}`]: { 'index.php': '<?php echo "hi";' } }
+      return json(route, 201, { app: a, deployment_id: null, site_user: user, generated_password: body.password ? null : 'Gen3ratedPassw0rd' })
+    }
+
     // ── apps ──
     if (path === '/apps') {
       const pid = Number(url.searchParams.get('project_id'))
       return json(route, 200, db.apps.filter((a) => !pid || a.project_id === pid))
+    }
+    m = path.match(/^\/apps\/(\d+)\/(files\/content|files\/op|files\/upload|ssl\/custom|ssl\/letsencrypt|ssl\/force|site-user\/password)$/)
+    if (m) {
+      const a = db.apps.find((x) => x.id === Number(m[1]))
+      const tree = (db.files[a.id] ||= {})
+      const split = (p) => [p.slice(0, p.lastIndexOf('/')), p.slice(p.lastIndexOf('/') + 1)]
+      if (m[2] === 'files/content' && method === 'GET') {
+        const [d, n] = split(url.searchParams.get('path'))
+        const c = tree[d]?.[n]
+        return c == null ? json(route, 400, { message: '없는 경로입니다' }) : json(route, 200, { path: url.searchParams.get('path'), content: c, mode: '0644' })
+      }
+      if (m[2] === 'files/content' && method === 'PUT') {
+        const [d, n] = split(body.path)
+        ;(tree[d] ||= {})[n] = body.content
+        return json(route, 200, { ok: true, bytes: String(body.content.length) })
+      }
+      if (m[2] === 'files/upload') {
+        const [d, n] = split(url.searchParams.get('path'))
+        ;(tree[d] ||= {})[n] = req.postData() || ''
+        return json(route, 200, { ok: true, bytes: (req.postData() || '').length })
+      }
+      if (m[2] === 'files/op') {
+        if (body.op === 'mkdir') tree[body.path] = {}
+        if (body.op === 'rm') {
+          const [d, n] = split(body.path)
+          delete tree[d]?.[n]
+          delete tree[body.path]
+        }
+        return json(route, 200, { ok: true })
+      }
+      if (m[2] === 'ssl/custom') {
+        if (!body.certificate.includes('BEGIN CERTIFICATE')) return json(route, 400, { message: 'PEM 형식의 인증서와 개인키를 붙여넣으세요' })
+        Object.assign(a, { ssl_mode: 'custom', force_https: body.force_https })
+        return json(route, 200, { ok: true })
+      }
+      if (m[2] === 'ssl/letsencrypt') return json(route, 400, { message: "Let's Encrypt 발급 실패 — 도메인 DNS 가 이 서버를 가리키는지 확인하세요" })
+      if (m[2] === 'site-user/password') return body.password.length < 10 ? json(route, 400, { message: '비밀번호는 10자 이상이어야 합니다' }) : json(route, 200, { ok: true })
+      return json(route, 200, { ok: true })
     }
     m = path.match(/^\/apps\/(\d+)(\/[\w-]+)?$/)
     if (m) {
@@ -125,6 +195,15 @@ export function createMockBackend({ needsSetup = false } = {}) {
         ...db.dbs.filter((d) => d.app_id === a.id).map((d) => ({ key: d.env_key, value: `mysql://${d.username}:secretpw@127.0.0.1:3306/${d.name}`, source: `MariaDB · ${d.name}` })),
         ...(a.redis_db != null ? [{ key: 'REDIS_URL', value: `redis://:pw@127.0.0.1:6379/${a.redis_db}`, source: `Redis · DB ${a.redis_db}` }] : []),
       ]
+      if (sub === '/files') {
+        const dir = url.searchParams.get('path') || ''
+        const tree = db.files[a.id] || {}
+        const entries = Object.entries(tree[dir] || {}).map(([name, content]) => ({ name, kind: 'file', size: content.length, mode: '0644', mtime: 1792100000 }))
+        for (const k of Object.keys(tree)) if (k.startsWith(dir + '/') && !k.slice(dir.length + 1).includes('/')) entries.unshift({ name: k.slice(dir.length + 1), kind: 'dir', size: 0, mode: '0750', mtime: 1792100000 })
+        return json(route, 200, { path: dir, entries, root: `htdocs/${a.domains.split(' ')[0]}`, user: a.site_user })
+      }
+      if (sub === '/content' || sub === '/files-content') return json(route, 404, {})
+      if (sub === '/ssl' && method === 'GET') return json(route, 200, { mode: a.ssl_mode, force_https: a.force_https, certificates: a.ssl_mode === 'none' ? [] : [{ path: 'x', not_after: 'Jan 14 00:00:00 2027 GMT', issuer: 'CN = Test CA', domains: a.domains.split(' ') }], edge_mode: 'direct', domains: a.domains.split(' ') })
       if (sub === '/env' && method === 'GET') return json(route, 200, { vars: db.env[a.id], managed: managed() })
       if (sub === '/databases' && method === 'GET')
         return json(route, 200, {

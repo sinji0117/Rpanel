@@ -1,47 +1,62 @@
 #!/bin/bash
-# Rpanel 원스톱 설치 — Ubuntu 24.04 를 막 설치한 서버(VM102)에서 그대로 실행합니다.
+# Rpanel 설치 — Ubuntu 24.04 를 막 설치한 서버에서 이 패널 하나만 설치하면 웹 호스팅이 동작합니다.
+# (Nginx · PHP-FPM · MariaDB · Redis · Node.js · Let's Encrypt 를 함께 설치·설정)
 #
-#   한 줄 설치 (OS 설치 직후):
+#   한 줄 설치:
 #     curl -fsSL https://raw.githubusercontent.com/sinji0117/Rpanel/main/deploy/bootstrap.sh | sudo bash
 #
 #   소스를 직접 받은 경우:
 #     sudo ./deploy/install.sh [옵션]
 #
-#   옵션
-#     --no-firewall   ufw 를 건드리지 않음 (직접 관리할 때)
-#     --no-build      빌드 생략, 이미 빌드된 backend/target/release, frontend/dist 사용
-#     --dry-run-mode  패널을 RPANEL_EXEC_MODE=dry-run 으로 시작 (처음 둘러보기용, 나중에 env 에서 real 로)
+# 옵션
+#   --mode=standalone        (기본) 이 서버가 80/443 을 직접 받고 SSL 도 여기서 발급 (Let's Encrypt)
+#   --mode=proxy             앞단 리버스 프록시(Nginx Proxy Manager 등)가 SSL 을 처리하고 :80 으로 전달
+#   --trusted-proxy=IP       proxy 모드에서 앞단 프록시 IP (실제 접속자 IP 복원 + 80 포트 허용 대상)
+#   --allow-from=CIDR,...    SSH·패널(8443) 접속 허용 대역 (기본: 어디서나)
+#   --php=8.3[,8.2,7.4]      설치할 PHP 버전 (기본 8.3, 8.3 외 버전은 ondrej/php PPA 사용)
+#   --no-php                 PHP 를 설치하지 않음
+#   --panel-domain=DOMAIN    패널 접속 도메인 (standalone 에서 Let's Encrypt 인증서 발급, --email 필요)
+#   --email=EMAIL            Let's Encrypt 계정 이메일
+#   --no-firewall            ufw 를 건드리지 않음
+#   --no-ssh-password        사이트 유저의 SSH/SFTP 비밀번호 로그인을 켜지 않음 (키만)
+#   --dry-run-mode           패널을 RPANEL_EXEC_MODE=dry-run 으로 시작 (둘러보기용)
+#   --no-build               빌드 생략 (이미 빌드된 결과물 사용)
 #
-# 하는 일 (여러 번 실행해도 안전 — 업데이트도 이 스크립트로)
-#   1. 기본 패키지 + 시간대(Asia/Seoul) + qemu-guest-agent
-#   2. Nginx · MariaDB 10.11 · Redis 7 설치/보안 설정 (127.0.0.1 바인딩, Redis 비밀번호, 익명 계정 제거)
-#   3. Node.js 22 (NodeSource) — 프런트·Node 앱 빌드용
-#   4. 패널용 DB·계정, Redis 비밀번호, JWT 비밀키 자동 생성 → /etc/rpanel/rpanel.env
-#   5. rpanel / rpanel-app 사용자, Rust 툴체인(rpanel 사용자), 패널 빌드·설치
-#   6. 권한 helper + sudoers, systemd 서비스, Nginx :9000 패널 사이트
-#   7. ufw: SSH·패널은 Tailscale(100.64.0.0/10)·내부망(10.0.0.0/24)만, 80 은 CT100(10.0.0.10)만
+# 여러 번 실행해도 안전합니다 (비밀값 유지). 업데이트: sudo rpanel-update
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BUILD=1
 FIREWALL=1
+SSH_PASSWORD=1
 EXEC_MODE=real
+MODE_ARG=""
+PROXY_IP="${RPANEL_TRUSTED_PROXY:-}"
+ALLOW_FROM=""
+PHP_VERSIONS="8.3"
+PANEL_DOMAIN=""
+EMAIL=""
 for arg in "$@"; do
   case "$arg" in
+    --mode=*) MODE_ARG="${arg#*=}" ;;
+    --trusted-proxy=*) PROXY_IP="${arg#*=}" ;;
+    --allow-from=*) ALLOW_FROM="${arg#*=}" ;;
+    --php=*) PHP_VERSIONS="${arg#*=}" ;;
+    --no-php) PHP_VERSIONS="" ;;
+    --panel-domain=*) PANEL_DOMAIN="${arg#*=}" ;;
+    --email=*) EMAIL="${arg#*=}" ;;
     --no-build) BUILD=0 ;;
     --no-firewall) FIREWALL=0 ;;
+    --no-ssh-password) SSH_PASSWORD=0 ;;
     --dry-run-mode) EXEC_MODE=dry-run ;;
-    -h|--help) sed -n '2,25p' "$0"; exit 0 ;;
-    *) echo "알 수 없는 옵션: $arg" >&2; exit 2 ;;
+    -h|--help) sed -n '2,29p' "$0"; exit 0 ;;
+    *) echo "알 수 없는 옵션: $arg  (--help)" >&2; exit 2 ;;
   esac
 done
 
-# Vol.3/Vol.6 네트워크 값 (필요하면 환경변수로 덮어쓰기)
-INTERNAL_NET="${RPANEL_INTERNAL_NET:-10.0.0.0/24}"
-TAILSCALE_NET="${RPANEL_TAILSCALE_NET:-100.64.0.0/10}"
-PROXY_IP="${RPANEL_TRUSTED_PROXY:-10.0.0.10}"
-PANEL_PORT=9000
-
+PANEL_PORT=8443
+# IPv6 가 꺼진 서버(일부 VM·컨테이너)에서는 [::] 리스닝을 쓰지 않음
+if [[ -s /proc/net/if_inet6 ]]; then IPV6=true; else IPV6=false; fi
 say()  { printf '\n\033[1;32m▶ %s\033[0m\n' "$*"; }
 info() { printf '  %s\n' "$*"; }
 warn() { printf '\033[1;33m! %s\033[0m\n' "$*"; }
@@ -57,28 +72,51 @@ envget() { [[ -f $ENVF ]] && grep -E "^$1=" "$ENVF" | tail -n1 | cut -d= -f2- ||
 genpw() { openssl rand -hex 24; }
 mem_mb() { awk '/MemTotal/ {print int($2/1024)}' /proc/meminfo; }
 
+# 모드: 인자 > 기존 설정 > standalone
+EDGE="${MODE_ARG:-}"
+if [[ -z "$EDGE" ]]; then
+  case "$(envget RPANEL_EDGE_MODE)" in proxy) EDGE=proxy ;; *) EDGE=standalone ;; esac
+fi
+[[ "$EDGE" == standalone || "$EDGE" == proxy ]] || die "--mode 는 standalone 또는 proxy"
+[[ -n "$PROXY_IP" ]] || PROXY_IP="$(envget RPANEL_TRUSTED_PROXY)"
+if [[ "$EDGE" == proxy ]]; then
+  [[ -n "$PROXY_IP" ]] || die "proxy 모드에는 --trusted-proxy=<앞단 프록시 IP> 가 필요합니다"
+  [[ "$PROXY_IP" =~ ^[0-9a-fA-F.:/]+$ ]] || die "--trusted-proxy 형식 오류: $PROXY_IP"
+else
+  PROXY_IP=""
+fi
+[[ -z "$ALLOW_FROM" ]] || [[ "$ALLOW_FROM" =~ ^[0-9a-fA-F.:/,]+$ ]] || die "--allow-from 형식 오류 (예: 10.0.0.0/24,100.64.0.0/10)"
+[[ -z "$PHP_VERSIONS" ]] || [[ "$PHP_VERSIONS" =~ ^([0-9]\.[0-9])(,[0-9]\.[0-9])*$ ]] || die "--php 형식 오류 (예: 8.3,7.4)"
+[[ -z "$PANEL_DOMAIN" ]] || [[ "$PANEL_DOMAIN" =~ ^([a-z0-9]([a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}$ ]] || die "--panel-domain 형식 오류"
+[[ -z "$PANEL_DOMAIN" || -n "$EMAIL" ]] || die "--panel-domain 에는 --email 이 필요합니다"
+info "설치 모드: $EDGE${PROXY_IP:+ (앞단 프록시 $PROXY_IP)}"
+
 # ───────────────────────── 1. 기본 ─────────────────────────
-say "1/7 기본 패키지"
+say "1/9 기본 패키지"
 apt-get update -q >/dev/null
 apt-get install -y -q curl ca-certificates gnupg git rsync openssl sudo build-essential pkg-config libssl-dev \
-  openssh-client nginx mariadb-server mariadb-client redis-server ufw qemu-guest-agent >/dev/null
-timedatectl set-timezone Asia/Seoul 2>/dev/null || true
+  openssh-client openssh-server nginx mariadb-server mariadb-client redis-server ufw certbot unzip zip >/dev/null
+# 가상머신이면 게스트 에이전트 (없어도 무관)
+apt-get install -y -q qemu-guest-agent >/dev/null 2>&1 || true
+# 시간대가 UTC 기본값이면 서울로 (이미 정했다면 유지)
+[[ "$(timedatectl show -p Timezone --value 2>/dev/null || echo UTC)" == "Etc/UTC" || "$(timedatectl show -p Timezone --value 2>/dev/null || echo UTC)" == "UTC" ]] \
+  && timedatectl set-timezone "${RPANEL_TZ:-Asia/Seoul}" 2>/dev/null || true
 systemctl enable --now qemu-guest-agent >/dev/null 2>&1 || true
 info "$(nginx -v 2>&1) · $(mariadb --version | awk '{print $5}' | tr -d ,) · $(redis-server --version | awk '{print $3}')"
 
 # ───────────────────────── 2. MariaDB ─────────────────────────
-say "2/7 MariaDB"
+say "2/9 MariaDB"
 systemctl enable --now mariadb >/dev/null 2>&1 || true
-# 다른 설정 파일보다 나중에 읽히도록 z- 접두어 (Vol.5 §8.7 의 교훈)
+# 다른 설정 파일보다 나중에 읽히도록 z- 접두어 (bind-address 를 덮어쓰는 설정이 있어도 확실히 적용)
 cat > /etc/mysql/mariadb.conf.d/z-rpanel-bind.cnf <<'EOF'
-# managed by rpanel install.sh — DB는 이 VM 안에서만 접속
+# managed by rpanel install.sh — DB는 이 서버 안에서만 접속
 [mysqld]
 bind-address = 127.0.0.1
 EOF
 if [[ ! -f /etc/mysql/mariadb.conf.d/99-tuning.cnf ]]; then
   BP=$(( $(mem_mb) * 35 / 100 )); (( BP < 256 )) && BP=256
   cat > /etc/mysql/mariadb.conf.d/99-tuning.cnf <<EOF
-# rpanel install.sh 가 RAM $(mem_mb)MB 기준으로 생성 (Vol.6 §9.7 튜닝과 같은 항목) — 자유롭게 수정하세요
+# rpanel install.sh 가 RAM $(mem_mb)MB 기준으로 생성 — 자유롭게 수정하세요
 [mysqld]
 innodb_buffer_pool_size = ${BP}M
 innodb_log_file_size = 512M
@@ -127,7 +165,7 @@ else
 fi
 
 # ───────────────────────── 3. Redis ─────────────────────────
-say "3/7 Redis"
+say "3/9 Redis"
 RCONF=/etc/redis/redis.conf
 [[ -f $RCONF ]] || die "$RCONF 가 없습니다"
 redis_set() { # 활성 줄만 지우고 끝에 다시 씀 (주석 예시는 보존)
@@ -158,7 +196,7 @@ if [[ -z "$REDIS_URL_V" || "$REDIS_URL_V" == *"<"* || "$REDIS_URL_V" != *":$REDI
 fi
 
 # ───────────────────────── 4. Node.js ─────────────────────────
-say "4/7 Node.js 22"
+say "4/9 Node.js 22"
 node_ok() {
   command -v node >/dev/null && node -e 'const [a,b]=process.versions.node.split(".").map(Number); process.exit((a>22||(a===22&&b>=12)||(a===20&&b>=19))?0:1)'
 }
@@ -169,14 +207,51 @@ fi
 node_ok || die "Node.js 20.19+/22.12+ 설치 실패 (현재: $(node -v 2>/dev/null || echo 없음))"
 info "node $(node -v) · npm $(npm -v)"
 
-# ───────────────────────── 5. 사용자 · 빌드 ─────────────────────────
-say "5/7 사용자 · Rust · 빌드"
+# ───────────────────────── 5. PHP-FPM ─────────────────────────
+say "5/9 PHP"
+if [[ -n "$PHP_VERSIONS" ]]; then
+  need_ppa=0
+  for v in ${PHP_VERSIONS//,/ }; do
+    apt-cache show "php$v-fpm" >/dev/null 2>&1 || need_ppa=1
+  done
+  if (( need_ppa )); then
+    info "ondrej/php PPA 추가 (Ubuntu 기본 저장소에 없는 PHP 버전)"
+    apt-get install -y -q software-properties-common >/dev/null
+    add-apt-repository -y ppa:ondrej/php >/dev/null 2>&1 || die "ondrej/php PPA 추가 실패"
+    apt-get update -q >/dev/null
+  fi
+  for v in ${PHP_VERSIONS//,/ }; do
+    pkgs="php$v-fpm php$v-cli php$v-mysql php$v-curl php$v-gd php$v-mbstring php$v-xml php$v-zip php$v-intl php$v-bcmath php$v-opcache"
+    # shellcheck disable=SC2086
+    apt-get install -y -q $pkgs >/dev/null || die "PHP $v 설치 실패"
+    apt-get install -y -q "php$v-redis" "php$v-imagick" >/dev/null 2>&1 || true
+    # 기본 www 풀은 상시 프로세스를 띄우지 않도록 ondemand 로
+    www="/etc/php/$v/fpm/pool.d/www.conf"
+    [[ -f "$www" ]] && sed -i -E 's/^pm = (dynamic|static)$/pm = ondemand/' "$www"
+    systemctl enable "php$v-fpm" >/dev/null 2>&1 || true
+    systemctl restart "php$v-fpm"
+    info "PHP $v ($(php$v -r 'echo PHP_VERSION;' 2>/dev/null || echo '?'))"
+  done
+  command -v composer >/dev/null || {
+    curl -fsSL https://getcomposer.org/installer -o /tmp/composer-setup.php \
+      && php /tmp/composer-setup.php --quiet --install-dir=/usr/local/bin --filename=composer >/dev/null 2>&1 \
+      && info "composer $(composer --version 2>/dev/null | awk '{print $3}')" || warn "composer 설치 건너뜀"
+    rm -f /tmp/composer-setup.php
+  }
+else
+  info "건너뜀 (--no-php)"
+fi
+
+# ───────────────────────── 6. 사용자 · 빌드 ─────────────────────────
+say "6/9 사용자 · Rust · 빌드"
 id rpanel >/dev/null 2>&1 || useradd --system --home-dir /var/lib/rpanel --create-home --shell /usr/sbin/nologin rpanel
 id rpanel-app >/dev/null 2>&1 || useradd --system --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin rpanel-app
 install -d -o rpanel -g rpanel -m 0755 /var/lib/rpanel /var/lib/rpanel/builds /var/lib/rpanel/apps /var/lib/rpanel/www
 install -d -o rpanel -g rpanel -m 0750 /var/lib/rpanel/staging /var/lib/rpanel/backups
 install -d -o rpanel -g rpanel -m 0700 /var/lib/rpanel/keys
 install -d -o root -g rpanel -m 0750 /etc/rpanel
+install -d -o root -g root -m 0755 /var/lib/rpanel/acme
+getent group rpanel-sites >/dev/null || groupadd --system rpanel-sites
 
 if [[ ! -x /var/lib/rpanel/.cargo/bin/cargo ]]; then
   info "rustup 설치 (rpanel 사용자 — 앱 빌드에도 사용)"
@@ -191,29 +266,33 @@ if [[ $BUILD -eq 1 ]]; then
   rsync -a --delete --exclude .git --exclude target --exclude node_modules --exclude dist "$REPO/" "$SRC/"
   chown -R rpanel:rpanel "$SRC"
   info "백엔드 빌드 (cargo build --release) — 처음엔 5~10분 걸립니다"
-  sudo -u rpanel -H bash -c "cd '$SRC/backend' && /var/lib/rpanel/.cargo/bin/cargo build --release --locked --quiet"
+  sudo -u rpanel -H bash -c "cd '$SRC/backend' && /var/lib/rpanel/.cargo/bin/cargo build --release --locked --quiet --bins"
   info "프런트 빌드 (React 19 + Vite + Tailwind 4)"
   sudo -u rpanel -H bash -c "cd '$SRC/frontend' && npm ci --no-audit --no-fund --loglevel=error >/dev/null && npm run build >/dev/null"
 elif [[ -x "$REPO/backend/target/release/rpanel" && -f "$REPO/frontend/dist/index.html" ]]; then
   SRC="$REPO"
 fi
 [[ -x "$SRC/backend/target/release/rpanel" ]] || die "백엔드 바이너리가 없습니다: $SRC/backend/target/release/rpanel"
+[[ -x "$SRC/backend/target/release/rpanel-files" ]] || die "파일 관리 도구가 없습니다: $SRC/backend/target/release/rpanel-files"
 [[ -f "$SRC/frontend/dist/index.html" ]] || die "프런트 빌드 결과가 없습니다: $SRC/frontend/dist"
 
-# ───────────────────────── 6. 설치 ─────────────────────────
-say "6/7 패널 설치"
+# ───────────────────────── 7. 설치 ─────────────────────────
+say "7/9 패널 설치"
 install -m 0755 -o root -g root "$SRC/backend/target/release/rpanel" /usr/local/bin/rpanel
 install -d -m 0755 /usr/share/rpanel/www
 rsync -a --delete "$SRC/frontend/dist/" /usr/share/rpanel/www/
 chmod -R a+rX /usr/share/rpanel/www
 install -d -m 0755 /usr/local/lib/rpanel
 install -m 0755 -o root -g root "$REPO/deploy/rpanel-helper" /usr/local/lib/rpanel/rpanel-helper
+install -m 0755 -o root -g root "$SRC/backend/target/release/rpanel-files" /usr/local/lib/rpanel/rpanel-files
 install -m 0755 -o root -g root "$REPO/deploy/bootstrap.sh" /usr/local/sbin/rpanel-update
 
 cat > /etc/sudoers.d/rpanel.tmp <<'EOF'
 # Rpanel: 패널은 이 helper 하나만 root로 실행할 수 있습니다 (인자·파일은 helper가 검증)
+#         사이트 파일은 해당 사이트 유저 권한으로만 다룹니다 (rpanel-files)
 Defaults:rpanel !requiretty, env_reset
 rpanel ALL=(root) NOPASSWD: /usr/local/lib/rpanel/rpanel-helper
+rpanel ALL=(%rpanel-sites) NOPASSWD: /usr/local/lib/rpanel/rpanel-files
 EOF
 chmod 0440 /etc/sudoers.d/rpanel.tmp
 visudo -cf /etc/sudoers.d/rpanel.tmp >/dev/null || die "sudoers 문법 오류"
@@ -223,11 +302,12 @@ mv /etc/sudoers.d/rpanel.tmp /etc/sudoers.d/rpanel
 JWT="$(envget JWT_SECRET)"; [[ ${#JWT} -ge 32 && "$JWT" != *"<"* ]] || JWT="$(openssl rand -hex 32)"
 MODE="$(envget RPANEL_EXEC_MODE)"; [[ -n "$MODE" ]] || MODE="$EXEC_MODE"
 [[ "$EXEC_MODE" == dry-run ]] && MODE=dry-run
-COOKIE="$(envget COOKIE_SECURE)"; [[ -n "$COOKIE" ]] || COOKIE=false
+# 패널은 항상 HTTPS(8443) 로 서비스 → 리프레시 쿠키 Secure
+COOKIE=true
 EXTRA=""
 if [[ -f $ENVF ]]; then
   # 스크립트가 관리하지 않는 사용자 추가 설정은 보존
-  EXTRA="$(grep -Ev '^(#|$|DATABASE_URL=|REDIS_URL=|JWT_SECRET=|BIND_ADDR=|RPANEL_EXEC_MODE=|COOKIE_SECURE=)' "$ENVF" || true)"
+  EXTRA="$(grep -Ev '^(#|$|DATABASE_URL=|REDIS_URL=|JWT_SECRET=|BIND_ADDR=|RPANEL_EXEC_MODE=|COOKIE_SECURE=|RPANEL_EDGE_MODE=|RPANEL_TRUSTED_PROXY=|RPANEL_IPV6=)' "$ENVF" || true)"
   cp -p "$ENVF" "$ENVF.bak"
 fi
 {
@@ -238,13 +318,15 @@ fi
   echo "BIND_ADDR=127.0.0.1:8090"
   echo "RPANEL_EXEC_MODE=$MODE"
   echo "COOKIE_SECURE=$COOKIE"
+  echo "RPANEL_EDGE_MODE=$([[ $EDGE == proxy ]] && echo proxy || echo direct)"
+  echo "RPANEL_TRUSTED_PROXY=$PROXY_IP"
+  echo "RPANEL_IPV6=$IPV6"
   if [[ -n "$EXTRA" ]]; then
     echo "$EXTRA"
   else
     echo "RUST_LOG=info"
     echo "RPANEL_APP_PORT_MIN=8100"
     echo "RPANEL_APP_PORT_MAX=8999"
-    echo "RPANEL_TRUSTED_PROXY=$PROXY_IP"
     echo "RPANEL_MAX_CONCURRENT_BUILDS=2"
     echo "RPANEL_BACKUP_HOUR=3"
   fi
@@ -255,13 +337,112 @@ install -m 0644 "$REPO/deploy/systemd/rpanel.service" /etc/systemd/system/rpanel
 systemctl daemon-reload
 systemctl enable rpanel >/dev/null 2>&1
 
+# ───────────────────────── Nginx ─────────────────────────
 [[ -L /etc/nginx/sites-enabled/default ]] && rm -f /etc/nginx/sites-enabled/default && info "Nginx 기본 사이트 비활성화"
-install -m 0644 "$REPO/deploy/nginx/rpanel-panel.conf" /etc/nginx/sites-available/rpanel-panel.conf
-ln -sfn /etc/nginx/sites-available/rpanel-panel.conf /etc/nginx/sites-enabled/rpanel-panel.conf
+
+# 기본 서버(등록되지 않은 도메인·IP 직접 접속)는 응답 없이 끊고, 인증서용 ACME 경로만 엽니다
+CERT_DIR=/etc/rpanel/panel-cert
+install -d -m 0700 -o root -g root "$CERT_DIR"
+if [[ ! -f "$CERT_DIR/selfsigned.pem" ]]; then
+  openssl req -x509 -newkey rsa:2048 -nodes -days 3650 -subj "/CN=rpanel" \
+    -keyout "$CERT_DIR/selfsigned.key" -out "$CERT_DIR/selfsigned.pem" >/dev/null 2>&1
+  chmod 0600 "$CERT_DIR/selfsigned.key"
+  info "패널용 자체 서명 인증서 생성"
+fi
+if [[ "$EDGE" == proxy ]]; then
+  PROTO_MAP='map $http_x_forwarded_proto $rpanel_proto { default $scheme; https https; http http; }'
+else
+  PROTO_MAP='map $scheme $rpanel_proto { default $scheme; }'
+fi
+cat > /etc/nginx/conf.d/rpanel.conf <<EOF
+# managed by rpanel install.sh
+server_names_hash_bucket_size 128;
+$PROTO_MAP
+map \$rpanel_proto \$rpanel_https { https on; default ""; }
+
+server {
+    listen 80 default_server;
+    listen [::]:80 default_server;
+    server_name _;
+    location ^~ /.well-known/acme-challenge/ {
+        root /var/lib/rpanel/acme;
+        default_type "text/plain";
+        try_files \$uri =404;
+    }
+    location / { return 444; }
+}
+
+server {
+    listen 443 ssl http2 default_server;
+    listen [::]:443 ssl http2 default_server;
+    server_name _;
+    ssl_reject_handshake on;
+}
+EOF
+[[ $IPV6 == true ]] || sed -i '/listen \[::\]/d' /etc/nginx/conf.d/rpanel.conf
+
+PANEL_CERT="$CERT_DIR/selfsigned.pem"; PANEL_KEY="$CERT_DIR/selfsigned.key"
+if [[ -f "/etc/letsencrypt/live/rpanel-panel/fullchain.pem" ]]; then
+  PANEL_CERT=/etc/letsencrypt/live/rpanel-panel/fullchain.pem; PANEL_KEY=/etc/letsencrypt/live/rpanel-panel/privkey.pem
+fi
+write_panel_conf() {
+  sed -e "s|__CERT__|$PANEL_CERT|; s|__KEY__|$PANEL_KEY|; s|__PORT__|$PANEL_PORT|g" \
+    "$REPO/deploy/nginx/rpanel-panel.conf" > /etc/nginx/sites-available/rpanel-panel.conf
+  [[ $IPV6 == true ]] || sed -i '/listen \[::\]/d' /etc/nginx/sites-available/rpanel-panel.conf
+  ln -sfn /etc/nginx/sites-available/rpanel-panel.conf /etc/nginx/sites-enabled/rpanel-panel.conf
+}
+write_panel_conf
 nginx -t >/dev/null 2>&1 || { nginx -t; die "Nginx 설정 오류"; }
 systemctl enable nginx >/dev/null 2>&1 || true
 systemctl reload nginx 2>/dev/null || systemctl restart nginx
 
+# Let's Encrypt 갱신 시 Nginx 재적용
+install -d -m 0755 /etc/letsencrypt/renewal-hooks/deploy
+cat > /etc/letsencrypt/renewal-hooks/deploy/rpanel-nginx-reload <<'EOF'
+#!/bin/sh
+# managed by rpanel — 인증서 갱신 후 Nginx 재적용
+systemctl reload nginx
+EOF
+chmod 0755 /etc/letsencrypt/renewal-hooks/deploy/rpanel-nginx-reload
+systemctl enable --now certbot.timer >/dev/null 2>&1 || true
+
+# 패널 도메인 인증서 (standalone)
+if [[ -n "$PANEL_DOMAIN" ]]; then
+  if [[ "$EDGE" == standalone ]]; then
+    if certbot certonly --webroot -w /var/lib/rpanel/acme --cert-name rpanel-panel -d "$PANEL_DOMAIN" \
+         --non-interactive --agree-tos -m "$EMAIL" --keep-until-expiring >/dev/null 2>&1; then
+      PANEL_CERT=/etc/letsencrypt/live/rpanel-panel/fullchain.pem; PANEL_KEY=/etc/letsencrypt/live/rpanel-panel/privkey.pem
+      write_panel_conf
+      nginx -t >/dev/null 2>&1 && systemctl reload nginx
+      info "패널 인증서 발급: https://$PANEL_DOMAIN:$PANEL_PORT"
+    else
+      warn "패널 도메인 인증서 발급 실패 — DNS 가 이 서버를 가리키는지, 80 포트가 열려 있는지 확인하세요 (자체 서명 인증서로 계속)"
+    fi
+  else
+    warn "proxy 모드에서는 --panel-domain 인증서를 발급하지 않습니다 (앞단 프록시에서 처리하세요)"
+  fi
+fi
+
+# ───────────────────────── 사이트 유저 SSH/SFTP ─────────────────────────
+if [[ $SSH_PASSWORD -eq 1 && -d /etc/ssh/sshd_config.d ]]; then
+  cat > /etc/ssh/sshd_config.d/50-rpanel-sites.conf <<'EOF'
+# managed by rpanel — 사이트 유저(rpanel-sites 그룹)는 비밀번호로 SSH/SFTP 접속 가능
+Match Group rpanel-sites
+    PasswordAuthentication yes
+    KbdInteractiveAuthentication yes
+Match all
+EOF
+  install -d -m 0755 /run/sshd   # sshd -t 에 필요 (ssh 서비스가 아직 안 떴을 때)
+  if sshd -t 2>/dev/null; then
+    systemctl reload ssh 2>/dev/null || systemctl reload sshd 2>/dev/null || true
+    info "사이트 유저 SSH/SFTP 비밀번호 로그인 허용"
+  else
+    rm -f /etc/ssh/sshd_config.d/50-rpanel-sites.conf; warn "sshd 설정 검사 실패 — 사이트 유저 비밀번호 로그인 설정을 건너뜁니다"
+  fi
+fi
+
+# ───────────────────────── 8. 시작 ─────────────────────────
+say "8/9 패널 시작"
 systemctl restart rpanel
 ok=0
 for _ in $(seq 1 30); do
@@ -271,39 +452,57 @@ done
 (( ok )) || die "패널이 시작되지 않았습니다: journalctl -u rpanel -n 50 --no-pager"
 info "패널 동작 확인 (db·redis ok)"
 
-# ───────────────────────── 7. 방화벽 ─────────────────────────
-say "7/7 방화벽 (ufw)"
+# ───────────────────────── 9. 방화벽 ─────────────────────────
+say "9/9 방화벽 (ufw)"
 if [[ $FIREWALL -eq 1 ]]; then
   # 지금 SSH 로 접속해 있는 주소는 잠기지 않도록 허용 (sudo·파이프 실행에서도 동작하도록 소켓에서 직접 읽음)
   SSH_FROM="$(ss -Htn state established '( sport = :22 )' 2>/dev/null | awk '{print $4}' | sed -E 's/:[0-9]+$//; s/^\[//; s/\]$//; s/^::ffff://' | sort -u | tr '\n' ' ')"
   ufw default deny incoming >/dev/null
   ufw default allow outgoing >/dev/null
-  for net in "$INTERNAL_NET" "$TAILSCALE_NET"; do
-    ufw allow from "$net" to any port 22 proto tcp >/dev/null
-    ufw allow from "$net" to any port "$PANEL_PORT" proto tcp >/dev/null
-  done
-  for ip in $SSH_FROM; do
-    ufw allow from "$ip" to any port 22 proto tcp >/dev/null && info "현재 SSH 접속 주소 $ip 허용"
-  done
-  ufw allow from "$PROXY_IP" to any port 80 proto tcp >/dev/null
+  if [[ -n "$ALLOW_FROM" ]]; then
+    for net in ${ALLOW_FROM//,/ }; do
+      ufw allow from "$net" to any port 22 proto tcp >/dev/null
+      ufw allow from "$net" to any port "$PANEL_PORT" proto tcp >/dev/null
+    done
+    for ip in $SSH_FROM; do
+      ufw allow from "$ip" to any port 22 proto tcp >/dev/null && info "현재 SSH 접속 주소 $ip 허용"
+    done
+    ADMIN_DESC="${ALLOW_FROM//,/, }"
+  else
+    ufw allow 22/tcp >/dev/null
+    ufw allow "$PANEL_PORT/tcp" >/dev/null
+    ADMIN_DESC="어디서나"
+  fi
+  if [[ "$EDGE" == proxy ]]; then
+    ufw allow from "$PROXY_IP" to any port 80 proto tcp >/dev/null
+    WEB_DESC="80 ← $PROXY_IP (앞단 프록시)"
+  else
+    ufw allow 80/tcp >/dev/null
+    ufw allow 443/tcp >/dev/null
+    WEB_DESC="80·443 ← 어디서나"
+  fi
   ufw --force enable >/dev/null
-  info "22·$PANEL_PORT ← $INTERNAL_NET, $TAILSCALE_NET  |  80 ← $PROXY_IP (CT100)"
+  info "22·$PANEL_PORT ← $ADMIN_DESC  |  $WEB_DESC"
 else
   info "건너뜀 (--no-firewall)"
 fi
 
-IP="$(hostname -I 2>/dev/null | tr ' ' '\n' | grep -E '^10\.' | head -n1 || true)"
-[[ -n "$IP" ]] || IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
+if [[ -n "$PANEL_DOMAIN" && "$PANEL_CERT" == /etc/letsencrypt/* ]]; then
+  URL="https://$PANEL_DOMAIN:$PANEL_PORT"
+else
+  IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
+  URL="https://${IP:-<서버IP>}:$PANEL_PORT   (자체 서명 인증서 — 브라우저 경고에서 '계속' 선택)"
+fi
 cat <<EOF
 
 $(printf '\033[1;32m')✔ Rpanel 설치 완료$(printf '\033[0m')
 
-  접속      http://${IP:-<서버IP>}:$PANEL_PORT   (Tailscale 이 켜진 PC에서) → 첫 관리자 계정 생성
+  접속      $URL
+            → 첫 화면에서 관리자 계정을 만드세요
+  모드      $EDGE$([[ $EDGE == proxy ]] && echo " — SSL 은 앞단 프록시($PROXY_IP)에서, 도메인은 프록시에서 이 서버 :80 으로 연결")
+  PHP       ${PHP_VERSIONS:-설치 안 함}
   실행 모드  $MODE$( [[ $MODE == dry-run ]] && echo "  — 실제 배포하려면 $ENVF 에서 RPANEL_EXEC_MODE=real 후 systemctl restart rpanel")
-  설정·비밀  $ENVF  (DB·Redis 비밀번호, JWT 키 — root/rpanel 만 읽기)
+  설정·비밀  $ENVF
   업데이트   sudo rpanel-update
   로그      journalctl -u rpanel -f
-
-  다음 단계: z820 에서 tailscale set --snat-subnet-routes=false (Vol.3 §4.5.1),
-             서비스할 도메인은 CT100(NPM) Proxy Host → $IP:80 (Vol.4 §10.2)
 EOF

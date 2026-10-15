@@ -1,5 +1,5 @@
 //! 사이트(도메인) 중심 화면 — CloudPanel의 Sites 목록
-//! 도메인마다 VM102 Nginx(:80)에 Host 헤더로 요청해 실제 응답을 확인하고, Nginx 로그를 보여줍니다.
+//! 도메인마다 이 서버의 Nginx(:80)에 Host 헤더로 요청해 실제 응답을 확인하고, Nginx 로그를 보여줍니다.
 
 use std::{collections::HashMap, time::Instant};
 
@@ -29,8 +29,10 @@ pub struct SiteCheck {
     pub app_name: String,
     pub app_slug: String,
     pub kind: String,
+    pub source: String,
+    pub https: bool,
     pub app_status: String,
-    pub project_id: u64,
+    pub project_id: Option<u64>,
     pub http_status: Option<u16>,
     pub latency_ms: Option<u64>,
     pub error: Option<String>,
@@ -91,6 +93,8 @@ pub async fn list(State(state): State<AppState>, _u: AuthUser) -> AppResult<Json
             app_name: app.name.clone(),
             app_slug: app.slug.clone(),
             kind: app.kind.clone(),
+            source: app.source.clone(),
+            https: app.has_ssl(),
             app_status: app.status.clone(),
             project_id: app.project_id,
             http_status: code,

@@ -35,6 +35,8 @@ pub struct Config {
     pub trusted_proxy: String,
     /// 빌드 명령 실행 시 PATH
     pub build_path: String,
+    /// 새 버전 확인에 쓰는 GitHub 저장소 (owner/repo, 비우면 확인 안 함)
+    pub update_repo: String,
     /// 동시 빌드 수
     pub max_concurrent_builds: usize,
     /// 빌드 명령에 전달할 환경변수 이름 (기본: 없음). 예: HTTPS_PROXY,NO_PROXY,SSL_CERT_FILE
@@ -124,6 +126,7 @@ impl Config {
             app_port_max,
             redis_prefix: var("REDIS_PREFIX").unwrap_or_else(|| "rpanel".into()),
             trusted_proxy: var("RPANEL_TRUSTED_PROXY").unwrap_or_default(),
+            update_repo: var("RPANEL_UPDATE_REPO").unwrap_or_else(|| "sinji0117/Rpanel".into()),
             build_path: var("RPANEL_BUILD_PATH").unwrap_or_else(|| {
                 "/var/lib/rpanel/.cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin".into()
             }),
@@ -172,6 +175,7 @@ impl Config {
             redis_prefix: format!("rpanel-test-{}-{}", std::process::id(), rand_suffix()),
             trusted_proxy: "10.0.0.10".into(),
             build_path: "/usr/bin:/bin".into(),
+            update_repo: String::new(),
             max_concurrent_builds: 2,
             pass_env: vec![],
             app_redis_base: redis_base(&redis_url),

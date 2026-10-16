@@ -1,5 +1,6 @@
 import { Link } from 'react-router'
 import Sparkline from '../components/Sparkline'
+import { VersionRows } from '../components/VersionInfo'
 import { ErrorBox, Meter, PageHeader, StatusBadge } from '../components/ui'
 import { get } from '../lib/api'
 import { ago, bytes, percent, shortSha, uptime } from '../lib/format'
@@ -100,8 +101,7 @@ export default function Dashboard() {
           <h2 className="text-sm font-medium">{t('시스템')}</h2>
           {info.data && (
             <dl className="mt-4 grid grid-cols-[96px_1fr] gap-y-2 text-sm">
-              <dt className="text-ink-400">Rpanel</dt>
-              <dd className="font-mono">v{info.data.version}</dd>
+              <VersionRows />
               <dt className="text-ink-400">{t('실행 모드')}</dt>
               <dd className="font-mono">{info.data.exec_mode}</dd>
               <dt className="text-ink-400">{t('호스트')}</dt>

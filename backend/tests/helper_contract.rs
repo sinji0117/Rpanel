@@ -49,6 +49,7 @@ fn app(kind: &str) -> App {
         ssl_mode: "none".into(),
         force_https: false,
         client_max_body_mb: 64,
+        runtime_version: None,
         created_at: Utc::now(),
         updated_at: Utc::now(),
     }
@@ -608,4 +609,54 @@ fn account_and_backup_args() {
     for bad in ["../etc", "_other", "''"] {
         assert!(!helper_fn(&format!("valid_backup_scope {bad}")), "{bad}");
     }
+}
+
+#[test]
+fn helper_rejects_bad_runtime_args() {
+    let tmp = std::env::temp_dir().join(format!("rpanel-rt-{}", std::process::id()));
+    let run = |args: &[&str]| {
+        Command::new("bash")
+            .arg(helper())
+            .args(args)
+            .env("RPANEL_TEST_RUNTIMES", &tmp)
+            .output()
+            .unwrap()
+    };
+    for (lang, v) in [
+        ("python", "3"),
+        ("python", "2.7"),
+        ("python", "3.12;id"),
+        ("python", "../3.12"),
+        ("python", "3.12.1"),
+        ("node", "v22"),
+        ("node", "8"),
+        ("node", "22/../../etc"),
+        ("node", "lts"),
+        ("ruby", "3.3"),
+        ("rust", "1.85"),
+        ("", ""),
+    ] {
+        let out = run(&["runtime-install", lang, v]);
+        assert!(!out.status.success(), "runtime-install {lang} {v} accepted");
+        let out = run(&["runtime-remove", lang, v]);
+        assert!(!out.status.success(), "runtime-remove {lang} {v} accepted");
+    }
+    // 정상 인자로 지우기는 (없어도) 성공하고, 지정 폴더 밖은 건드리지 않음
+    std::fs::create_dir_all(tmp.join("node/22/bin")).unwrap();
+    std::fs::create_dir_all(tmp.join("node/20/bin")).unwrap();
+    let out = run(&["runtime-remove", "node", "22"]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(!tmp.join("node/22").exists());
+    assert!(tmp.join("node/20").exists());
+    let out = run(&["runtime-remove", "python", "3.12"]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let _ = std::fs::remove_dir_all(&tmp);
 }

@@ -338,7 +338,21 @@ async fn run(
 
     // 3) 빌드
     log.step("빌드").await;
-    let bash = |cmd: &str| with_env(CmdSpec::new("bash", &["-c", cmd]).cwd(&work), &vars);
+    let runtime = crate::runtimes::resolve(state, &app).await?;
+    let rt_env = runtime
+        .as_ref()
+        .map(|r| r.build_env(&state.cfg.build_path))
+        .unwrap_or_default();
+    if let Some(r) = &runtime {
+        log.line(format!("런타임: {}", r.describe())).await;
+    }
+    let bash = |cmd: &str| {
+        let mut spec = with_env(CmdSpec::new("bash", &["-c", cmd]).cwd(&work), &vars);
+        for (k, v) in &rt_env {
+            spec = spec.env(k, v.clone());
+        }
+        spec
+    };
     let release_id = deploy_id.to_string();
     let release_dir: PathBuf;
 
@@ -385,7 +399,16 @@ async fn run(
                         release_dir.join(".venv").display().to_string(),
                     )
             };
-            run_ok(exec, in_release(PYTHON_SETUP_GIT).timeout(1800), log).await?;
+            let python = runtime
+                .as_ref()
+                .map(|r| r.python())
+                .unwrap_or_else(|| "python3".into());
+            run_ok(
+                exec,
+                in_release(&python_setup_git(&python)).timeout(1800),
+                log,
+            )
+            .await?;
             if let Some(cmd) = app.build_cmd.clone().filter(|s| !s.trim().is_empty()) {
                 run_ok(exec, in_release(&cmd).timeout(1800), log).await?;
             }
@@ -704,7 +727,15 @@ async fn apply_site(
         .await?;
         if kind == AppKind::Python {
             log.step("Python 가상환경 (.venv · requirements.txt)").await;
-            crate::files::run_command(state, app, PYTHON_SETUP_SITE, vars, log).await?;
+            let runtime = crate::runtimes::resolve(state, app).await?;
+            let python = runtime
+                .as_ref()
+                .map(|r| r.python())
+                .unwrap_or_else(|| "python3".into());
+            if let Some(r) = &runtime {
+                log.line(format!("런타임: {}", r.describe())).await;
+            }
+            crate::files::run_command(state, app, &python_setup_site(&python), vars, log).await?;
         }
         if let Some(cmd) = app.build_cmd.as_deref().filter(|c| !c.trim().is_empty()) {
             log.step("빌드 명령 (사이트 유저 권한)").await;
@@ -780,14 +811,30 @@ async fn apply_site(
 }
 
 /// Git Python 앱: 릴리스 폴더 안에 가상환경을 만들고 requirements.txt 설치
-const PYTHON_SETUP_GIT: &str = "python3 -m venv .venv && \
-     if [ -f requirements.txt ]; then pip install --no-input --disable-pip-version-check -r requirements.txt; \
-     else echo 'requirements.txt 없음 — 패키지 설치 생략'; fi";
+/// (`python` 은 runtimes::Resolved::python() — "python3" 또는 /opt/rpanel/runtimes/bin/python3.X)
+fn python_setup_git(python: &str) -> String {
+    format!(
+        "{python} -m venv .venv && \
+         if [ -f requirements.txt ]; then pip install --no-input --disable-pip-version-check -r requirements.txt; \
+         else echo 'requirements.txt 없음 — 패키지 설치 생략'; fi"
+    )
+}
 
-/// 파일 Python 사이트: 문서 루트의 .venv (없을 때만 생성) + requirements.txt 설치
-const PYTHON_SETUP_SITE: &str = "test -x .venv/bin/python || python3 -m venv .venv; \
-     if [ -f requirements.txt ]; then .venv/bin/pip install --no-input --disable-pip-version-check -q -r requirements.txt; \
-     else echo 'requirements.txt 없음 — 패키지 설치 생략'; fi";
+/// 파일 Python 사이트: 문서 루트의 .venv + requirements.txt 설치.
+/// 가상환경의 Python 버전이 고른 버전과 다르면 새로 만듦 (버전 변경)
+fn python_setup_site(python: &str) -> String {
+    format!(
+        "PYV='import sys; print(\"%d.%d\" % sys.version_info[:2])'; \
+         want=\"$({python} -c \"$PYV\")\" || {{ echo 'Python 실행 파일을 찾지 못했습니다: {python}' >&2; exit 1; }}; \
+         have=\"$(.venv/bin/python -c \"$PYV\" 2>/dev/null || true)\"; \
+         if [ \"$want\" != \"$have\" ]; then \
+           if [ -n \"$have\" ]; then echo \"Python $have → $want: 가상환경을 새로 만듭니다\"; rm -rf .venv; fi; \
+           {python} -m venv .venv; \
+         fi; \
+         if [ -f requirements.txt ]; then .venv/bin/pip install --no-input --disable-pip-version-check -q -r requirements.txt; \
+         else echo 'requirements.txt 없음 — 패키지 설치 생략'; fi"
+    )
+}
 
 /// 사이트 유저로 실행하는 명령 앞에 붙여 가상환경을 켬
 const PYTHON_ACTIVATE: &str = "export VIRTUAL_ENV=\"$PWD/.venv\" PATH=\"$PWD/.venv/bin:$PATH\";";

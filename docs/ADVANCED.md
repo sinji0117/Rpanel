@@ -1,6 +1,6 @@
 # Rpanel 기술 문서
 
-처음 쓰는 분은 [README](../README.md)부터 보세요. 이 문서는 설치 옵션, 구조, 보안 설계, 개발 방법을 다룹니다.
+처음 쓰는 분은 [README](../README.md)와 [사용 설명서](README.md)부터 보세요. 이 문서는 설치 옵션, 구조, 보안 설계, 개발 방법을 다룹니다.
 
 ## 구성
 
@@ -96,6 +96,21 @@
 - SFTP 클라이언트가 원래 파일 권한(0644 등)을 그대로 보내면 다른 계정이 그 파일을 고칠 수 없습니다. 이럴 땐 패널 파일 관리자로 고치거나 클라이언트에서 권한 유지를 끄세요.
 - 설치 스크립트가 `acl` 패키지와 두 그룹, sshd 설정을 준비합니다 (`sshd -t` 검사 후 reload).
 
+## 언어 런타임 버전
+
+- 테이블 `runtimes(lang, version, status, is_default, is_system, detail, log)`, 앱별 선택은 `apps.runtime_version` (NULL = 기본 버전).
+- 처음 조회할 때 서버에 있던 것을 기본으로 등록: Rust `stable`, Python·Node.js `system`(apt 의 python3 / 설치 스크립트의 node).
+- **Rust**: 패널 계정(rpanel)의 rustup 으로 `rustup toolchain install <v> --profile minimal`. 빌드할 때 `RUSTUP_TOOLCHAIN=<v>` 로 고릅니다 (`rustup default` 는 그대로 → 패널 자체 업데이트 빌드에 영향 없음).
+- **Python**: helper 가 [uv](https://github.com/astral-sh/uv)(SHA-256 확인)로 standalone CPython 을 `/opt/rpanel/runtimes/python` 에 설치하고 `/opt/rpanel/runtimes/bin/python3.X` 링크. 가상환경을 이 실행 파일로 만듭니다. 파일 사이트는 `.venv` 의 버전이 고른 버전과 다르면 새로 만듭니다.
+- **Node.js**: helper 가 nodejs.org 의 `node-vX.Y.Z-linux-<arch>.tar.xz` 를 `SHASUMS256.txt` 로 확인한 뒤 `/opt/rpanel/runtimes/node/<major>` 에 풉니다. 빌드 PATH 맨 앞에 `…/node/<major>/bin`.
+- `/opt/rpanel/runtimes` 는 root 소유 0755 (사이트 유저도 실행 가능). helper 는 버전 문자열을 `python 3.8~3.20`, `node 18~40` 로만 받습니다.
+- 설치는 백그라운드 작업이고 출력은 `runtimes.log` 에 남습니다. 서버 기본·현재 기본·앱이 쓰는 버전은 지울 수 없습니다.
+
+## 버전 확인 (GitHub)
+
+- `GET /api/system/version` → 지금 버전(`CARGO_PKG_VERSION`)과 GitHub 최신 버전. 최신 릴리스 태그를 먼저 보고, 없으면 `main` 브랜치 `backend/Cargo.toml` 의 `version` 을 읽습니다 (curl, 8초 제한, Redis 6시간 캐시, `?refresh=true` 로 즉시 확인).
+- 저장소는 `RPANEL_UPDATE_REPO`(기본 `sinji0117/Rpanel`), 빈 값이면 확인하지 않습니다.
+
 ## 관리자 · 화면 설정
 
 - 관리자는 모두 같은 권한입니다. 자기 자신과 마지막 관리자는 지울 수 없고, 비밀번호 변경·삭제 시 그 관리자의 세션을 모두 끊습니다. 로그인 시각은 `users.last_login_at`.
@@ -112,7 +127,7 @@
 
 ## Python 앱
 
-- **파일 사이트**: 사이트 추가 → Python. 문서 루트에 예시 `app.py`·`requirements.txt`·`README.txt` 를 만듭니다. 적용할 때마다 사이트 유저 권한으로 `python3 -m venv .venv`(없을 때만) → `.venv/bin/pip install -r requirements.txt` → (선택) 빌드 명령 → systemd 서비스 → 헬스체크.
+- **파일 사이트**: 사이트 추가 → Python. 문서 루트에 예시 `app.py`·`requirements.txt`·`README.txt` 를 만듭니다. 적용할 때마다 사이트 유저 권한으로 `<고른 Python> -m venv .venv`(없거나 버전이 다를 때만) → `.venv/bin/pip install -r requirements.txt` → (선택) 빌드 명령 → systemd 서비스 → 헬스체크.
 - **Git 앱**: 종류 Python. 소스를 릴리스 폴더로 복사한 뒤 그 안에 새 가상환경을 만들고 `requirements.txt` 를 설치합니다(`PIP_CACHE_DIR=/var/lib/rpanel/cache/pip` 재사용). 릴리스마다 가상환경이 따로라 롤백해도 안전합니다.
 - 서비스·크론의 `PATH` 맨 앞에 `.venv/bin` 이 들어가므로 시작 명령에 `python`, `gunicorn`, `uvicorn` 을 그대로 씁니다. 기본 시작 명령은 `python app.py`.
 - Python 서비스에는 `MemoryDenyWriteExecute` 를 걸지 않습니다 (cffi 등 확장 모듈 호환). 나머지 격리 설정은 Rust 와 같습니다.
@@ -212,7 +227,8 @@ npx playwright install chromium && npm run e2e # E2E (가짜 API, 백엔드 불�
 | GET/POST/PUT/DELETE | `/api/backups`, `/api/apps/{id}/backups`, `/api/backups/{id}/restore`, `/download` | 백업 |
 | GET/POST/PUT/DELETE | `/api/backup-jobs`, `/api/backup-jobs/{id}`, `/run` | 백업 예약 |
 | GET/POST/PUT/DELETE | `/api/apps/{id}/cron`, `/api/cron/{id}`, `/run`, `/log`, `/api/cron/preview` | 크론 |
-| GET | `/api/apps/{id}/nginx-logs`, `/api/system/info`, `/overview`, `/edge`, `/api/audit` | 로그·시스템 |
+| GET | `/api/apps/{id}/nginx-logs`, `/api/system/info`, `/overview`, `/edge`, `/version`, `/api/audit` | 로그·시스템·버전 |
+| GET/POST/PUT/DELETE | `/api/runtimes`, `/api/runtimes/{id}`, `/default`, PUT `/api/apps/{id}/runtime` | 언어 런타임 버전 |
 | WS | `/api/ws/metrics?ticket=`, `/api/ws/deployments/{id}?ticket=` | 실시간 |
 
 인증된 요청은 `Authorization: Bearer <access>`, 쿠키 기반 엔드포인트(`/auth/refresh`, `/auth/logout`)는 `X-Requested-With: rpanel` 헤더가 필요합니다(CSRF 방지).

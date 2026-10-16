@@ -9,6 +9,7 @@ import { ago, duration, mergeEnv, parseDotenv, shortSha } from '../lib/format'
 import { useFetch, useInterval } from '../lib/useFetch'
 import { BackupTab, CronTab, DatabaseTab, NginxLogTab } from './AppTabs'
 import { AccountsTab } from './SiteAccounts'
+import { AppRuntimePicker } from './Runtimes'
 import { FileManager, SiteSettings, SslTab } from './SiteTabs'
 import { t, tx } from '../i18n'
 
@@ -171,7 +172,12 @@ export default function AppDetail() {
       {tab === 'files' && <FileManager app={a} />}
       {tab === 'ssl' && <SslTab app={a} onChanged={() => app.reload(true)} />}
       {tab === 'accounts' && <AccountsTab app={a} />}
-      {tab === 'settings' && (isGit ? <SettingsTab app={a} onSaved={(n) => app.setData(n)} /> : <SiteSettings app={a} onSaved={(n) => app.setData(n)} />)}
+      {tab === 'settings' && (
+        <div className="space-y-4">
+          <AppRuntimePicker app={a} onSaved={(n) => app.setData(n)} />
+          {isGit ? <SettingsTab app={a} onSaved={(n) => app.setData(n)} /> : <SiteSettings app={a} onSaved={(n) => app.setData(n)} />}
+        </div>
+      )}
     </>
   )
 }

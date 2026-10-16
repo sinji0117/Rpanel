@@ -5,6 +5,7 @@ pub mod databases;
 pub mod deployments;
 pub mod files;
 pub mod projects;
+pub mod runtimes;
 pub mod site_accounts;
 pub mod site_admin;
 pub mod sites;
@@ -39,6 +40,12 @@ pub fn router(state: AppState) -> Router {
         // 시스템
         .route("/system/info", get(system::info))
         .route("/system/overview", get(system::overview))
+        .route("/system/version", get(system::version))
+        // 언어 런타임 버전
+        .route("/runtimes", get(runtimes::list).post(runtimes::install))
+        .route("/runtimes/{id}", delete(runtimes::delete))
+        .route("/runtimes/{id}/default", put(runtimes::make_default))
+        .route("/apps/{id}/runtime", put(runtimes::set_for_app))
         .route("/audit", get(system::audit))
         // 프로젝트
         .route("/projects", get(projects::list).post(projects::create))

@@ -485,3 +485,53 @@ test('테마 낮·밤 전환과 영어 전환', async ({ page }) => {
   await page.getByRole('combobox', { name: 'Language' }).selectOption('ko')
   await expect(page.getByRole('link', { name: '사이트' })).toBeVisible()
 })
+
+test('버전 표시 (지금 · GitHub) 와 런타임 버전 설치·기본 변경·앱별 선택', async ({ page }) => {
+  const backend = seededBackend()
+  await backend.install(page)
+  page.on('dialog', (d) => d.accept())
+  await page.goto('/')
+  await expect(page.getByTestId('update-badge')).toHaveText('새 버전 v0.5.0')
+  await expect(page.getByTestId('version-current')).toHaveText('v0.4.0')
+  await expect(page.getByTestId('version-latest')).toHaveText('v0.5.0')
+  await expect(page.getByText('sudo rpanel-update')).toBeVisible()
+
+  await page.getByRole('link', { name: '런타임' }).click()
+  await expect(page.getByRole('heading', { name: '런타임' })).toBeVisible()
+  // Python: 3.13 고르기 → 설치하고 기본으로 변경 → 설치 끝나면 기본
+  const py = page.getByRole('group', { name: 'Python 버전 고르기' })
+  await py.getByLabel('Python 버전').selectOption('3.13')
+  await py.getByRole('button', { name: '설치하고 기본으로 변경' }).click()
+  await expect(page.getByText('3.13 설치를 시작했습니다. 끝나면 기본 버전이 됩니다')).toBeVisible()
+  const pyRows = page.getByRole('table', { name: 'Python 설치된 버전' })
+  const row313 = pyRows.getByRole('row', { name: /3\.13/ })
+  await expect(row313.getByText('사용 가능')).toBeVisible({ timeout: 10000 })
+  await expect(row313.getByText('기본', { exact: true })).toBeVisible()
+  await expect(row313.getByText('3.13.9')).toBeVisible()
+  // 다시 서버 기본으로
+  await pyRows
+    .getByRole('row', { name: /서버 기본/ })
+    .getByRole('button', { name: '기본으로' })
+    .click()
+  await expect(pyRows.getByRole('row', { name: /서버 기본/ }).getByText('기본', { exact: true })).toBeVisible()
+
+  // Rust: 직접 입력한 버전을 설치만 → 삭제
+  const rs = page.getByRole('group', { name: 'Rust 버전 고르기' })
+  await rs.getByLabel('Rust 버전', { exact: true }).selectOption('__custom')
+  await rs.getByLabel('Rust 버전 직접 입력').fill('1.85')
+  await rs.getByRole('button', { name: '설치만' }).click()
+  const rsRows = page.getByRole('table', { name: 'Rust 설치된 버전' })
+  await expect(rsRows.getByRole('row', { name: /1\.85/ }).getByText('사용 가능')).toBeVisible({ timeout: 10000 })
+  await rsRows.getByRole('button', { name: 'Rust 1.85 삭제' }).click()
+  await expect(rsRows.getByText('1.85')).toHaveCount(0)
+
+  // 앱별 버전: Rust Git 앱 → 설정 탭에서 stable 대신 1.85 는 없음, 기본 따르기 / stable 고르기
+  await page.goto('/apps/2')
+  await page.getByRole('tab', { name: '설정' }).click()
+  const pick = page.getByLabel('앱 런타임 버전')
+  await expect(pick.locator('option').first()).toHaveText('기본 버전 따르기 (최신 안정판 (stable))')
+  await pick.selectOption('stable')
+  await page.getByRole('button', { name: '저장' }).first().click()
+  await expect(page.getByText('버전을 저장했습니다. 다음 배포·적용부터 쓰입니다')).toBeVisible()
+  expect(backend.db.apps.find((a) => a.id === 2).runtime_version).toBe('stable')
+})

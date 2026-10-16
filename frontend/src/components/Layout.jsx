@@ -3,6 +3,7 @@ import { NavLink, Outlet } from 'react-router'
 import { useAuth } from '../context/AuthContext'
 import { LANGS, setLang, t, useLang } from '../i18n'
 import { getTheme, setTheme } from '../lib/prefs'
+import { VersionBadge } from './VersionInfo'
 
 const DB_ICON = 'M4 6c0-1.7 3.6-3 8-3s8 1.3 8 3-3.6 3-8 3-8-1.3-8-3zm0 0v12c0 1.7 3.6 3 8 3s8-1.3 8-3V6M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3'
 
@@ -11,6 +12,7 @@ const NAV = [
   { to: '/', label: '대시보드', icon: 'M3 12h4l3-8 4 16 3-8h4', end: true },
   { to: '/sites', label: '사이트', icon: 'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM3 12h18M12 3c2.5 2.7 2.5 15.3 0 18M12 3c-2.5 2.7-2.5 15.3 0 18' },
   { to: '/projects', label: '프로젝트', icon: 'M3 7h7l2 2h9v10H3z' },
+  { to: '/runtimes', label: '런타임', icon: 'M8 6 3 12l5 6M16 6l5 6-5 6M13.5 4l-3 16' },
   { to: '/mariadb', label: 'MariaDB', icon: DB_ICON },
   { to: '/redis', label: 'Redis', icon: 'M12 3 3 7.5 12 12l9-4.5L12 3zM3 12l9 4.5 9-4.5M3 16.5 12 21l9-4.5' },
   { to: '/backups', label: '백업', icon: 'M4 7h16v13H4zM4 7l2-3h12l2 3M9 12h6' },
@@ -121,6 +123,7 @@ export default function Layout() {
         {nav}
         <div className="mt-auto space-y-3 border-t border-ink-800 px-2 pt-4">
           <ThemeLangSwitch compact />
+          <VersionBadge />
           <p className="truncate text-xs text-ink-400" title={user?.email}>
             {user?.email}
           </p>

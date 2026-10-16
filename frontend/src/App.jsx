@@ -12,6 +12,7 @@ import Projects from './pages/Projects'
 import Settings from './pages/Settings'
 import Sites from './pages/Sites'
 import AdminsPage from './pages/Admins'
+import RuntimesPage from './pages/Runtimes'
 import { BackupsPage, MariaDBPage, RedisPage } from './pages/DataPages'
 import { t, useLang } from './i18n'
 
@@ -47,6 +48,7 @@ function Gate() {
         <Route path="redis" element={<RedisPage />} />
         <Route path="databases" element={<Navigate to="/mariadb" replace />} />
         <Route path="admins" element={<AdminsPage />} />
+        <Route path="runtimes" element={<RuntimesPage />} />
         <Route path="backups" element={<BackupsPage />} />
         <Route path="projects" element={<Projects />} />
         <Route path="projects/:id" element={<ProjectDetail />} />

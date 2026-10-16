@@ -95,7 +95,7 @@ say "1/8 기본 패키지"
 apt-get update -q >/dev/null
 apt-get install -y -q curl ca-certificates gnupg git rsync openssl sudo build-essential pkg-config libssl-dev \
   openssh-client openssh-server nginx mariadb-server mariadb-client redis-server ufw certbot unzip zip \
-  python3 python3-venv python3-pip python3-dev acl >/dev/null
+  python3 python3-venv python3-pip python3-dev acl xz-utils >/dev/null
 # 가상머신이면 게스트 에이전트 (없어도 무관)
 apt-get install -y -q qemu-guest-agent >/dev/null 2>&1 || true
 # 시간대가 UTC 기본값이면 서울로 (이미 정했다면 유지)
@@ -221,6 +221,8 @@ install -d -o rpanel -g rpanel -m 0750 /var/lib/rpanel/staging /var/lib/rpanel/b
 install -d -o rpanel -g rpanel -m 0700 /var/lib/rpanel/keys
 install -d -o root -g rpanel -m 0750 /etc/rpanel
 install -d -o root -g root -m 0755 /var/lib/rpanel/acme
+# 언어 런타임 (Python · Node.js 여러 버전) — 패널 런타임 메뉴에서 설치
+install -d -o root -g root -m 0755 /opt/rpanel /opt/rpanel/runtimes /opt/rpanel/runtimes/bin
 getent group rpanel-sites >/dev/null || groupadd --system rpanel-sites
 getent group rpanel-sftp >/dev/null || groupadd --system rpanel-sftp       # SFTP 전용 사이트 계정
 getent group rpanel-locked >/dev/null || groupadd --system rpanel-locked   # 잠근 사이트 계정

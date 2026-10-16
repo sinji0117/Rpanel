@@ -117,6 +117,11 @@ async fn full_flow() {
     let cfg = Config::for_tests(db_url, redis_url);
     let state = rpanel::build_state(cfg).await.expect("state");
     for t in [
+        "runtimes",
+        "redis_users",
+        "db_users",
+        "backup_jobs",
+        "site_accounts",
         "app_env",
         "cron_jobs",
         "backups",
@@ -1131,6 +1136,214 @@ async fn full_flow() {
     let d = wait_deploy(&ctx, &t, r.body["deployment_id"].as_u64().unwrap()).await;
     assert_eq!(d["status"], "success", "{}", d["log"]);
     assert!(d["log"].as_str().unwrap().contains("Python 가상환경"));
+    assert!(
+        d["log"]
+            .as_str()
+            .unwrap()
+            .contains("런타임: Python 서버 기본"),
+        "{}",
+        d["log"]
+    );
+
+    // ── 런타임 버전 ──
+    let r = ctx.get("/api/runtimes", &t).await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+    let rows = r.body["runtimes"].as_array().unwrap().clone();
+    assert_eq!(rows.len(), 3);
+    let default_of = |rows: &[Value], lang: &str| -> String {
+        rows.iter()
+            .find(|x| x["lang"] == lang && x["is_default"] == true)
+            .map(|x| x["version"].as_str().unwrap().to_string())
+            .unwrap()
+    };
+    assert_eq!(default_of(&rows, "rust"), "stable");
+    assert_eq!(default_of(&rows, "python"), "system");
+    assert_eq!(default_of(&rows, "node"), "system");
+    assert!(r.body["candidates"]["rust"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|v| v == "stable"));
+    assert!(r.body["candidates"]["python"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|v| v == "3.12"));
+    assert_eq!(r.body["usage"]["python:system"], 1);
+    for body in [
+        json!({"lang":"ruby","version":"3.3"}),
+        json!({"lang":"python","version":"2.7"}),
+        json!({"lang":"node","version":"22; rm -rf /"}),
+        json!({"lang":"rust","version":"1.85.0.1"}),
+        json!({"lang":"node","version":"16"}),
+    ] {
+        assert_eq!(
+            ctx.post("/api/runtimes", &t, body.clone()).await.status,
+            StatusCode::BAD_REQUEST,
+            "{body}"
+        );
+    }
+    let r = ctx
+        .post(
+            "/api/runtimes",
+            &t,
+            json!({"lang":"python","version":"3.12","make_default":true}),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::ACCEPTED, "{:?}", r.body);
+    assert_eq!(r.body["status"], "installing");
+    let py312 = r.body["id"].as_u64().unwrap();
+    let mut rows = vec![];
+    for _ in 0..50 {
+        rows = ctx.get("/api/runtimes", &t).await.body["runtimes"]
+            .as_array()
+            .unwrap()
+            .clone();
+        if rows
+            .iter()
+            .any(|x| x["id"] == py312 && x["status"] != "installing")
+        {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    let row = rows.iter().find(|x| x["id"] == py312).unwrap();
+    assert_eq!(row["status"], "ready", "{}", row["log"]);
+    assert!(row["log"]
+        .as_str()
+        .unwrap()
+        .contains("runtime-install python 3.12"));
+    assert_eq!(default_of(&rows, "python"), "3.12");
+    // 이미 설치된 버전 → 바로 200
+    let r = ctx
+        .post(
+            "/api/runtimes",
+            &t,
+            json!({"lang":"python","version":"3.12"}),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK);
+    // Rust 툴체인
+    let r = ctx
+        .post("/api/runtimes", &t, json!({"lang":"rust","version":"1.85"}))
+        .await;
+    assert_eq!(r.status, StatusCode::ACCEPTED, "{:?}", r.body);
+    let rust185 = r.body["id"].as_u64().unwrap();
+
+    // 앱별 버전: 설치 안 된 버전 거부, 업로드형 Rust 사이트는 고를 수 없음
+    let put_rt = |id: u64, v: Value| {
+        let ctx = &ctx;
+        let t = t.clone();
+        async move {
+            ctx.req(
+                Method::PUT,
+                &format!("/api/apps/{id}/runtime"),
+                Some(&t),
+                None,
+                Some(json!({ "version": v })),
+            )
+            .await
+        }
+    };
+    assert_eq!(
+        put_rt(py_id, json!("3.11")).await.status,
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        put_rt(py_id, json!("3.12; id")).await.status,
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        put_rt(rust_id, json!("stable")).await.status,
+        StatusCode::BAD_REQUEST
+    );
+    let r = put_rt(py_id, json!("3.12")).await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+    assert_eq!(r.body["runtime_version"], "3.12");
+    let r = ctx
+        .post(&format!("/api/apps/{py_id}/deploy"), &t, json!({}))
+        .await;
+    assert_eq!(r.status, StatusCode::ACCEPTED, "{:?}", r.body);
+    let d = wait_deploy(&ctx, &t, r.body["deployment_id"].as_u64().unwrap()).await;
+    assert_eq!(d["status"], "success", "{}", d["log"]);
+    assert!(
+        d["log"]
+            .as_str()
+            .unwrap()
+            .contains("/opt/rpanel/runtimes/bin/python3.12 -m venv"),
+        "{}",
+        d["log"]
+    );
+
+    // 지우기: 서버 기본·기본 버전·쓰는 중인 버전은 거부
+    let sys_py = rows
+        .iter()
+        .find(|x| x["lang"] == "python" && x["version"] == "system")
+        .unwrap()["id"]
+        .as_u64()
+        .unwrap();
+    let del_rt = |id: u64| {
+        let ctx = &ctx;
+        let t = t.clone();
+        async move {
+            ctx.req(
+                Method::DELETE,
+                &format!("/api/runtimes/{id}"),
+                Some(&t),
+                None,
+                None,
+            )
+            .await
+            .status
+        }
+    };
+    assert_eq!(del_rt(sys_py).await, StatusCode::BAD_REQUEST);
+    assert_eq!(del_rt(py312).await, StatusCode::BAD_REQUEST, "default");
+    let r = ctx
+        .req(
+            Method::PUT,
+            &format!("/api/runtimes/{sys_py}/default"),
+            Some(&t),
+            None,
+            None,
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK);
+    assert_eq!(r.body["is_default"], true);
+    assert_eq!(del_rt(py312).await, StatusCode::CONFLICT, "used by app");
+    assert_eq!(
+        put_rt(py_id, Value::Null).await.body["runtime_version"],
+        Value::Null
+    );
+    assert_eq!(del_rt(py312).await, StatusCode::NO_CONTENT);
+    for _ in 0..50 {
+        let rows = ctx.get("/api/runtimes", &t).await.body["runtimes"]
+            .as_array()
+            .unwrap()
+            .clone();
+        if rows
+            .iter()
+            .any(|x| x["id"] == rust185 && x["status"] == "ready")
+        {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert_eq!(del_rt(rust185).await, StatusCode::NO_CONTENT);
+    assert_eq!(
+        ctx.get("/api/runtimes", &t).await.body["runtimes"]
+            .as_array()
+            .unwrap()
+            .len(),
+        3
+    );
+
+    // 버전 확인 (테스트 설정은 GitHub 확인 끔)
+    let r = ctx.get("/api/system/version", &t).await;
+    assert_eq!(r.status, StatusCode::OK);
+    assert_eq!(r.body["current"], env!("CARGO_PKG_VERSION"));
+    assert_eq!(r.body["latest"], Value::Null);
+    assert_eq!(r.body["update_available"], false);
 
     // 사이트 설정 변경 → 바로 적용
     let r = ctx

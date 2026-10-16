@@ -899,6 +899,114 @@ nginx_log() {
   tail -n "$n" "/var/log/nginx/rpanel-$slug-$kind.log" 2>/dev/null || true
 }
 
+# ───────────────────────── 언어 런타임 (Python · Node.js) ─────────────────────────
+# /opt/rpanel/runtimes 아래에만 설치 (root 소유, 모두 읽기·실행 가능 → 사이트 유저도 사용)
+#   python: uv 의 standalone 빌드 → bin/python3.X 링크
+#   node:   nodejs.org 공식 tarball (SHA-256 확인) → node/<major>
+
+RT="${RPANEL_TEST_RUNTIMES:-/opt/rpanel/runtimes}"   # 테스트용 덮어쓰기
+
+valid_runtime() {
+  local lang="$1" v="$2"
+  case "$lang" in
+    python) [[ "$v" =~ ^3\.([0-9]{1,2})$ ]] && (( BASH_REMATCH[1] >= 8 && BASH_REMATCH[1] <= 20 )) || die "invalid python version: '$v'" ;;
+    node)   [[ "$v" =~ ^[1-9][0-9]$ ]] && (( v >= 18 && v <= 40 )) || die "invalid node version: '$v'" ;;
+    *) die "invalid runtime: '$lang' (python|node)" ;;
+  esac
+}
+
+rt_arch() {
+  case "$(uname -m)" in
+    x86_64) echo "$1" | cut -d, -f1 ;;
+    aarch64|arm64) echo "$1" | cut -d, -f2 ;;
+    *) die "unsupported cpu: $(uname -m)" ;;
+  esac
+}
+
+# 받은 파일을 SHA-256 으로 확인
+rt_fetch() {
+  local url="$1" out="$2"
+  curl -fsSL --proto '=https' --retry 2 --max-time 600 -o "$out" "$url" || die "download failed: $url"
+}
+
+uv_bin() {
+  local uv="$RT/uv/uv"
+  if [[ ! -x $uv ]]; then
+    local a; a=$(rt_arch x86_64,aarch64)
+    local name="uv-$a-unknown-linux-gnu" tmp
+    tmp=$(mktemp -d)
+    echo "uv 설치 (Python 설치 도구)" >&2
+    rt_fetch "https://github.com/astral-sh/uv/releases/latest/download/$name.tar.gz" "$tmp/uv.tgz"
+    rt_fetch "https://github.com/astral-sh/uv/releases/latest/download/$name.tar.gz.sha256" "$tmp/uv.sha256"
+    echo "$(awk '{print $1}' "$tmp/uv.sha256")  $tmp/uv.tgz" | sha256sum -c --quiet - || { rm -rf "$tmp"; die "uv checksum mismatch"; }
+    tar -xzf "$tmp/uv.tgz" -C "$tmp"
+    install -d -m 0755 "$RT/uv"
+    install -m 0755 "$tmp/$name/uv" "$uv"
+    rm -rf "$tmp"
+  fi
+  echo "$uv"
+}
+
+uv_env() {
+  export UV_PYTHON_INSTALL_DIR="$RT/python" UV_PYTHON_BIN_DIR="$RT/.uv-bin" UV_CACHE_DIR="$RT/.cache/uv" \
+    UV_NO_CONFIG=1 UV_PYTHON_PREFERENCE=only-managed UV_NO_MODIFY_PATH=1
+}
+
+runtime_install() {
+  local lang="$1" v="$2"
+  valid_runtime "$lang" "$v"
+  install -d -m 0755 "$RT" "$RT/bin"
+  case "$lang" in
+    python)
+      local uv; uv=$(uv_bin); uv_env
+      "$uv" python install "$v" >&2 || die "python $v install failed"
+      local py; py=$("$uv" python find "$v") || die "python $v not found after install"
+      py=$(readlink -f "$py")
+      [[ "$py" == "$RT/python/"* && -x "$py" ]] || die "unexpected python path: $py"
+      chmod -R a+rX "$RT/python"
+      ln -sfn "$py" "$RT/bin/python$v"
+      echo "OK $("$RT/bin/python$v" --version 2>&1)"
+      ;;
+    node)
+      local a; a=$(rt_arch x64,arm64)
+      local ver index
+      index=$(curl -fsSL --proto '=https' --max-time 60 https://nodejs.org/dist/index.json) \
+        || die "nodejs.org 에 접속하지 못했습니다 — 서버 인터넷 연결을 확인하세요"
+      ver=$(printf '%s' "$index" | python3 -c 'import json,sys; m="v"+sys.argv[1]+"."; print(next(r["version"] for r in json.load(sys.stdin) if r["version"].startswith(m)))' "$v") \
+        || die "node $v: 출시된 버전을 찾지 못했습니다"
+      [[ "$ver" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "bad node version: $ver"
+      local f="node-$ver-linux-$a.tar.xz" tmp
+      tmp=$(mktemp -d)
+      echo "Node.js $ver 내려받는 중" >&2
+      rt_fetch "https://nodejs.org/dist/$ver/$f" "$tmp/$f"
+      rt_fetch "https://nodejs.org/dist/$ver/SHASUMS256.txt" "$tmp/SHASUMS256.txt"
+      (cd "$tmp" && grep " $f\$" SHASUMS256.txt | sha256sum -c --quiet -) || { rm -rf "$tmp"; die "node checksum mismatch"; }
+      install -d -m 0755 "$RT/node"
+      rm -rf "$RT/node/.$v.new"
+      mkdir "$RT/node/.$v.new"
+      tar -xJf "$tmp/$f" -C "$RT/node/.$v.new" --strip-components=1 --no-same-owner
+      rm -rf "$tmp"
+      chmod -R a+rX "$RT/node/.$v.new"
+      rm -rf "$RT/node/$v"
+      mv "$RT/node/.$v.new" "$RT/node/$v"
+      echo "OK $("$RT/node/$v/bin/node" --version)"
+      ;;
+  esac
+}
+
+runtime_remove() {
+  local lang="$1" v="$2"
+  valid_runtime "$lang" "$v"
+  case "$lang" in
+    python)
+      rm -f "$RT/bin/python$v"
+      if [[ -x $RT/uv/uv ]]; then uv_env; "$RT/uv/uv" python uninstall "$v" >&2 || true; fi
+      ;;
+    node) rm -rf --one-file-system "$RT/node/$v" ;;
+  esac
+  echo "removed $lang $v"
+}
+
 # ───────────────────────── main ─────────────────────────
 
 main() {
@@ -971,6 +1079,8 @@ case "$cmd" in
   ssl-remove)  valid_slug "${1:-}"; ssl_remove "$1" ;;
   backup-files)  valid_slug "${1:-}"; backup_files "$1" "${2:-}" ;;
   restore-files) valid_slug "${1:-}"; restore_files "$1" "${2:-}" ;;
+  runtime-install) runtime_install "${1:-}" "${2:-}" ;;
+  runtime-remove)  runtime_remove "${1:-}" "${2:-}" ;;
   purge-app)
     valid_slug "${1:-}"
     remove_all_crons "$1"
@@ -984,7 +1094,7 @@ case "$cmd" in
     echo "purged $1"
     ;;
   *)
-    die "usage: rpanel-helper {prepare-app|install-unit|remove-unit|install-site|remove-site|purge-app} <slug> | svc {start|stop|restart} <slug> | status|journal <slug> | {install,remove,run}-cron|cron-status|cron-log <slug> <id> | db-{create,drop,password} <db> <user> | db-user-create <db> <user> <all|read> (pw stdin) | db-user-drop <db> <user> | db-user-password <db> <user> (pw stdin) | redis-user-set <user> <pattern> <rw|ro> (pw stdin) | redis-user-drop <user> | backup-db <slug> <db> <stamp> | backup-data <slug> <stamp> | restore-db <slug> <db> <file> | restore-data <slug> <file> | nginx-log <slug> access|error <lines> | site-create <slug> <user> <domain> <static|rust|python> | site-password <slug> (stdin) | site-account-create <slug> <user> <ssh|sftp> (pw stdin) | site-account-update <slug> <user> <ssh|sftp> <on|off> | site-account-password <slug> <user> (stdin) | site-account-keys <slug> <user> (stdin) | site-account-delete <slug> <user> | ssl-issue <slug> <email> <domain>... | ssl-custom|ssl-info|ssl-remove <slug> | backup-files <slug> <stamp> | restore-files <slug> <file>"
+    die "usage: rpanel-helper {prepare-app|install-unit|remove-unit|install-site|remove-site|purge-app} <slug> | svc {start|stop|restart} <slug> | status|journal <slug> | {install,remove,run}-cron|cron-status|cron-log <slug> <id> | db-{create,drop,password} <db> <user> | db-user-create <db> <user> <all|read> (pw stdin) | db-user-drop <db> <user> | db-user-password <db> <user> (pw stdin) | redis-user-set <user> <pattern> <rw|ro> (pw stdin) | redis-user-drop <user> | backup-db <slug> <db> <stamp> | backup-data <slug> <stamp> | restore-db <slug> <db> <file> | restore-data <slug> <file> | nginx-log <slug> access|error <lines> | site-create <slug> <user> <domain> <static|rust|python> | site-password <slug> (stdin) | site-account-create <slug> <user> <ssh|sftp> (pw stdin) | site-account-update <slug> <user> <ssh|sftp> <on|off> | site-account-password <slug> <user> (stdin) | site-account-keys <slug> <user> (stdin) | site-account-delete <slug> <user> | ssl-issue <slug> <email> <domain>... | ssl-custom|ssl-info|ssl-remove <slug> | backup-files <slug> <stamp> | restore-files <slug> <file> | runtime-install|runtime-remove <python|node> <version>"
     ;;
 esac
 }

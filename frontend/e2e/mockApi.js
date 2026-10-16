@@ -21,6 +21,12 @@ export function createMockBackend({ needsSetup = false } = {}) {
     ssl: {},
     accounts: [],
     admins: [],
+    version: { current: '0.4.0', latest: '0.5.0', update_available: true, repo_url: 'https://github.com/sinji0117/Rpanel', checked_at: now(), error: null },
+    runtimes: [
+      { id: 901, lang: 'rust', version: 'stable', status: 'ready', is_default: true, is_system: true, detail: '1.90.0', log: null, updated_at: now() },
+      { id: 902, lang: 'python', version: 'system', status: 'ready', is_default: true, is_system: true, detail: '3.12.3', log: null, updated_at: now() },
+      { id: 903, lang: 'node', version: 'system', status: 'ready', is_default: true, is_system: true, detail: '22.11.0', log: null, updated_at: now() },
+    ],
     seq: 1,
   }
   const id = () => db.seq++
@@ -81,6 +87,59 @@ export function createMockBackend({ needsSetup = false } = {}) {
         recent_deployments: db.deployments.map((d) => ({ ...d, app_name: db.apps.find((a) => a.id === d.app_id)?.name, app_slug: '' })),
       })
     if (path === '/audit') return json(route, 200, [])
+    if (path === '/system/version') return json(route, 200, db.version)
+
+    // ── runtimes ── (설치는 GET 두 번째에 끝난 것으로)
+    if (path === '/runtimes' && method === 'GET') {
+      for (const r of db.runtimes)
+        if (r.status === 'installing' && (r.polls = (r.polls ?? 0) + 1) > 1) {
+          Object.assign(r, {
+            status: 'ready',
+            detail: r.lang === 'python' ? `${r.version}.9` : r.lang === 'node' ? `${r.version}.3.0` : `${r.version}.0`,
+            log: `$ install ${r.lang} ${r.version}\nOK`,
+          })
+          if (r.makeDefault) for (const x of db.runtimes) if (x.lang === r.lang) x.is_default = x === r
+        }
+      const usage = {}
+      for (const a of db.apps) {
+        const lang = a.kind === 'python' ? 'python' : a.source === 'git' && a.kind === 'rust' ? 'rust' : a.source === 'git' && a.kind === 'static' ? 'node' : null
+        if (!lang) continue
+        const v = a.runtime_version ?? db.runtimes.find((r) => r.lang === lang && r.is_default)?.version
+        usage[`${lang}:${v}`] = (usage[`${lang}:${v}`] ?? 0) + 1
+      }
+      return json(route, 200, {
+        runtimes: db.runtimes,
+        candidates: { rust: ['stable', 'beta', 'nightly', '1.90', '1.89'], python: ['system', '3.14', '3.13', '3.12', '3.11'], node: ['system', '24', '22', '20'] },
+        usage,
+      })
+    }
+    if (path === '/runtimes' && method === 'POST') {
+      if (body.lang === 'python' && !/^(system|3\.\d{1,2})$/.test(body.version))
+        return json(route, 400, { error: 'bad_request', message: 'Python 버전은 3.8 ~ 3.20 형식입니다 (예: 3.12)' })
+      const ex = db.runtimes.find((r) => r.lang === body.lang && r.version === body.version)
+      if (ex?.status === 'ready') {
+        if (body.make_default) for (const x of db.runtimes) if (x.lang === ex.lang) x.is_default = x === ex
+        return json(route, 200, ex)
+      }
+      const r = ex ?? { id: id(), lang: body.lang, version: body.version, is_default: false, is_system: false, detail: '', log: null, updated_at: now() }
+      Object.assign(r, { status: 'installing', polls: 0, makeDefault: !!body.make_default })
+      if (!ex) db.runtimes.push(r)
+      return json(route, 202, r)
+    }
+    let rm = path.match(/^\/runtimes\/(\d+)(\/default)?$/)
+    if (rm) {
+      const r = db.runtimes.find((x) => x.id === Number(rm[1]))
+      if (!r) return json(route, 404, { error: 'not_found', message: '찾을 수 없습니다' })
+      if (rm[2]) {
+        for (const x of db.runtimes) if (x.lang === r.lang) x.is_default = x === r
+        return json(route, 200, r)
+      }
+      if (r.is_default || r.is_system) return json(route, 400, { error: 'bad_request', message: '기본 버전은 지울 수 없습니다 — 다른 버전을 기본으로 정한 뒤 지우세요' })
+      if (db.apps.some((a) => a.runtime_version === r.version))
+        return json(route, 409, { error: 'conflict', message: '앱 1개가 이 버전을 쓰고 있습니다 — 앱 설정에서 버전을 바꾼 뒤 지우세요' })
+      db.runtimes = db.runtimes.filter((x) => x !== r)
+      return json(route, 204)
+    }
 
     // ── admins ──
     const admins = () => [db.user, ...db.admins]
@@ -200,6 +259,13 @@ export function createMockBackend({ needsSetup = false } = {}) {
         db.apps.filter((a) => !pid || a.project_id === pid),
       )
     }
+    m = path.match(/^\/apps\/(\d+)\/runtime$/)
+    if (m && method === 'PUT') {
+      const a = db.apps.find((x) => x.id === Number(m[1]))
+      a.runtime_version = body.version ?? null
+      return json(route, 200, a)
+    }
+
     // ── site accounts ──
     m = path.match(/^\/apps\/(\d+)\/accounts(?:\/(\d+)(\/password)?)?$/)
     if (m) {

@@ -245,7 +245,7 @@ if command -v certbot >/dev/null; then
   done
 fi
 rm -f /var/log/nginx/rpanel-*.log*
-rm -rf --one-file-system /var/lib/rpanel /etc/rpanel /opt/rpanel-src
+rm -rf --one-file-system /var/lib/rpanel /etc/rpanel /opt/rpanel-src /opt/rpanel
 userdel rpanel >/dev/null 2>&1 || true
 userdel rpanel-app >/dev/null 2>&1 || true
 groupdel rpanel-sites >/dev/null 2>&1 || true
@@ -255,7 +255,7 @@ if [[ -f /etc/ssh/sshd_config.d/49-rpanel-access.conf ]]; then
   rm -f /etc/ssh/sshd_config.d/49-rpanel-access.conf
   systemctl reload ssh 2>/dev/null || systemctl reload sshd 2>/dev/null || true
 fi
-info "/var/lib/rpanel · /etc/rpanel · 패널 계정 삭제"
+info "/var/lib/rpanel · /etc/rpanel · /opt/rpanel(언어 런타임) · 패널 계정 삭제"
 
 cat <<EOF
 

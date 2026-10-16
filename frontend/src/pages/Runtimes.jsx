@@ -1,6 +1,7 @@
 import { useState } from 'react'
-import { Link } from 'react-router'
-import { ErrorBox, Modal, PageHeader, Section, Spinner } from '../components/ui'
+import { Link, useSearchParams } from 'react-router'
+import { ErrorBox, Modal, PageHeader, Section, Spinner, Tabs } from '../components/ui'
+import { DbEngineList } from './DbVersions'
 import { useToast } from '../context/ToastContext'
 import { t } from '../i18n'
 import { del, get, post, put } from '../lib/api'
@@ -192,23 +193,51 @@ function LangSection({ lang, rows, candidates, usage, onChanged }) {
 }
 
 export default function RuntimesPage() {
+  const [params, setParams] = useSearchParams()
+  const tab = params.get('tab') === 'db' ? 'db' : 'lang'
+  return (
+    <>
+      <PageHeader
+        title={t('런타임')}
+        subtitle={t('언어와 데이터베이스 서버의 버전을 골라 씁니다')}
+        help={
+          tab === 'db' ? (
+            <>
+              {t('데이터베이스 서버의 지금 버전을 보고, 더 높은 버전으로 바꿉니다. DB 서버는 한 번에 한 버전만 쓸 수 있어 앱별로 고르지는 않습니다.')}
+              <br />
+              <br />
+              {t('바꾸기 전에 전체 백업을 /var/lib/rpanel/backups/_engines 에 만듭니다. 데이터 형식이 바뀌므로 낮은 버전으로는 되돌릴 수 없습니다.')}
+            </>
+          ) : (
+            <>
+              {t('언어별로 여러 버전을 설치해 두고 기본 버전을 고릅니다. 앱마다 다른 버전을 쓰려면 앱의 설정 탭에서 고르세요.')}
+              <br />
+              <br />
+              {t('바꾼 버전은 다음 배포·적용부터 쓰입니다. Python 사이트는 버전이 바뀌면 가상환경을 새로 만들고 패키지를 다시 설치합니다.')}
+            </>
+          )
+        }
+      />
+      <Tabs
+        tabs={[
+          { id: 'lang', label: t('언어 (Rust · Python · Node.js)') },
+          { id: 'db', label: t('데이터베이스 (MariaDB · MongoDB · Redis)') },
+        ]}
+        active={tab}
+        onChange={(id) => setParams(id === 'db' ? { tab: 'db' } : {}, { replace: true })}
+      />
+      {tab === 'db' ? <DbEngineList /> : <LangRuntimes />}
+    </>
+  )
+}
+
+function LangRuntimes() {
   const data = useFetch(() => get('/runtimes'), [])
   const installing = data.data?.runtimes.some((r) => r.status === 'installing')
   useInterval(() => data.reload(true), 2000, !!installing)
 
   return (
     <>
-      <PageHeader
-        title={t('런타임')}
-        help={
-          <>
-            {t('언어별로 여러 버전을 설치해 두고 기본 버전을 고릅니다. 앱마다 다른 버전을 쓰려면 앱의 설정 탭에서 고르세요.')}
-            <br />
-            <br />
-            {t('바꾼 버전은 다음 배포·적용부터 쓰입니다. Python 사이트는 버전이 바뀌면 가상환경을 새로 만들고 패키지를 다시 설치합니다.')}
-          </>
-        }
-      />
       {data.loading && <Spinner className="text-ink-400" />}
       <ErrorBox error={data.error} />
       {data.data && (

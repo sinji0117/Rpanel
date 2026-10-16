@@ -1062,4 +1062,7 @@ export default {
   "사용자 화면 · 관리자 화면 (npm 빌드 → Nginx)": "Public site · admin screen (npm build → Nginx)",
   "프런트엔드": "Front end",
   "프런트엔드(사용자 화면 · 관리자 화면)와 백엔드를 한 곳에서 관리합니다. 프런트엔드 카드의 “/api/ 연결”에서 백엔드를 고르면 같은 도메인의 /api/ 요청이 그 백엔드로 갑니다. 관리자 화면은 admin.example.com 같은 다른 도메인을 붙이세요.": "Manage front ends (public site · admin screen) and backends in one place. Pick a backend in a front-end card's “/api/ link” to send /api/ requests on the same domain to it. Give the admin screen its own domain such as admin.example.com.",
+  "데이터베이스 (MariaDB · MongoDB · Redis)": "Databases (MariaDB · MongoDB · Redis)",
+  "언어 (Rust · Python · Node.js)": "Languages (Rust · Python · Node.js)",
+  "언어와 데이터베이스 서버의 버전을 골라 씁니다": "Choose the versions of languages and database servers",
 }

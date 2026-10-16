@@ -661,7 +661,6 @@ test('알림: 종 아이콘 · 목록 · 설정 · 시험 알림, 메뉴 순서,
     'MariaDB',
     'MongoDB',
     'Redis',
-    'DB 버전',
     '백업',
     '로그',
     '알림',
@@ -937,7 +936,11 @@ test('DB 버전: 지금 버전 · 더 높은 버전으로만 바꾸기', async (
   const backend = seededBackend()
   await backend.install(page)
   await acceptPopups(page)
+  // 예전 주소는 시스템 → 런타임의 데이터베이스 탭으로
   await page.goto('/db-versions')
+  await expect(page).toHaveURL(/\/runtimes\?tab=db$/)
+  await expect(page.getByRole('tab', { name: /데이터베이스/ })).toHaveAttribute('aria-selected', 'true')
+  await expect(page.getByTestId('section-bar')).toContainText('시스템')
   await expect(page.getByTestId('engine-version-mariadb')).toHaveText('10.11.13-MariaDB')
   const maria = page.getByTestId('engine-mariadb')
   await expect(maria.getByText('사용 중')).toBeVisible()

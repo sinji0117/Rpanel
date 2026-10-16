@@ -1,6 +1,6 @@
 // 데이터베이스 서버 버전 (MariaDB · MongoDB · Redis) — 지금 버전 · 더 높은 버전으로 바꾸기
 import { useState } from 'react'
-import { ErrorBox, PageHeader, Section, Spinner } from '../components/ui'
+import { ErrorBox, Section, Spinner } from '../components/ui'
 import { confirmDialog } from '../components/Dialog'
 import { useToast } from '../context/ToastContext'
 import { get, post } from '../lib/api'
@@ -92,24 +92,14 @@ function EngineCard({ e, busyAll, onStarted }) {
   )
 }
 
-export default function DbVersionsPage() {
+/** 런타임 화면의 “데이터베이스” 탭 */
+export function DbEngineList() {
   const data = useFetch(() => get('/db-engines'), [])
   const engines = data.data?.engines ?? []
   const running = engines.some((e) => e.job?.status === 'running')
   useInterval(() => data.reload(true), 2000, running)
   return (
     <>
-      <PageHeader
-        title={t('DB 버전')}
-        help={
-          <>
-            {t('데이터베이스 서버의 지금 버전을 보고, 더 높은 버전으로 바꿉니다. DB 서버는 한 번에 한 버전만 쓸 수 있어 앱별로 고르지는 않습니다.')}
-            <br />
-            <br />
-            {t('바꾸기 전에 전체 백업을 /var/lib/rpanel/backups/_engines 에 만듭니다. 데이터 형식이 바뀌므로 낮은 버전으로는 되돌릴 수 없습니다.')}
-          </>
-        }
-      />
       {data.loading && <Spinner className="text-ink-400" />}
       <ErrorBox error={data.error} />
       <div className="space-y-4">

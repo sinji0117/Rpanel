@@ -29,7 +29,6 @@ export const NAV = [
       { to: '/mariadb', label: 'MariaDB' },
       { to: '/mongodb', label: 'MongoDB' },
       { to: '/redis', label: 'Redis' },
-      { to: '/db-versions', label: 'DB 버전' },
     ],
   },
   {

@@ -1,6 +1,6 @@
 [package]
 name = "rpanel"
-version = "0.6.2"
+version = "0.6.3"
 edition = "2021"
 description = "Rpanel — self-hosted web panel for Rust services (sites, Git deploys, databases, SSL, backups)"
 license = "MIT"

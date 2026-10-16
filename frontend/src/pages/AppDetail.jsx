@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router'
 import AppForm, { sshUrl, toPayload } from '../components/AppForm'
+import DeploymentLogPanel from '../components/DeploymentLog'
 import LogViewer from '../components/LogViewer'
 import { CardHeader, CopyButton, ErrorBox, HelpTip, KindBadge, PageHeader, Spinner, StatusBadge, Tabs } from '../components/ui'
 import { useToast } from '../context/ToastContext'
@@ -20,6 +21,8 @@ export default function AppDetail() {
   const app = useFetch(() => get(`/apps/${id}`), [id])
   const [tabState, setTab] = useState(null)
   const [deploying, setDeploying] = useState(false)
+  // 배포 탭에서 로그를 볼 배포 (null = 가장 최근)
+  const [logId, setLogId] = useState(null)
 
   useInterval(() => app.reload(true), 4000, app.data?.status === 'deploying')
 
@@ -35,7 +38,10 @@ export default function AppDetail() {
     setDeploying(true)
     try {
       const { deployment_id } = await post(`/apps/${id}/deploy`)
-      nav(`/deployments/${deployment_id}`)
+      // 화면을 떠나지 않고 배포 탭에서 실시간 로그를 보여 줌
+      setLogId(deployment_id)
+      setTab('deployments')
+      app.reload(true)
     } catch (e) {
       toast.push(e.message, 'error')
     } finally {
@@ -114,6 +120,15 @@ export default function AppDetail() {
         actions={
           <>
             {isService && <ServiceButtons app={a} onDone={() => app.reload(true)} />}
+            <button
+              className="btn-ghost"
+              onClick={() => {
+                setLogId(null)
+                setTab('deployments')
+              }}
+            >
+              {isGit ? t('배포 로그') : t('적용 로그')}
+            </button>
             <button className="btn-primary" onClick={deploy} disabled={deploying || a.status === 'deploying'} title={isGit ? '' : t('설정(Nginx·서비스)을 다시 적용합니다')}>
               {a.status === 'deploying' ? (isGit ? t('배포 중…') : t('적용 중…')) : isGit ? t('배포') : t('적용')}
             </button>
@@ -161,7 +176,7 @@ export default function AppDetail() {
       </PageHeader>
 
       <Tabs tabs={tabs} active={tab} onChange={setTab} />
-      {tab === 'deployments' && <DeploymentsTab app={a} onChanged={() => app.reload(true)} />}
+      {tab === 'deployments' && <DeploymentsTab app={a} selected={logId} onSelect={setLogId} onChanged={() => app.reload(true)} />}
       {tab === 'env' && <EnvTab app={a} />}
       {tab === 'db' && <DatabaseTab app={a} onChanged={() => app.reload(true)} />}
       {tab === 'backups' && <BackupTab app={a} onChanged={() => app.reload(true)} />}
@@ -182,16 +197,32 @@ export default function AppDetail() {
   )
 }
 
+// systemctl is-active 결과 → 표시
+const SYSTEMD = {
+  active: { label: '실행 중', cls: 'text-signal', dot: 'bg-signal' },
+  activating: { label: '시작하는 중', cls: 'text-warn', dot: 'bg-warn animate-pulse' },
+  reloading: { label: '다시 읽는 중', cls: 'text-warn', dot: 'bg-warn animate-pulse' },
+  deactivating: { label: '멈추는 중', cls: 'text-warn', dot: 'bg-warn animate-pulse' },
+  inactive: { label: '멈춤', cls: 'text-ink-400', dot: 'bg-ink-600' },
+  failed: { label: '실패', cls: 'text-fail', dot: 'bg-fail' },
+}
+
 function ServiceButtons({ app, onDone }) {
   const toast = useToast()
   const status = useFetch(() => get(`/apps/${app.id}/service`), [app.id, app.status])
   const [busy, setBusy] = useState(null)
+  const state = status.data?.active
+  const settling = ['activating', 'deactivating', 'reloading'].includes(state)
+  // 평소 5초마다, 상태가 바뀌는 중이면 1초마다 다시 확인
+  useInterval(() => status.reload(true), settling ? 1000 : 5000, !!app.current_release)
   const act = async (action) => {
     setBusy(action)
     try {
       await post(`/apps/${app.id}/service`, { action })
       toast.push(t('{slug}: {action} 완료', { slug: app.slug, action }), 'success')
       status.reload(true)
+      // systemd 가 상태를 바꾸는 데 시간이 조금 걸릴 수 있어 몇 번 더 확인
+      for (const ms of [800, 2000, 4000]) setTimeout(() => status.reload(true), ms)
       onDone()
     } catch (e) {
       toast.push(e.message, 'error')
@@ -202,11 +233,20 @@ function ServiceButtons({ app, onDone }) {
   const disabled = !app.current_release || !!busy
   return (
     <div className="flex items-center gap-1.5">
-      {status.data?.active && <span className="mr-1 font-mono text-xs text-ink-400">systemd: {status.data.active}</span>}
+      {state && (
+        <span
+          className={`mr-1 inline-flex items-center gap-1.5 text-xs ${SYSTEMD[state]?.cls ?? 'text-ink-400'}`}
+          data-testid="systemd-state"
+          title={`systemctl is-active: ${state}`}
+        >
+          <span className={`h-1.5 w-1.5 rounded-full ${SYSTEMD[state]?.dot ?? 'bg-ink-600'}`} />
+          <span className="font-mono text-ink-400">systemd</span> {SYSTEMD[state] ? t(SYSTEMD[state].label) : state}
+        </span>
+      )}
       <button className="btn-ghost px-2.5" disabled={disabled} onClick={() => act('restart')} title={t('재시작')}>
         {busy === 'restart' ? <Spinner /> : '↻'}
       </button>
-      {app.status === 'stopped' ? (
+      {app.status === 'stopped' || state === 'inactive' || state === 'failed' ? (
         <button className="btn-ghost px-2.5" disabled={disabled} onClick={() => act('start')} title={t('시작')}>
           ▶
         </button>
@@ -219,70 +259,76 @@ function ServiceButtons({ app, onDone }) {
   )
 }
 
-function DeploymentsTab({ app, onChanged }) {
+function DeploymentsTab({ app, selected, onSelect, onChanged }) {
   const toast = useToast()
   const list = useFetch(() => get(`/apps/${app.id}/deployments?limit=50`), [app.id])
   useInterval(() => list.reload(true), 3000, !!list.data?.some((d) => ['queued', 'running'].includes(d.status)) || app.status === 'deploying')
   useEffect(() => {
     list.reload(true)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [app.status])
+  }, [app.status, selected])
 
   if (list.loading) return <Spinner className="text-ink-400" />
   if (!list.data?.length) return <p className="card px-5 py-10 text-center text-sm text-ink-400">{t('아직 배포가 없습니다. 오른쪽 위 “배포”를 누르세요.')}</p>
+  const shown = selected && list.data.some((d) => d.id === selected) ? selected : list.data[0].id
 
   return (
-    <div className="card overflow-x-auto">
-      <table className="w-full text-sm">
-        <thead className="border-b border-ink-700/70 text-left text-xs text-ink-400">
-          <tr>
-            <th className="px-5 py-3 font-medium">#</th>
-            <th className="px-3 py-3 font-medium">{t('상태')}</th>
-            <th className="px-3 py-3 font-medium">{t('커밋')}</th>
-            <th className="px-3 py-3 font-medium">{t('소요')}</th>
-            <th className="px-3 py-3 font-medium">{t('시작')}</th>
-            <th className="px-5 py-3" />
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-ink-800">
-          {list.data.map((d) => (
-            <tr key={d.id} className="hover:bg-ink-850">
-              <td className="px-5 py-3">
-                <Link to={`/deployments/${d.id}`} className="font-mono hover:text-signal">
-                  #{d.id}
-                </Link>
-                {app.current_release === d.id && <span className="ml-2 text-[11px] text-signal">{t('현재')}</span>}
-              </td>
-              <td className="px-3 py-3">
-                <StatusBadge status={d.status} deployment />
-              </td>
-              <td className="px-3 py-3 font-mono text-xs text-ink-300">{shortSha(d.commit_sha)}</td>
-              <td className="px-3 py-3 text-xs text-ink-400">{duration(d.started_at, d.finished_at)}</td>
-              <td className="px-3 py-3 text-xs text-ink-400">{ago(d.created_at)}</td>
-              <td className="px-5 py-3 text-right">
-                {d.status === 'success' && app.current_release !== d.id && (
-                  <button
-                    className="btn-ghost px-2.5 py-1 text-xs"
-                    onClick={async () => {
-                      if (!window.confirm(t('#{id} 릴리스로 되돌릴까요?', { id: d.id }))) return
-                      try {
-                        await post(`/deployments/${d.id}/rollback`)
-                        toast.push(t('#{id} 로 롤백했습니다', { id: d.id }), 'success')
-                        onChanged()
-                        list.reload(true)
-                      } catch (e) {
-                        toast.push(e.message, 'error')
-                      }
-                    }}
-                  >
-                    {t('롤백')}
-                  </button>
-                )}
-              </td>
+    <div className="space-y-4">
+      <div className="card max-h-[320px] overflow-auto">
+        <table className="w-full text-sm" aria-label={t('배포 기록')}>
+          <thead className="border-b border-ink-700/70 text-left text-xs text-ink-400">
+            <tr>
+              <th className="px-5 py-3 font-medium">#</th>
+              <th className="px-3 py-3 font-medium">{t('상태')}</th>
+              <th className="px-3 py-3 font-medium">{t('커밋')}</th>
+              <th className="px-3 py-3 font-medium">{t('소요')}</th>
+              <th className="px-3 py-3 font-medium">{t('시작')}</th>
+              <th className="px-5 py-3" />
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody className="divide-y divide-ink-800">
+            {list.data.map((d) => (
+              <tr key={d.id} className={`cursor-pointer hover:bg-ink-850 ${d.id === shown ? 'bg-ink-850' : ''}`} aria-selected={d.id === shown} onClick={() => onSelect?.(d.id)}>
+                <td className="px-5 py-3">
+                  <span className={`font-mono ${d.id === shown ? 'text-signal' : ''}`}>#{d.id}</span>
+                  {app.current_release === d.id && <span className="ml-2 text-[11px] text-signal">{t('현재')}</span>}
+                </td>
+                <td className="px-3 py-3">
+                  <StatusBadge status={d.status} deployment />
+                </td>
+                <td className="px-3 py-3 font-mono text-xs text-ink-300">{shortSha(d.commit_sha)}</td>
+                <td className="px-3 py-3 text-xs text-ink-400">{duration(d.started_at, d.finished_at)}</td>
+                <td className="px-3 py-3 text-xs text-ink-400">{ago(d.created_at)}</td>
+                <td className="px-5 py-3 text-right">
+                  {d.status === 'success' && app.current_release !== d.id && (
+                    <button
+                      className="btn-ghost px-2.5 py-1 text-xs"
+                      onClick={async (e) => {
+                        e.stopPropagation()
+                        if (!window.confirm(t('#{id} 릴리스로 되돌릴까요?', { id: d.id }))) return
+                        try {
+                          await post(`/deployments/${d.id}/rollback`)
+                          toast.push(t('#{id} 로 롤백했습니다', { id: d.id }), 'success')
+                          onChanged()
+                          list.reload(true)
+                        } catch (e) {
+                          toast.push(e.message, 'error')
+                        }
+                      }}
+                    >
+                      {t('롤백')}
+                    </button>
+                  )}
+                  <button className="btn-ghost ml-1.5 px-2.5 py-1 text-xs" aria-label={t('#{id} 로그 보기', { id: d.id })} onClick={(e) => (e.stopPropagation(), onSelect?.(d.id))}>
+                    {t('로그')}
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <DeploymentLogPanel key={shown} id={shown} onFinished={() => (list.reload(true), onChanged())} />
     </div>
   )
 }

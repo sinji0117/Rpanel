@@ -883,4 +883,12 @@ export default {
   '빌드 결과 폴더': 'Build output folder',
   '프로그램에서 {path} 경로로 읽으면 됩니다': 'Your program can read it at {path}',
   'Node.js / npm 을 찾지 못했습니다 — 런타임 메뉴에서 Node.js 를 설치하세요': 'Node.js / npm not found — install Node.js from the Runtimes menu',
+  '배포 #{id} 로그': 'Deployment #{id} log',
+  '전체 화면 ↗': 'Full screen ↗',
+  '배포 로그': 'Deploy log',
+  '시작하는 중': 'Starting',
+  '다시 읽는 중': 'Reloading',
+  '멈추는 중': 'Stopping',
+  멈춤: 'Stopped',
+  '#{id} 로그 보기': 'View log #{id}',
 }

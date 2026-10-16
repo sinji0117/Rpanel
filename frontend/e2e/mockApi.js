@@ -566,7 +566,12 @@ export function createMockBackend({ needsSetup = false } = {}) {
         db.env[a.id] = [...body.vars].sort((x, y) => x.key.localeCompare(y.key))
         return json(route, 200, { vars: db.env[a.id] })
       }
-      if (sub === '/service' && method === 'GET') return json(route, 200, { active: 'inactive', unit: `rpanel-app-${a.slug}.service` })
+      if (sub === '/service' && method === 'GET') return json(route, 200, { active: a.svc ?? (a.current_release ? 'active' : 'inactive'), unit: `rpanel-app-${a.slug}.service` })
+      if (sub === '/service' && method === 'POST') {
+        a.svc = body.action === 'stop' ? 'inactive' : 'active'
+        a.status = body.action === 'stop' ? 'stopped' : 'running'
+        return json(route, 200, { ok: true })
+      }
       if (sub === '/deploy-key' && method === 'GET') return json(route, 200, { public_key: null })
       if (sub === '/deploy-key' && method === 'POST') return json(route, 200, { public_key: `ssh-ed25519 AAAAC3NzaTEST rpanel-${a.slug}` })
       if (sub === '/webhook') return json(route, 200, { path: `/api/hooks/${a.slug}`, token: 'hooktoken123', branch: a.git_branch })

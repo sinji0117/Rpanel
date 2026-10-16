@@ -7,17 +7,22 @@ export function useFetch(fn, deps = []) {
   const [loading, setLoading] = useState(true)
   const fnRef = useRef(fn)
   fnRef.current = fn
+  // 늦게 도착한 이전 응답이 최신 값을 덮어쓰지 않도록
+  const seq = useRef(0)
 
   const load = useCallback(async (silent = false) => {
+    const my = ++seq.current
     if (!silent) setLoading(true)
     try {
       const d = await fnRef.current()
+      if (my !== seq.current) return
       setData(d)
       setError(null)
     } catch (e) {
+      if (my !== seq.current) return
       setError(e)
     } finally {
-      setLoading(false)
+      if (my === seq.current) setLoading(false)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, deps)

@@ -81,17 +81,33 @@ test('프로젝트 → Rust 앱 생성 → 배포 실시간 로그 → 롤백 �
   expect(backend.db.apps.find((a) => a.name === 'Beripick API')).toMatchObject({ frontend_dir: 'frontend', output_dir: 'dist' })
   await expect(page.getByText('아직 배포가 없습니다')).toBeVisible()
 
+  // 배포를 눌러도 앱 화면에 머물고, 배포 탭 아래에서 실시간 로그를 봄
   await page.getByRole('button', { name: '배포', exact: true }).click()
-  await expect(page.getByRole('heading', { name: /배포 #\d+/ })).toBeVisible()
-  const log = page.getByTestId('log-viewer')
+  const panel = page.getByRole('region', { name: /배포 #\d+ 로그/ })
+  await expect(panel).toBeVisible()
+  const log = panel.getByTestId('log-viewer')
   await expect(log).toContainText('✔ 배포 완료')
   await expect(log).toContainText('Compiling hello-api')
   // seq 중복 제거: "▶ 소스 가져오기"는 한 번만
   await expect(log.getByText('▶ 소스 가져오기')).toHaveCount(1)
-  await expect(page.getByRole('heading', { name: /배포 #\d+/ }).getByText('성공')).toBeVisible()
-
-  await page.getByRole('link', { name: '앱으로' }).click()
+  await expect(panel.getByText('성공')).toBeVisible()
   await expect(page.getByRole('cell', { name: /현재/ })).toBeVisible()
+
+  // 다른 탭에 있다가도 "배포 로그" 버튼으로 바로 돌아옴
+  await page.getByRole('tab', { name: '환경변수' }).click()
+  await page.getByRole('button', { name: '배포 로그' }).click()
+  await expect(page.getByRole('region', { name: /배포 #\d+ 로그/ }).getByTestId('log-viewer')).toContainText('✔ 배포 완료')
+  // 전체 화면으로 보기
+  await page.getByRole('link', { name: '전체 화면 ↗' }).click()
+  await expect(page.getByRole('heading', { name: /배포 #\d+/ })).toBeVisible()
+  await page.getByRole('link', { name: '앱으로' }).click()
+
+  // 서비스 중지 → systemd 상태가 바로 "멈춤" 으로, 시작 버튼으로 바뀜
+  await expect(page.getByTestId('systemd-state')).toContainText('실행 중')
+  await page.getByRole('button', { name: '■' }).click()
+  await expect(page.getByTestId('systemd-state')).toContainText('멈춤')
+  await page.getByRole('button', { name: '▶' }).click()
+  await expect(page.getByTestId('systemd-state')).toContainText('실행 중')
 })
 
 test('환경변수 .env 붙여넣기·저장 + Deploy key·Webhook', async ({ page }) => {

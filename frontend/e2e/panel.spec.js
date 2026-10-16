@@ -654,20 +654,7 @@ test('알림: 종 아이콘 · 목록 · 설정 · 시험 알림, 메뉴 순서,
 
   // 메뉴 순서: … 로그 · 런타임 · 설정 · 관리자
   await expect(page.locator('[data-testid^=nav-group-]')).toHaveText([/웹사이트/, /데이터베이스/, /운영/, /시스템/])
-  await expect(page.locator('aside nav a')).toHaveText([
-    '대시보드',
-    '사이트',
-    '프로젝트',
-    'MariaDB',
-    'MongoDB',
-    'Redis',
-    '백업',
-    '로그',
-    '알림',
-    '런타임',
-    '설정',
-    '관리자',
-  ])
+  await expect(page.locator('aside nav a')).toHaveText(['대시보드', '사이트', '프로젝트', 'MariaDB', 'MongoDB', 'Redis', '백업', '로그', '알림', '런타임', '설정', '관리자'])
 
   // 종 아이콘: 안 읽은 2개 → 펼치면 번역된 제목 → 누르면 링크로 이동하고 읽음
   await expect(page.getByTestId('notification-count').first()).toHaveText('2')
@@ -932,7 +919,7 @@ test('알림 목록: 분류·수준으로 나눠 보기', async ({ page }) => {
   await expect(list).toContainText('디스크 사용량 93% (/)')
 })
 
-test('DB 버전: 지금 버전 · 더 높은 버전으로만 바꾸기', async ({ page }) => {
+test('DB 버전: 올리기 · 내리기, 만든 DB 가 있으면 잠김', async ({ page }) => {
   const backend = seededBackend()
   await backend.install(page)
   await acceptPopups(page)
@@ -944,12 +931,53 @@ test('DB 버전: 지금 버전 · 더 높은 버전으로만 바꾸기', async (
   await expect(page.getByTestId('engine-version-mariadb')).toHaveText('10.11.13-MariaDB')
   const maria = page.getByTestId('engine-mariadb')
   await expect(maria.getByText('사용 중')).toBeVisible()
-  await maria.getByRole('button', { name: '이 버전으로' }).first().click()
+  await maria.getByRole('button', { name: '↑ 이 버전으로 올리기' }).first().click()
   await expect(page.getByText('MariaDB 11.4 로 바꾸는 중입니다')).toBeVisible()
   await expect(page.getByTestId('engine-version-mariadb')).toHaveText('11.4.1')
   await expect(page.getByText('11.4 로 바꿨습니다')).toBeVisible()
-  // 이제 10.11 은 낮은 버전 → 바꿀 수 없음
-  await expect(maria.getByRole('button', { name: '바꿀 수 없음' })).toBeDisabled()
+  // 만든 DB 가 없으면 낮은 버전으로도 내릴 수 있음
+  await expect(maria.getByRole('button', { name: '↓ 이 버전으로 내리기' })).toBeEnabled()
+  // DB 를 만들면 바꿀 수 없음
+  backend.db.dbs.push({ id: 40, app_id: null, name: 'shopdb', username: 'shopdb', env_key: 'DATABASE_URL', created_at: '' })
+  await page.reload()
+  await expect(page.getByTestId('engine-locked-mariadb')).toContainText('1개')
+  await expect(page.getByTestId('engine-mariadb').getByRole('button', { name: '바꿀 수 없음' }).first()).toBeDisabled()
+})
+
+test('DB 웹 관리: MongoDB 문서 · Redis 키', async ({ page }) => {
+  const backend = seededBackend()
+  backend.db.mongos.push({ id: 50, app_id: 2, name: 'shop', username: 'shop', env_key: 'MONGODB_URL', created_at: '' })
+  backend.db.apps[0].redis_db = 4
+  await backend.install(page)
+  await acceptPopups(page)
+  await page.goto('/mongodb')
+  await page.getByTestId('mongoweb-shop').click()
+  await page
+    .getByTestId('mongo-collections')
+    .getByRole('button', { name: /orders/ })
+    .click()
+  const docs = page.getByTestId('mongo-docs')
+  await expect(docs).toContainText('사과')
+  await page.getByRole('button', { name: '+ 문서 추가' }).click()
+  await page.getByLabel('문서 (JSON)').fill('{ "item": "배", "qty": 1 }')
+  await page.getByRole('button', { name: '저장', exact: true }).click()
+  await expect(docs).toContainText('배')
+  await page.getByLabel('찾기 조건 (JSON)').fill('{ "qty": 1 }')
+  await page.getByRole('button', { name: '찾기' }).click()
+  await expect(docs.locator('li')).toHaveCount(1)
+
+  await page.goto('/redis')
+  await page.getByTestId('redisweb').click()
+  const keys = page.getByTestId('redis-keys')
+  await expect(keys).toContainText('session:1')
+  await page.getByLabel('키 패턴').fill('cache:*')
+  await page.getByRole('button', { name: '찾기' }).click()
+  await expect(keys.getByRole('button')).toHaveCount(1)
+  await keys.getByRole('button', { name: /cache:home/ }).click()
+  await page.getByLabel('값').fill('<p>new</p>')
+  await page.getByRole('button', { name: '저장', exact: true }).click()
+  await expect(page.getByText('저장했습니다')).toBeVisible()
+  expect(backend.db.redisKeys['cache:home']).toBe('<p>new</p>')
 })
 
 test('새 앱: 백엔드 · 프런트 · 관리자 화면을 먼저 고름', async ({ page }) => {

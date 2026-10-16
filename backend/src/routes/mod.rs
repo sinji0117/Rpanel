@@ -4,6 +4,7 @@ pub mod cron;
 pub mod databases;
 pub mod dbengines;
 pub mod dbweb;
+pub mod dbweb_nosql;
 pub mod deployments;
 pub mod files;
 pub mod mongo;
@@ -139,6 +140,20 @@ pub fn router(state: AppState) -> Router {
             "/dbweb/admin/{id}/table/{table}/{op}",
             post(dbweb::admin_row),
         )
+        .route("/dbweb/mongo/{id}", get(dbweb_nosql::mongo_collections))
+        .route(
+            "/dbweb/mongo/{id}/collections",
+            post(dbweb_nosql::mongo_create_collection),
+        )
+        .route("/dbweb/mongo/{id}/c/{coll}", get(dbweb_nosql::mongo_find))
+        .route(
+            "/dbweb/mongo/{id}/c/{coll}/{op}",
+            post(dbweb_nosql::mongo_write),
+        )
+        .route("/dbweb/redis", get(dbweb_nosql::redis_dbs))
+        .route("/dbweb/redis/{db}/keys", get(dbweb_nosql::redis_keys))
+        .route("/dbweb/redis/{db}/key", get(dbweb_nosql::redis_get))
+        .route("/dbweb/redis/{db}/{op}", post(dbweb_nosql::redis_write))
         .route("/dbweb/login", post(dbweb::login))
         .route("/dbweb/logout", post(dbweb::logout))
         .route("/dbweb/me", get(dbweb::me))

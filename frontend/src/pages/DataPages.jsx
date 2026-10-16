@@ -625,7 +625,15 @@ export function RedisPage() {
   const reload = () => d.reload(true)
   return (
     <>
-      <PageHeader title="Redis" help={t('프로그램별 Redis 계정과 앱별 DB 번호 배정을 관리합니다.')} />
+      <PageHeader
+        title="Redis"
+        help={t('프로그램별 Redis 계정과 앱별 DB 번호 배정을 관리합니다.')}
+        actions={
+          <Link to="/redis/web" className="btn-ghost" data-testid="redisweb">
+            {t('웹 관리')}
+          </Link>
+        }
+      />
       <div className="space-y-4">
         <RedisUsers users={redis_users} reload={reload} showCred={setCred} />
         <Section

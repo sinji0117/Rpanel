@@ -143,7 +143,7 @@
 
 ## DB 서버 버전
 
-- `GET /api/db-engines`: MariaDB(`SELECT VERSION()`) · Redis(`INFO server`) · MongoDB(`buildInfo`) 의 지금 버전과 고를 수 있는 계열. 같은 계열 목록 안에서 **더 높은 것만** 허용 (`dbengines::check_target`).
+- `GET /api/db-engines`: MariaDB(`SELECT VERSION()`) · Redis(`INFO server`) · MongoDB(`buildInfo`) 의 지금 버전과 고를 수 있는 계열. 목록 안에서 올리기·내리기 모두 허용하되, 사용자가 만든 DB(app_databases · mongo_databases · Redis 배정·계정)가 있으면 409 (`dbengines::check_target`, `user_db_count`). 내리기는 helper `db-engine-downgrade`(MariaDB: users/DB SQL 덤프 → datadir 이동 → purge·재설치 → 복원 / MongoDB: 패널이 FCV 를 먼저 내림 → 재설치 / Redis: dump.rdb 이동 → 재설치).
 - `POST /api/db-engines/{engine}` → 백그라운드로 helper `db-engine-upgrade <engine> <version>`: 전체 백업(`_engines`, mariadb-dump / mongodump / redis SAVE+dump.rdb 복사) → 공식 저장소 추가(MariaDB `dlm.mariadb.com`, MongoDB `repo.mongodb.org`, Redis `packages.redis.io`) → `apt-get install --force-confold` → 재시작 (MariaDB 는 `mariadb-upgrade`, MongoDB 는 패널이 `setFeatureCompatibilityVersion`). 진행 로그는 패널 메모리, 결과는 `panel_settings.db_engine_<engine>`, 알림 `db_engine`.
 
 ## 패널 접속 IP
@@ -283,6 +283,8 @@ npx playwright install chromium && npm run e2e # E2E (가짜 API, 백엔드 불�
 | GET/PUT/DELETE | `/api/system/panel-domain` | 패널 도메인 |
 | GET/PUT | `/api/system/panel-access` | 패널 접속 허용 IP |
 | GET/POST | `/api/db-engines`, `/api/db-engines/{engine}` | DB 서버 버전 |
+| GET/POST | `/api/dbweb/mongo/{id}`, `/collections`, `/c/{coll}`, `/c/{coll}/{insert,update,delete}` | MongoDB 웹 관리 |
+| GET/POST | `/api/dbweb/redis`, `/{db}/keys`, `/{db}/key?k=`, `/{db}/{set,delete}` | Redis 웹 관리 |
 | GET/DELETE/POST/PUT | `/api/notifications`, `/read`, `/settings`, `/test` | 알림 |
 | WS | `/api/ws/metrics?ticket=`, `/api/ws/deployments/{id}?ticket=` | 실시간 |
 

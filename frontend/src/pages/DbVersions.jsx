@@ -34,6 +34,11 @@ function EngineCard({ e, busyAll, onStarted }) {
         )
       }
     >
+      {e.user_dbs > 0 && (
+        <p className="mb-3 rounded-lg border border-warn/40 bg-warn/10 px-3 py-2 text-xs" data-testid={`engine-locked-${e.engine}`}>
+          {t('이 서버에 만든 데이터베이스가 {n}개 있어 버전을 바꿀 수 없습니다. 바꾸려면 데이터베이스를 백업한 뒤 지우세요.', { n: e.user_dbs })}
+        </p>
+      )}
       <div className="grid gap-2 sm:grid-cols-3" data-testid={`engine-${e.engine}`}>
         {e.versions.map((v) => (
           <div key={v.version} className={`flex flex-col gap-2 rounded-lg border px-3 py-2.5 ${v.current ? 'border-signal/60 bg-signal/5' : 'border-ink-700'}`}>
@@ -49,11 +54,17 @@ function EngineCard({ e, busyAll, onStarted }) {
                 title={v.reason ? t(v.reason) : undefined}
                 onClick={async () => {
                   const ok = await confirmDialog(
-                    t('{engine} 를 {from} → {to} 로 바꿉니다. 먼저 전체 백업을 만들고, 바꾸는 동안 잠깐 DB 가 멈춥니다. 낮은 버전으로는 되돌릴 수 없습니다.', {
-                      engine: e.label,
-                      from: e.series,
-                      to: v.version,
-                    }),
+                    v.direction === 'down'
+                      ? t('{engine} 를 {from} → {to} 로 내립니다. 먼저 전체 백업을 만들고, 패널 데이터를 옮겨 담아 다시 설치합니다. 몇 분 동안 패널이 멈출 수 있습니다.', {
+                          engine: e.label,
+                          from: e.series,
+                          to: v.version,
+                        }) + (e.engine === 'redis' ? ' ' + t('Redis 를 내리면 패널에 다시 로그인해야 합니다.') : '')
+                      : t('{engine} 를 {from} → {to} 로 올립니다. 먼저 전체 백업을 만들고, 바꾸는 동안 잠깐 DB 가 멈춥니다.', {
+                          engine: e.label,
+                          from: e.series,
+                          to: v.version,
+                        }),
                     { title: t('{engine} 버전 바꾸기', { engine: e.label }), requireText: `${e.engine} ${v.version}`, confirmText: t('바꾸기'), danger: true },
                   )
                   if (!ok) return
@@ -69,7 +80,7 @@ function EngineCard({ e, busyAll, onStarted }) {
                   }
                 }}
               >
-                {v.available ? t('이 버전으로') : t('바꿀 수 없음')}
+                {!v.available ? t('바꿀 수 없음') : v.direction === 'down' ? t('↓ 이 버전으로 내리기') : t('↑ 이 버전으로 올리기')}
               </button>
             )}
           </div>

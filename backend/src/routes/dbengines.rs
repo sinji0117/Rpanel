@@ -23,15 +23,23 @@ pub async fn list(State(state): State<AppState>, user: AuthUser) -> AppResult<Js
     for e in Engine::ALL {
         let version = dbengines::current_version(&state, e).await;
         let series = version.as_deref().and_then(|v| dbengines::series(e, v));
+        let user_dbs = dbengines::user_db_count(&state, e).await;
         let versions: Vec<Value> = e
             .versions()
             .iter()
             .map(|(v, note)| {
-                let check = dbengines::check_target(e, series.as_deref(), v);
+                let check = dbengines::check_target(e, series.as_deref(), v).and_then(|d| {
+                    if user_dbs > 0 {
+                        Err(format!("만든 데이터베이스가 {user_dbs}개 있어 버전을 바꿀 수 없습니다"))
+                    } else {
+                        Ok(d)
+                    }
+                });
                 json!({
                     "version": v, "note": note,
                     "current": series.as_deref() == Some(*v),
                     "available": check.is_ok(),
+                    "direction": check.as_ref().ok().map(|d| if *d == dbengines::Direction::Down { "down" } else { "up" }),
                     "reason": check.err(),
                 })
             })
@@ -43,6 +51,7 @@ pub async fn list(State(state): State<AppState>, user: AuthUser) -> AppResult<Js
             "version": version,
             "series": series,
             "versions": versions,
+            "user_dbs": user_dbs,
             "job": dbengines::job(e),
             "last": dbengines::last_result(&state, e).await,
         }));
@@ -72,7 +81,15 @@ pub async fn upgrade(
     }
     let cur = dbengines::current_version(&state, e).await;
     let series = cur.as_deref().and_then(|v| dbengines::series(e, v));
-    dbengines::check_target(e, series.as_deref(), &input.version).map_err(AppError::BadRequest)?;
+    let dir = dbengines::check_target(e, series.as_deref(), &input.version)
+        .map_err(AppError::BadRequest)?;
+    let n = dbengines::user_db_count(&state, e).await;
+    if n > 0 {
+        return Err(AppError::Conflict(format!(
+            "{} 에 만든 데이터베이스가 {n}개 있어 버전을 바꿀 수 없습니다. 데이터베이스를 백업·삭제한 뒤 바꾸세요",
+            e.label()
+        )));
+    }
     audit::log(
         &state,
         Some(user.id),
@@ -86,9 +103,11 @@ pub async fn upgrade(
         &ip,
     )
     .await;
-    dbengines::start(state.clone(), e, input.version.clone());
+    dbengines::start(state.clone(), e, input.version.clone(), dir);
     Ok((
         StatusCode::ACCEPTED,
-        Json(json!({ "engine": e.as_str(), "target": input.version, "status": "running" })),
+        Json(
+            json!({ "engine": e.as_str(), "target": input.version, "status": "running", "direction": if dir == dbengines::Direction::Down { "down" } else { "up" } }),
+        ),
     ))
 }

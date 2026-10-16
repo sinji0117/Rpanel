@@ -1173,6 +1173,100 @@ db_engine_upgrade() {
   esac
 }
 
+# 낮은 버전으로 바꾸기 — 사용자가 만든 DB 가 없을 때만 패널이 호출합니다.
+# 데이터 파일은 낮은 버전이 읽지 못하므로: (MariaDB) 패널 DB·계정을 SQL 로 덤프 → 데이터 폴더를 옆으로 옮김 → 패키지 다시 설치 → 복원
+#                                         (MongoDB) 패널이 featureCompatibilityVersion 을 먼저 내림 → 패키지만 다시 설치
+#                                         (Redis)   dump.rdb 를 옆으로 옮김(세션은 다시 로그인) → 패키지 다시 설치
+db_engine_downgrade() {
+  local engine="$1" v="$2" code stamp keep f
+  valid_engine_version "$engine" "$v"
+  code="$(os_codename)"
+  command -v apt-get >/dev/null || die "apt-get 이 없습니다 (Ubuntu·Debian 만 지원)"
+  engine_backup "$engine"
+  stamp="$(date +%Y%m%d-%H%M%S)"
+  keep="$DATA/backups/_engines/$stamp-$engine-downgrade"
+  install -d -m 0700 "$keep"
+  install -d -m 0755 /etc/apt/keyrings
+  case "$engine" in
+    mariadb)
+      local dbs
+      dbs="$(mariadb -N -e "SELECT schema_name FROM information_schema.schemata WHERE schema_name NOT IN ('mysql','information_schema','performance_schema','sys')" | tr '\n' ' ')"
+      echo "▶ 데이터베이스·계정 덤프: ${dbs:-(없음)}" >&2
+      mariadb-dump --system=users > "$keep/users.sql" || die "계정 덤프 실패 — 바꾸지 않았습니다"
+      if [[ -n "${dbs// /}" ]]; then
+        # shellcheck disable=SC2086
+        mariadb-dump --databases $dbs --single-transaction --routines --events --triggers > "$keep/databases.sql" || die "DB 덤프 실패 — 바꾸지 않았습니다"
+      fi
+      cp -a /etc/mysql/mariadb.conf.d "$keep/conf.d"
+      systemctl stop mariadb
+      mv /var/lib/mysql "$keep/datadir"
+      echo "▶ MariaDB 패키지 제거 (데이터 폴더는 $keep/datadir 에 보관)" >&2
+      DEBIAN_FRONTEND=noninteractive apt-get purge -y -q 'mariadb-server*' 'mariadb-client*' mariadb-common >&2 || true
+      if [[ "$v" == 10.11 ]]; then
+        rm -f /etc/apt/sources.list.d/mariadb.sources
+      else
+        curl -fsSL --proto '=https' --max-time 60 https://mariadb.org/mariadb_release_signing_key.pgp -o /etc/apt/keyrings/mariadb-keyring.pgp \
+          || die "MariaDB 저장소 키를 받지 못했습니다"
+        printf 'X-Repolib-Name: MariaDB\nTypes: deb\nURIs: https://dlm.mariadb.com/repo/mariadb-server/%s/repo/ubuntu\nSuites: %s\nComponents: main\nSigned-By: /etc/apt/keyrings/mariadb-keyring.pgp\n' "$v" "$code" \
+          > /etc/apt/sources.list.d/mariadb.sources
+      fi
+      apt-get update -q >&2 || die "apt-get update 실패"
+      echo "▶ MariaDB $v 설치" >&2
+      apt_install_quiet mariadb-server mariadb-client >&2 || die "MariaDB $v 설치 실패 — 보관본: $keep"
+      for f in z-rpanel-bind.cnf 99-tuning.cnf; do
+        [[ -f "$keep/conf.d/$f" ]] && cp "$keep/conf.d/$f" /etc/mysql/mariadb.conf.d/
+      done
+      systemctl restart mariadb
+      for _ in $(seq 1 60); do mariadb -e 'SELECT 1' >/dev/null 2>&1 && break; sleep 1; done
+      echo "▶ 계정·데이터베이스 복원" >&2
+      # 덤프한 쪽이 더 새 버전이라 남기는 '샌드박스' 첫 줄은 지움
+      sed -i '1{/^\/\*M!999999/d}' "$keep/users.sql" "$keep/databases.sql" 2>/dev/null || true
+      mariadb < "$keep/users.sql" >&2 || echo "(일부 계정 복원 경고 — 계속)" >&2
+      [[ -f "$keep/databases.sql" ]] && { mariadb < "$keep/databases.sql" || die "DB 복원 실패 — 덤프: $keep/databases.sql"; }
+      mariadb -e 'FLUSH PRIVILEGES' || true
+      echo "OK $(mariadb -N -e 'SELECT VERSION()')"
+      ;;
+    mongodb)
+      cp -a /etc/mongod.conf "$keep/mongod.conf"
+      systemctl stop mongod
+      echo "▶ MongoDB 패키지 제거 (데이터 /var/lib/mongodb 는 그대로)" >&2
+      DEBIAN_FRONTEND=noninteractive apt-get purge -y -q 'mongodb-org*' >&2 || true
+      for f in /etc/apt/sources.list.d/mongodb-org-*.list; do
+        [[ -e "$f" && "$f" != "/etc/apt/sources.list.d/mongodb-org-$v.list" ]] && rm -f "$f"
+      done
+      curl -fsSL --proto '=https' --max-time 60 "https://www.mongodb.org/static/pgp/server-$v.asc" | gpg --dearmor --yes -o "/usr/share/keyrings/mongodb-server-$v.gpg" \
+        || die "MongoDB 저장소 키를 받지 못했습니다"
+      echo "deb [ arch=amd64,arm64 signed-by=/usr/share/keyrings/mongodb-server-$v.gpg ] https://repo.mongodb.org/apt/ubuntu $code/mongodb-org/$v multiverse" \
+        > "/etc/apt/sources.list.d/mongodb-org-$v.list"
+      apt-get update -q >&2 || die "apt-get update 실패"
+      echo "▶ MongoDB $v 설치" >&2
+      apt_install_quiet mongodb-org >&2 || die "MongoDB $v 설치 실패 — 설정 보관본: $keep"
+      cp "$keep/mongod.conf" /etc/mongod.conf
+      chown -R mongodb:mongodb /var/lib/mongodb 2>/dev/null || true
+      systemctl enable mongod >/dev/null 2>&1 || true
+      systemctl restart mongod
+      for _ in $(seq 1 60); do (echo > /dev/tcp/127.0.0.1/27017) 2>/dev/null && break; sleep 1; done
+      echo "OK $(mongod --version | awk 'NR==1{print $3}')"
+      ;;
+    redis)
+      cp -a /etc/redis "$keep/etc-redis"
+      systemctl stop redis-server
+      [[ -f /var/lib/redis/dump.rdb ]] && mv /var/lib/redis/dump.rdb "$keep/dump.rdb"
+      echo "▶ Redis 패키지 제거 (저장 파일은 $keep 에 보관 — 패널 로그인은 다시 해야 합니다)" >&2
+      DEBIAN_FRONTEND=noninteractive apt-get purge -y -q redis-server redis-tools redis >&2 || true
+      rm -f /etc/apt/sources.list.d/redis.list
+      apt-get update -q >&2 || die "apt-get update 실패"
+      echo "▶ Redis $v 설치" >&2
+      apt_install_quiet redis-server redis-tools >&2 || die "Redis $v 설치 실패 — 설정 보관본: $keep"
+      cp -a "$keep/etc-redis/." /etc/redis/
+      chown -R redis:redis /etc/redis 2>/dev/null || true
+      systemctl restart redis-server
+      for _ in $(seq 1 30); do (echo > /dev/tcp/127.0.0.1/6379) 2>/dev/null && break; sleep 1; done
+      echo "OK $(redis-server --version | sed -nE 's/.*v=([0-9.]+).*/\1/p')"
+      ;;
+  esac
+}
+
 # ───────────────────────── 패널 접속 허용 IP ─────────────────────────
 # Nginx 의 allow/deny 로 막습니다 (Git 웹훅 /api/hooks/ 는 예외). ufw 는 이 대역을 열어 줍니다.
 
@@ -1462,6 +1556,7 @@ case "$cmd" in
   panel-domain-set)    panel_domain_set "${1:-}" "${2:-}" ;;
   panel-domain-remove) panel_domain_remove ;;
   db-engine-upgrade)   db_engine_upgrade "${1:-}" "${2:-}" ;;
+  db-engine-downgrade) db_engine_downgrade "${1:-}" "${2:-}" ;;
   panel-access)        panel_access "${1:-}" ;;
   runtime-remove)  runtime_remove "${1:-}" "${2:-}" ;;
   purge-app)
@@ -1477,7 +1572,7 @@ case "$cmd" in
     echo "purged $1"
     ;;
   *)
-    die "usage: rpanel-helper {prepare-app|install-unit|remove-unit|install-site|remove-site|purge-app} <slug> | svc {start|stop|restart} <slug> | status|journal <slug> | {install,remove,run}-cron|cron-status|cron-log <slug> <id> | db-{create,drop,password} <db> <user> | db-user-create <db> <user> <all|read> (pw stdin) | db-user-drop <db> <user> | db-user-password <db> <user> (pw stdin) | redis-user-set <user> <pattern> <rw|ro> (pw stdin) | redis-user-drop <user> | backup-db <slug> <db> <stamp> | backup-data <slug> <stamp> | restore-db <slug> <db> <file> | restore-data <slug> <file> | nginx-log <slug> access|error <lines> | site-create <slug> <user> <domain> <static|rust|python> | site-password <slug> (stdin) | site-account-create <slug> <user> <ssh|sftp> (pw stdin) | site-account-update <slug> <user> <ssh|sftp> <on|off> | site-account-password <slug> <user> (stdin) | site-account-keys <slug> <user> (stdin) | site-account-delete <slug> <user> | ssl-issue <slug> <email> <domain>... | ssl-custom|ssl-info|ssl-remove <slug> | backup-files <slug> <stamp> | restore-files <slug> <file> | backup-mongo <slug> <db> <stamp> | restore-mongo <slug> <db> <file> | runtime-install|runtime-remove <python|node> <version> | system-log <panel|nginx|ssh|mariadb|redis> <lines> | panel-domain-set <domain> <email> | panel-domain-remove | db-engine-upgrade <mariadb|mongodb|redis> <version> | panel-access <any|CIDR,...>"
+    die "usage: rpanel-helper {prepare-app|install-unit|remove-unit|install-site|remove-site|purge-app} <slug> | svc {start|stop|restart} <slug> | status|journal <slug> | {install,remove,run}-cron|cron-status|cron-log <slug> <id> | db-{create,drop,password} <db> <user> | db-user-create <db> <user> <all|read> (pw stdin) | db-user-drop <db> <user> | db-user-password <db> <user> (pw stdin) | redis-user-set <user> <pattern> <rw|ro> (pw stdin) | redis-user-drop <user> | backup-db <slug> <db> <stamp> | backup-data <slug> <stamp> | restore-db <slug> <db> <file> | restore-data <slug> <file> | nginx-log <slug> access|error <lines> | site-create <slug> <user> <domain> <static|rust|python> | site-password <slug> (stdin) | site-account-create <slug> <user> <ssh|sftp> (pw stdin) | site-account-update <slug> <user> <ssh|sftp> <on|off> | site-account-password <slug> <user> (stdin) | site-account-keys <slug> <user> (stdin) | site-account-delete <slug> <user> | ssl-issue <slug> <email> <domain>... | ssl-custom|ssl-info|ssl-remove <slug> | backup-files <slug> <stamp> | restore-files <slug> <file> | backup-mongo <slug> <db> <stamp> | restore-mongo <slug> <db> <file> | runtime-install|runtime-remove <python|node> <version> | system-log <panel|nginx|ssh|mariadb|redis> <lines> | panel-domain-set <domain> <email> | panel-domain-remove | db-engine-upgrade|db-engine-downgrade <mariadb|mongodb|redis> <version> | panel-access <any|CIDR,...>"
     ;;
 esac
 }

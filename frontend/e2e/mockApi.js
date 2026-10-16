@@ -851,12 +851,77 @@ export function createMockBackend({ needsSetup = false } = {}) {
       db.jobs = db.jobs.filter((x) => x !== j)
       return json(route, 204)
     }
+    // ── DB 웹 관리 (MongoDB · Redis) ──
+    m = path.match(/^\/dbweb\/mongo\/(\d+)(?:\/(collections)|\/c\/([\w.]+)(?:\/(insert|update|delete))?)?$/)
+    if (m) {
+      db.mongoDocs ??= { orders: [{ _id: { $oid: '65a000000000000000000001' }, item: '사과', qty: 3 }] }
+      if (m[2]) {
+        db.mongoDocs[body.name] = []
+        return json(route, 200, { name: body.name })
+      }
+      if (m[3] && m[4]) {
+        const list = db.mongoDocs[m[3]]
+        if (m[4] === 'insert') {
+          const _id = { $oid: String(Date.now()).padStart(24, '0') }
+          list.unshift({ _id, ...body.doc })
+          return json(route, 200, { inserted_id: _id })
+        }
+        const i = list.findIndex((d) => d._id.$oid === body.id.$oid)
+        if (m[4] === 'update') list[i] = { _id: list[i]._id, ...body.doc }
+        else list.splice(i, 1)
+        return json(route, 200, m[4] === 'update' ? { matched: 1, modified: 1 } : { deleted: 1 })
+      }
+      if (m[3]) {
+        let docs = db.mongoDocs[m[3]] ?? []
+        const f = url.searchParams.get('filter')
+        if (f) {
+          let q
+          try {
+            q = JSON.parse(f)
+          } catch {
+            return json(route, 400, { error: 'bad_request', message: '필터 JSON 오류' })
+          }
+          docs = docs.filter((d) => Object.entries(q).every(([k, v]) => d[k] === v))
+        }
+        return json(route, 200, { collection: m[3], total: docs.length, page: 1, size: 20, docs })
+      }
+      return json(route, 200, {
+        database: db.mongos.find((x) => x.id === Number(m[1]))?.name,
+        collections: Object.entries(db.mongoDocs).map(([name, l]) => ({ name, count: l.length })),
+      })
+    }
+    if (path === '/dbweb/redis')
+      return json(route, 200, { databases: db.apps.filter((a) => a.redis_db != null).map((a) => ({ db: a.redis_db, app: a.name, keys: Object.keys(db.redisKeys ?? {}).length })) })
+    m = path.match(/^\/dbweb\/redis\/(\d+)\/(keys|key|set|delete)$/)
+    if (m) {
+      db.redisKeys ??= { 'session:1': 'abc', 'cache:home': '<html>' }
+      if (m[2] === 'keys') {
+        const re = new RegExp('^' + (url.searchParams.get('pattern') || '*').replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*') + '$')
+        return json(route, 200, {
+          db: Number(m[1]),
+          cursor: 0,
+          keys: Object.keys(db.redisKeys)
+            .filter((k) => re.test(k))
+            .map((k) => ({ key: k, type: 'string', ttl: null })),
+        })
+      }
+      if (m[2] === 'key') {
+        const k = url.searchParams.get('k')
+        return k in db.redisKeys ? json(route, 200, { key: k, type: 'string', ttl: null, value: db.redisKeys[k] }) : json(route, 404, { message: '찾을 수 없습니다' })
+      }
+      if (m[2] === 'set') db.redisKeys[body.key] = body.value ?? ''
+      else delete db.redisKeys[body.key]
+      return json(route, 200, { ok: true })
+    }
     // ── DB 서버 버전 ──
     if (path === '/db-engines')
       return json(route, 200, {
         engines: db.engines.map((e) => {
           const cur = e.list.findIndex((x) => x[0] === e.series)
+          const userDbs =
+            e.engine === 'mariadb' ? db.dbs.length : e.engine === 'mongodb' ? db.mongos.length : db.apps.filter((a) => a.redis_db != null).length + db.redisUsers.length
           return {
+            user_dbs: userDbs,
             engine: e.engine,
             label: e.label,
             installed: e.installed,
@@ -868,8 +933,9 @@ export function createMockBackend({ needsSetup = false } = {}) {
               version: v,
               note,
               current: i === cur,
-              available: i > cur,
-              reason: i < cur ? '낮은 버전으로 되돌릴 수 없습니다' : i === cur ? '이미 이 버전입니다' : null,
+              available: i !== cur && userDbs === 0,
+              direction: i === cur ? null : i > cur ? 'up' : 'down',
+              reason: i === cur ? '이미 이 버전입니다' : userDbs ? `만든 데이터베이스가 ${userDbs}개 있어 버전을 바꿀 수 없습니다` : null,
             })),
           }
         }),
@@ -879,7 +945,8 @@ export function createMockBackend({ needsSetup = false } = {}) {
       const e = db.engines.find((x) => x.engine === m[1])
       if (!e) return json(route, 404, { message: '찾을 수 없습니다' })
       const ti = e.list.findIndex((x) => x[0] === body.version)
-      if (ti <= e.list.findIndex((x) => x[0] === e.series)) return json(route, 400, { error: 'bad_request', message: '낮은 버전으로 되돌릴 수 없습니다' })
+      if (ti < 0 || ti === e.list.findIndex((x) => x[0] === e.series)) return json(route, 400, { error: 'bad_request', message: '고를 수 없는 버전입니다' })
+      if (e.engine === 'mariadb' && db.dbs.length) return json(route, 409, { error: 'conflict', message: '만든 데이터베이스가 있어 버전을 바꿀 수 없습니다' })
       e.job = {
         engine: e.engine,
         target: body.version,

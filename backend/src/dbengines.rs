@@ -87,8 +87,18 @@ fn rank(engine: Engine, series: &str) -> Option<usize> {
     engine.versions().iter().position(|(v, _)| *v == series)
 }
 
-/// 바꿀 수 있는지 (같은 버전·낮은 버전·목록에 없는 버전 거부)
-pub fn check_target(engine: Engine, current: Option<&str>, target: &str) -> Result<(), String> {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Direction {
+    Up,
+    Down,
+}
+
+/// 바꿀 수 있는지와 방향 (같은 버전·목록에 없는 버전 거부)
+pub fn check_target(
+    engine: Engine,
+    current: Option<&str>,
+    target: &str,
+) -> Result<Direction, String> {
     let t = rank(engine, target)
         .ok_or_else(|| format!("{} {target} 은(는) 고를 수 없는 버전입니다", engine.label()))?;
     let Some(cur) = current else {
@@ -99,23 +109,32 @@ pub fn check_target(engine: Engine, current: Option<&str>, target: &str) -> Resu
     };
     match rank(engine, cur) {
         Some(c) if c == t => Err(format!("이미 {} {target} 입니다", engine.label())),
-        Some(c) if c > t => Err(format!(
-            "{} 는 낮은 버전({target})으로 되돌릴 수 없습니다 — 데이터 형식이 바뀌기 때문입니다",
-            engine.label()
-        )),
-        Some(_) => Ok(()),
-        // 목록보다 새 버전이 이미 깔려 있으면 내릴 수 없음, 목록보다 옛 버전이면 올리기 허용
+        Some(c) if c > t => Ok(Direction::Down),
+        Some(_) => Ok(Direction::Up),
+        // 목록에 없는 버전: 목록보다 옛 버전이면 올리기, 새 버전이면 내리기
         None => {
-            let newest = engine.versions().last().map(|v| v.0).unwrap_or("");
-            if version_lt(cur, newest) {
-                Ok(())
+            if version_lt(cur, target) {
+                Ok(Direction::Up)
             } else {
-                Err(format!(
-                    "지금 버전({cur})이 목록보다 새 버전이라 바꿀 수 없습니다"
-                ))
+                Ok(Direction::Down)
             }
         }
     }
+}
+
+/// 사용자가 만든 DB 수 (있으면 버전을 바꾸지 않음)
+pub async fn user_db_count(state: &AppState, engine: Engine) -> i64 {
+    let sql = match engine {
+        Engine::MariaDb => "SELECT COUNT(*) FROM app_databases",
+        Engine::MongoDb => "SELECT COUNT(*) FROM mongo_databases",
+        Engine::Redis => {
+            "SELECT (SELECT COUNT(*) FROM apps WHERE redis_db IS NOT NULL) + (SELECT COUNT(*) FROM redis_users)"
+        }
+    };
+    sqlx::query_scalar::<_, i64>(sql)
+        .fetch_one(&state.db)
+        .await
+        .unwrap_or(0)
 }
 
 fn version_lt(a: &str, b: &str) -> bool {
@@ -196,7 +215,7 @@ pub async fn last_result(state: &AppState, engine: Engine) -> Option<serde_json:
 }
 
 /// 백그라운드로 helper `db-engine-upgrade` 실행
-pub fn start(state: AppState, engine: Engine, target: String) {
+pub fn start(state: AppState, engine: Engine, target: String, dir: Direction) {
     let j = Arc::new(Mutex::new(Job {
         engine: engine.as_str(),
         target: target.clone(),
@@ -217,20 +236,32 @@ pub fn start(state: AppState, engine: Engine, target: String) {
                 jj.lock().unwrap().log = lg.contents();
             }
         });
+        // MongoDB 를 내릴 때는 먼저 기능 호환 버전(FCV)을 내려야 낮은 버전이 데이터를 읽음
+        if dir == Direction::Down && engine == Engine::MongoDb {
+            if let Some(c) = state.mongo.as_ref() {
+                let r = c
+                    .database("admin")
+                    .run_command(mongodb::bson::doc! { "setFeatureCompatibilityVersion": target.as_str(), "confirm": true })
+                    .await;
+                log.line(match &r {
+                    Ok(_) => format!("featureCompatibilityVersion → {target}"),
+                    Err(e) => {
+                        format!("featureCompatibilityVersion 를 {target} 로 내리지 못했습니다: {e}")
+                    }
+                })
+                .await;
+            }
+        }
         let helper_path = state.cfg.helper_path.display().to_string();
+        let cmd = if dir == Direction::Down {
+            "db-engine-downgrade"
+        } else {
+            "db-engine-upgrade"
+        };
         let res = run_ok(
             state.exec.as_ref(),
-            CmdSpec::new(
-                "sudo",
-                &[
-                    "-n",
-                    &helper_path,
-                    "db-engine-upgrade",
-                    engine.as_str(),
-                    &target,
-                ],
-            )
-            .timeout(3600),
+            CmdSpec::new("sudo", &["-n", &helper_path, cmd, engine.as_str(), &target])
+                .timeout(3600),
             &log,
         )
         .await;
@@ -244,7 +275,7 @@ pub fn start(state: AppState, engine: Engine, target: String) {
             }
         };
         // MongoDB 는 새 버전 기능을 켜 줌 (setFeatureCompatibilityVersion)
-        if ok && engine == Engine::MongoDb {
+        if ok && dir == Direction::Up && engine == Engine::MongoDb {
             if let Some(c) = state.mongo.as_ref() {
                 let r = c
                     .database("admin")
@@ -323,29 +354,38 @@ mod tests {
     }
 
     #[test]
-    fn only_upgrades() {
+    fn directions() {
         let m = Engine::MariaDb;
-        assert!(check_target(m, Some("10.11"), "11.4").is_ok());
-        assert!(check_target(m, Some("10.11"), "11.8").is_ok());
-        assert!(check_target(m, Some("11.4"), "10.11")
-            .unwrap_err()
-            .contains("되돌릴 수 없습니다"));
+        assert_eq!(check_target(m, Some("10.11"), "11.4"), Ok(Direction::Up));
+        assert_eq!(check_target(m, Some("10.11"), "11.8"), Ok(Direction::Up));
+        assert_eq!(check_target(m, Some("11.4"), "10.11"), Ok(Direction::Down));
         assert!(check_target(m, Some("11.4"), "11.4")
             .unwrap_err()
             .contains("이미"));
-        assert!(
-            check_target(m, Some("10.6"), "10.11").is_ok(),
-            "older than list → upgrade ok"
+        assert_eq!(
+            check_target(m, Some("10.6"), "10.11"),
+            Ok(Direction::Up),
+            "older than list"
         );
-        assert!(
-            check_target(m, Some("12.0"), "11.8").is_err(),
-            "newer than list → no"
+        assert_eq!(
+            check_target(m, Some("12.0"), "11.8"),
+            Ok(Direction::Down),
+            "newer than list"
         );
         assert!(check_target(m, Some("10.11"), "9.9").is_err());
         assert!(check_target(m, Some("10.11"), "11.4; rm -rf /").is_err());
         assert!(check_target(m, None, "11.4").is_err());
-        assert!(check_target(Engine::Redis, Some("7.0"), "8").is_ok());
-        assert!(check_target(Engine::Redis, Some("8"), "7.0").is_err());
-        assert!(check_target(Engine::MongoDb, Some("8.0"), "8.2").is_ok());
+        assert_eq!(
+            check_target(Engine::Redis, Some("7.0"), "8"),
+            Ok(Direction::Up)
+        );
+        assert_eq!(
+            check_target(Engine::Redis, Some("8"), "7.0"),
+            Ok(Direction::Down)
+        );
+        assert_eq!(
+            check_target(Engine::MongoDb, Some("8.2"), "8.0"),
+            Ok(Direction::Down)
+        );
     }
 }

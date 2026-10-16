@@ -832,6 +832,50 @@ async fn full_flow() {
         .post(&format!("/api/apps/{front_id}/redis"), &t, json!({}))
         .await;
     assert_eq!(r.body["db"], 5);
+    // DB 웹 관리 (Redis): 앱에 배정한 DB 만
+    let r = ctx.get("/api/dbweb/redis", &t).await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+    assert_eq!(
+        r.body["databases"].as_array().unwrap().len(),
+        2,
+        "{:?}",
+        r.body
+    );
+    for k in ["web:a", "web:b"] {
+        let r = ctx
+            .post(
+                "/api/dbweb/redis/4/set",
+                &t,
+                json!({"key": k, "value": "값", "ttl": 600}),
+            )
+            .await;
+        assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+    }
+    let r = ctx.get("/api/dbweb/redis/4/keys?pattern=web:*", &t).await;
+    assert_eq!(r.body["keys"].as_array().unwrap().len(), 2, "{:?}", r.body);
+    assert_eq!(r.body["keys"][0]["type"], "string");
+    assert!(r.body["keys"][0]["ttl"].as_i64().unwrap() > 0);
+    let r = ctx.get("/api/dbweb/redis/4/key?k=web:a", &t).await;
+    assert_eq!(r.body["value"], "값", "{:?}", r.body);
+    let r = ctx
+        .post("/api/dbweb/redis/4/delete", &t, json!({"key":"web:a"}))
+        .await;
+    assert_eq!(r.body["deleted"], 1);
+    ctx.post("/api/dbweb/redis/4/delete", &t, json!({"key":"web:b"}))
+        .await;
+    assert_eq!(
+        ctx.get("/api/dbweb/redis/4/key?k=web:a", &t).await.status,
+        StatusCode::NOT_FOUND
+    );
+    for db in [15, 9] {
+        assert_eq!(
+            ctx.get(&format!("/api/dbweb/redis/{db}/keys"), &t)
+                .await
+                .status,
+            StatusCode::FORBIDDEN,
+            "db {db}"
+        );
+    }
     let env = ctx.get(&format!("/api/apps/{api_id}/env"), &t).await.body;
     let managed = env["managed"].as_array().unwrap();
     let keys: Vec<&str> = managed.iter().map(|m| m["key"].as_str().unwrap()).collect();
@@ -1842,6 +1886,59 @@ async fn full_flow() {
             .unwrap()
             .iter()
             .any(|m| m["key"] == "MONGODB_URL" && m["value"] == url));
+        // DB 웹 관리: 컬렉션 만들기 → 문서 추가·찾기·수정·삭제 (그 DB 계정으로)
+        let w = format!("/api/dbweb/mongo/{mid}");
+        let r = ctx
+            .post(&format!("{w}/collections"), &t, json!({"name":"orders"}))
+            .await;
+        assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+        let r = ctx
+            .post(
+                &format!("{w}/c/orders/insert"),
+                &t,
+                json!({"doc":{"item":"사과","qty":3}}),
+            )
+            .await;
+        assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+        let oid = r.body["inserted_id"].clone();
+        assert!(oid["$oid"].is_string(), "{oid}");
+        ctx.post(
+            &format!("{w}/c/orders/insert"),
+            &t,
+            json!({"doc":{"item":"배","qty":1}}),
+        )
+        .await;
+        let r = ctx.get(&w, &t).await;
+        assert_eq!(r.body["collections"][0]["name"], "orders", "{:?}", r.body);
+        let r = ctx
+            .get(&format!("{w}/c/orders?filter=%7B%22qty%22%3A3%7D"), &t)
+            .await;
+        assert_eq!(r.body["total"], 1, "{:?}", r.body);
+        assert_eq!(r.body["docs"][0]["item"], "사과");
+        let r = ctx
+            .post(
+                &format!("{w}/c/orders/update"),
+                &t,
+                json!({"id": oid, "doc":{"item":"청사과","qty":5}}),
+            )
+            .await;
+        assert_eq!(r.body["modified"], 1, "{:?}", r.body);
+        let r = ctx
+            .post(&format!("{w}/c/orders/delete"), &t, json!({"id": oid}))
+            .await;
+        assert_eq!(r.body["deleted"], 1, "{:?}", r.body);
+        assert_eq!(
+            ctx.get(&format!("{w}/c/orders?filter=nope"), &t)
+                .await
+                .status,
+            StatusCode::BAD_REQUEST
+        );
+        assert_eq!(
+            ctx.get(&format!("{w}/c/system.users"), &t).await.status,
+            StatusCode::BAD_REQUEST
+        );
+        assert_eq!(ctx.get(&format!("{w}/c/orders"), &t).await.body["total"], 1);
+
         // 실제로 그 계정으로 쓰기·읽기 (TEST 서버 주소로 바꿔서)
         let host = std::env::var("RPANEL_TEST_MONGODB_URL").unwrap();
         let host = host
@@ -2756,6 +2853,42 @@ async fn full_flow() {
                 .await;
             assert_eq!(r.status, StatusCode::BAD_REQUEST, "{:?}", r.body);
         }
+        // 만든 DB 가 있으면 어느 쪽으로도 바꾸지 않음
+        let tmp_db: u64 = sqlx::query("INSERT INTO app_databases (name, username, password, env_key) VALUES ('engine_guard', 'engine_guard', 'x', 'X_URL')")
+            .execute(&state.db)
+            .await
+            .unwrap()
+            .last_insert_id();
+        let r = ctx.get("/api/db-engines", &t).await;
+        let maria = r.body["engines"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|e| e["engine"] == "mariadb")
+            .unwrap()
+            .clone();
+        assert!(maria["user_dbs"].as_i64().unwrap() >= 1);
+        for v in maria["versions"].as_array().unwrap() {
+            assert_eq!(v["available"], false, "{v}");
+        }
+        let other = maria["versions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|v| v["current"] == false)
+            .unwrap()["version"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let r = ctx
+            .post("/api/db-engines/mariadb", &t, json!({"version": other}))
+            .await;
+        assert_eq!(r.status, StatusCode::CONFLICT, "{:?}", r.body);
+        sqlx::query("DELETE FROM app_databases WHERE id = ?")
+            .bind(tmp_db)
+            .execute(&state.db)
+            .await
+            .unwrap();
 
         let pa = "/api/system/panel-access";
         assert_eq!(ctx.get(pa, &t).await.body["restricted"], false);

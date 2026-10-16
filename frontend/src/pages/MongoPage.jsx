@@ -261,6 +261,9 @@ function MongoCard({ db, apps, reload, showCred }) {
           </p>
         </div>
         <div className="flex flex-wrap gap-1.5">
+          <Link to={`/mongodb/${db.id}/web`} className="btn-ghost px-2.5 py-1 text-xs" data-testid={`mongoweb-${db.name}`}>
+            {t('웹 관리')}
+          </Link>
           <button className="btn-ghost px-2.5 py-1 text-xs" disabled={busy} onClick={() => setLinking(true)}>
             {t('앱 연결')}
           </button>

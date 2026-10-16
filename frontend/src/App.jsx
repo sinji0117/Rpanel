@@ -18,6 +18,7 @@ import LogsPage from './pages/Logs'
 import NotificationsPage from './pages/Notifications'
 import MongoPage from './pages/MongoPage'
 import { DbWebAdminPage, DbWebStandalone } from './pages/DbWeb'
+import { MongoWebPage, RedisWebPage } from './pages/NoSqlWeb'
 import { BackupsPage, MariaDBPage, RedisPage } from './pages/DataPages'
 import { t, useLang } from './i18n'
 
@@ -53,6 +54,8 @@ function Gate() {
         <Route path="mariadb/:id/web" element={<DbWebAdminPage />} />
         <Route path="redis" element={<RedisPage />} />
         <Route path="mongodb" element={<MongoPage />} />
+        <Route path="mongodb/:id/web" element={<MongoWebPage />} />
+        <Route path="redis/web" element={<RedisWebPage />} />
         <Route path="db-versions" element={<Navigate to="/runtimes?tab=db" replace />} />
         <Route path="databases" element={<Navigate to="/mariadb" replace />} />
         <Route path="admins" element={<AdminsPage />} />

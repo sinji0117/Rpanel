@@ -835,6 +835,9 @@ fn helper_db_engine_and_panel_access() {
         ("redis", "6"),
         ("", ""),
     ] {
+        let out = run(&["db-engine-downgrade", e, v], None);
+        assert!(!out.status.success(), "downgrade {e} {v} accepted");
+        assert!(String::from_utf8_lossy(&out.stderr).contains("고를 수 없는 버전"));
         let out = run(&["db-engine-upgrade", e, v], None);
         assert!(!out.status.success(), "{e} {v} accepted");
         assert!(

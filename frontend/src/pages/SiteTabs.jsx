@@ -619,9 +619,17 @@ export function SiteSettings({ app, onSaved }) {
             <input id="s-webroot" className="input font-mono" value={v.web_root} onChange={set('web_root')} placeholder="(문서 루트 그대로)" />
           </Field>
         )}
-        {app.kind === 'rust' && (
+        {(app.kind === 'rust' || app.kind === 'python') && (
           <div className="grid gap-4 sm:grid-cols-[1fr_180px]">
-            <Field label="시작 명령" htmlFor="s-start" hint="문서 루트에 올린 실행 파일 — 예: ./app · PORT·BIND_ADDR 가 자동 주입됩니다">
+            <Field
+              label="시작 명령"
+              htmlFor="s-start"
+              hint={
+                app.kind === 'python'
+                  ? '가상환경(.venv)이 켜진 상태로 실행 — 예: python app.py · gunicorn -b 127.0.0.1:$PORT app:app'
+                  : '문서 루트에 올린 실행 파일 — 예: ./app · PORT·BIND_ADDR 가 자동 주입됩니다'
+              }
+            >
               <input id="s-start" className="input font-mono" required value={v.start_cmd} onChange={set('start_cmd')} />
             </Field>
             <Field label="헬스체크 경로" htmlFor="s-health">
@@ -629,8 +637,16 @@ export function SiteSettings({ app, onSaved }) {
             </Field>
           </div>
         )}
-        {app.kind === 'static' && (
-          <Field label="적용 전 실행할 명령 (선택)" htmlFor="s-build" hint="사이트 유저 권한으로 문서 루트에서 실행 — 예: npm ci && npm run build">
+        {(app.kind === 'static' || app.kind === 'python') && (
+          <Field
+            label="적용 전 실행할 명령 (선택)"
+            htmlFor="s-build"
+            hint={
+              app.kind === 'python'
+                ? '패키지 설치 뒤 사이트 유저 권한으로 실행 — 예: python manage.py migrate && python manage.py collectstatic --noinput'
+                : '사이트 유저 권한으로 문서 루트에서 실행 — 예: npm ci && npm run build'
+            }
+          >
             <input id="s-build" className="input font-mono" value={v.build_cmd} onChange={set('build_cmd')} />
           </Field>
         )}

@@ -92,6 +92,19 @@ async fn wait_deploy(ctx: &Ctx, token: &str, id: u64) -> Value {
     panic!("deployment {id} did not finish");
 }
 
+/// 조건에 맞는 백업이 모두 끝날 때까지 기다린 뒤 목록 반환
+async fn wait_backups(ctx: &Ctx, token: &str, query: &str) -> Vec<Value> {
+    for _ in 0..100 {
+        let list = ctx.get(&format!("/api/backups?{query}"), token).await.body;
+        let rows = list.as_array().cloned().unwrap_or_default();
+        if !rows.is_empty() && rows.iter().all(|b| b["status"] != "running") {
+            return rows;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    panic!("backups ({query}) did not finish");
+}
+
 #[tokio::test]
 async fn full_flow() {
     let (Ok(db_url), Ok(redis_url)) = (
@@ -694,6 +707,184 @@ async fn full_flow() {
         StatusCode::NO_CONTENT
     );
 
+    // ── 독립 데이터베이스 · 추가 계정 ──
+    let r = ctx
+        .post("/api/databases", &t, json!({"name":"analytics"}))
+        .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{:?}", r.body);
+    assert!(r.body["app_id"].is_null());
+    assert!(r.body["url"]
+        .as_str()
+        .unwrap()
+        .contains("@127.0.0.1:3306/analytics"));
+    let an_id = r.body["id"].as_u64().unwrap();
+    assert_eq!(
+        ctx.post("/api/databases", &t, json!({})).await.status,
+        StatusCode::BAD_REQUEST,
+        "name required without app"
+    );
+    let r = ctx
+        .post(
+            &format!("/api/databases/{an_id}/users"),
+            &t,
+            json!({"username":"analytics_ro","privileges":"read"}),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{:?}", r.body);
+    assert!(r.body["password"].as_str().unwrap().len() >= 32);
+    let ro_id = r.body["id"].as_u64().unwrap();
+    for (body, code) in [
+        (json!({"username":"analytics_ro"}), StatusCode::CONFLICT),
+        (json!({"username":"beripick_api"}), StatusCode::CONFLICT),
+        (
+            json!({"username":"x2","privileges":"admin"}),
+            StatusCode::BAD_REQUEST,
+        ),
+        (
+            json!({"username":"x3","password":"has space 123"}),
+            StatusCode::BAD_REQUEST,
+        ),
+        (json!({"username":"root"}), StatusCode::BAD_REQUEST),
+    ] {
+        assert_eq!(
+            ctx.post(&format!("/api/databases/{an_id}/users"), &t, body.clone())
+                .await
+                .status,
+            code,
+            "{body}"
+        );
+    }
+    let r = ctx
+        .post(
+            &format!("/api/databases/{an_id}/users/{ro_id}/password"),
+            &t,
+            json!({"password":"Custom_pass_123"}),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+    assert!(r.body["url"]
+        .as_str()
+        .unwrap()
+        .contains("analytics_ro:Custom_pass_123@"));
+    let r = ctx.get("/api/databases", &t).await;
+    let an = r.body["databases"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|d| d["name"] == "analytics")
+        .unwrap()
+        .clone();
+    assert!(an["app_id"].is_null());
+    assert_eq!(an["users"].as_array().unwrap().len(), 2);
+    assert_eq!(an["users"][1]["privileges"], "read");
+    // 앱에 연결 → 그 앱 환경변수로 주입, 같은 키 중복은 거부
+    assert_eq!(
+        ctx.req(
+            Method::PUT,
+            &format!("/api/databases/{an_id}"),
+            Some(&t),
+            None,
+            Some(json!({"app_id": api_id, "env_key": "DATABASE_URL"}))
+        )
+        .await
+        .status,
+        StatusCode::CONFLICT
+    );
+    assert_eq!(
+        ctx.req(
+            Method::PUT,
+            &format!("/api/databases/{an_id}"),
+            Some(&t),
+            None,
+            Some(json!({"app_id": api_id, "env_key": "ANALYTICS_URL"}))
+        )
+        .await
+        .status,
+        StatusCode::OK
+    );
+    let env = ctx.get(&format!("/api/apps/{api_id}/env"), &t).await.body;
+    assert!(env["managed"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|m| m["key"] == "ANALYTICS_URL"));
+    assert_eq!(
+        ctx.req(
+            Method::PUT,
+            &format!("/api/databases/{an_id}"),
+            Some(&t),
+            None,
+            Some(json!({"app_id": null}))
+        )
+        .await
+        .status,
+        StatusCode::OK
+    );
+    let r = ctx
+        .post(&format!("/api/databases/{an_id}/backups"), &t, json!({}))
+        .await;
+    assert_eq!(r.status, StatusCode::ACCEPTED, "{:?}", r.body);
+    let rows = wait_backups(&ctx, &t, &format!("database_id={an_id}")).await;
+    assert_eq!(rows.len(), 1);
+    assert!(rows[0]["app_id"].is_null());
+    assert_eq!(rows[0]["status"], "success");
+
+    // ── Redis 계정 ──
+    let r = ctx
+        .post(
+            "/api/redis-users",
+            &t,
+            json!({"username":"cache_ro","key_pattern":"cache:*","readonly":true,"db_index":3}),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{:?}", r.body);
+    assert!(r.body["url"]
+        .as_str()
+        .unwrap()
+        .starts_with("redis://cache_ro:"));
+    assert!(r.body["url"].as_str().unwrap().ends_with("/3"));
+    let ru_id = r.body["id"].as_u64().unwrap();
+    for (body, code) in [
+        (json!({"username":"cache_ro"}), StatusCode::CONFLICT),
+        (json!({"username":"default"}), StatusCode::BAD_REQUEST),
+        (
+            json!({"username":"ok_user","key_pattern":"a b"}),
+            StatusCode::BAD_REQUEST,
+        ),
+        (
+            json!({"username":"ok_user","db_index":99}),
+            StatusCode::BAD_REQUEST,
+        ),
+    ] {
+        assert_eq!(
+            ctx.post("/api/redis-users", &t, body.clone()).await.status,
+            code,
+            "{body}"
+        );
+    }
+    let r = ctx
+        .req(
+            Method::PUT,
+            &format!("/api/redis-users/{ru_id}"),
+            Some(&t),
+            None,
+            Some(json!({"key_pattern":"cache2:*","readonly":false,"db_index":3})),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+    let r = ctx
+        .post(&format!("/api/redis-users/{ru_id}/password"), &t, json!({}))
+        .await;
+    assert_eq!(r.status, StatusCode::OK);
+    let r = ctx.get("/api/databases", &t).await;
+    let ru = &r.body["redis_users"][0];
+    assert_eq!(ru["key_pattern"], "cache2:*");
+    assert_eq!(ru["readonly"], false);
+    assert!(
+        ru.get("password").is_none(),
+        "password must not be serialized"
+    );
+
     // ── 사이트 만들기 ──
     let r = ctx
         .post(
@@ -812,6 +1003,22 @@ async fn full_flow() {
         )
         .await;
     assert_eq!(r.status, StatusCode::BAD_REQUEST);
+    // Python 사이트: 기본 시작 명령 python app.py, 포트 배정, 바로 적용
+    let r = ctx
+        .post(
+            "/api/sites",
+            &t,
+            json!({"type":"python","domains":"py.example.com"}),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{:?}", r.body);
+    assert_eq!(r.body["app"]["kind"], "python");
+    assert_eq!(r.body["app"]["start_cmd"], "python app.py");
+    assert!(r.body["app"]["port"].as_u64().is_some());
+    let py_id = r.body["app"]["id"].as_u64().unwrap();
+    let d = wait_deploy(&ctx, &t, r.body["deployment_id"].as_u64().unwrap()).await;
+    assert_eq!(d["status"], "success", "{}", d["log"]);
+    assert!(d["log"].as_str().unwrap().contains("Python 가상환경"));
 
     // 사이트 설정 변경 → 바로 적용
     let r = ctx
@@ -994,7 +1201,7 @@ async fn full_flow() {
         )
         .await;
     assert_eq!(r.status, StatusCode::CREATED, "{:?}", r.body);
-    for id in [html_id, rust_id, proxy_id] {
+    for id in [html_id, rust_id, proxy_id, py_id] {
         let r = ctx
             .req(
                 Method::DELETE,
@@ -1097,26 +1304,109 @@ async fn full_flow() {
         StatusCode::BAD_REQUEST,
         "static app without DB has nothing to back up"
     );
+    // ── 백업 예약 ──
     let r = ctx
-        .req(
-            Method::PUT,
-            &format!("/api/apps/{api_id}/backup-settings"),
-            Some(&t),
-            None,
-            Some(json!({"schedule":"daily","keep":3})),
+        .post(
+            "/api/backup-jobs",
+            &t,
+            json!({"target":"app","app_id":api_id,"schedule":"daily","hour":3,"minute":30,"keep_count":3}),
         )
         .await;
-    assert_eq!(r.status, StatusCode::OK);
+    assert_eq!(r.status, StatusCode::CREATED, "{:?}", r.body);
+    assert_eq!(r.body["target_name"], "Beripick API");
+    assert!(r.body["next_run_at"].is_string());
+    let job_id = r.body["id"].as_u64().unwrap();
+    for body in [
+        json!({"target":"app","app_id":api_id,"schedule":"monthly","keep_count":3}),
+        json!({"target":"app","app_id":api_id,"schedule":"daily","hour":25,"keep_count":3}),
+        json!({"target":"app","schedule":"daily","keep_count":3}),
+        json!({"target":"app","app_id":api_id,"schedule":"daily","keep_count":0}),
+        json!({"target":"nope","schedule":"daily","keep_count":3}),
+    ] {
+        assert_eq!(
+            ctx.post("/api/backup-jobs", &t, body.clone()).await.status,
+            StatusCode::BAD_REQUEST,
+            "{body}"
+        );
+    }
     let r = ctx
-        .req(
-            Method::PUT,
-            &format!("/api/apps/{api_id}/backup-settings"),
-            Some(&t),
-            None,
-            Some(json!({"schedule":"hourly","keep":3})),
+        .req(Method::PUT, &format!("/api/backup-jobs/{job_id}"), Some(&t), None,
+            Some(json!({"name":"API 매주","target":"app","app_id":api_id,"schedule":"weekly","weekday":0,"hour":4,"keep_count":1,"enabled":false})))
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+    assert_eq!(r.body["name"], "API 매주");
+    assert!(
+        r.body["next_run_at"].is_null(),
+        "disabled job has no next run"
+    );
+    let r = ctx
+        .post(&format!("/api/backup-jobs/{job_id}/run"), &t, json!({}))
+        .await;
+    assert_eq!(r.status, StatusCode::ACCEPTED, "{:?}", r.body);
+    assert_eq!(r.body["started"], 2, "db + data");
+    let rows = wait_backups(&ctx, &t, &format!("job_id={job_id}")).await;
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0]["job_name"], "API 매주");
+    // 한 번 더 실행 → 보관 1개라 대상별로 최신 것만 남음
+    ctx.post(&format!("/api/backup-jobs/{job_id}/run"), &t, json!({}))
+        .await;
+    let mut kept = Vec::new();
+    for _ in 0..50 {
+        kept = wait_backups(&ctx, &t, &format!("job_id={job_id}")).await;
+        if kept.len() == 2
+            && kept
+                .iter()
+                .all(|b| b["id"].as_u64() > rows[0]["id"].as_u64())
+        {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert_eq!(kept.len(), 2, "pruned to keep_count per target: {kept:?}");
+    let r = ctx
+        .post(
+            "/api/backup-jobs",
+            &t,
+            json!({"target":"all","schedule":"hourly","minute":5,"keep_count":2}),
         )
         .await;
-    assert_eq!(r.status, StatusCode::BAD_REQUEST);
+    assert_eq!(r.status, StatusCode::CREATED, "{:?}", r.body);
+    let all_id = r.body["id"].as_u64().unwrap();
+    let r = ctx
+        .get(&format!("/api/backup-jobs?app_id={api_id}"), &t)
+        .await;
+    assert_eq!(r.body["jobs"].as_array().unwrap().len(), 2);
+    assert_eq!(
+        ctx.req(
+            Method::DELETE,
+            &format!("/api/backup-jobs/{job_id}"),
+            Some(&t),
+            None,
+            Some(json!({"delete_files": true}))
+        )
+        .await
+        .status,
+        StatusCode::NO_CONTENT
+    );
+    assert!(ctx
+        .get(&format!("/api/backups?job_id={job_id}"), &t)
+        .await
+        .body
+        .as_array()
+        .unwrap()
+        .is_empty());
+    assert_eq!(
+        ctx.req(
+            Method::DELETE,
+            &format!("/api/backup-jobs/{all_id}"),
+            Some(&t),
+            None,
+            None
+        )
+        .await
+        .status,
+        StatusCode::NO_CONTENT
+    );
     assert_eq!(
         ctx.req(
             Method::DELETE,
@@ -1227,6 +1517,34 @@ async fn full_flow() {
         .await
         .status,
         StatusCode::NO_CONTENT
+    );
+
+    // ── 독립 DB · 계정 정리 ──
+    for (m, uri) in [
+        (
+            Method::DELETE,
+            format!("/api/databases/{an_id}/users/{ro_id}"),
+        ),
+        (Method::DELETE, format!("/api/databases/{an_id}")),
+        (Method::DELETE, format!("/api/redis-users/{ru_id}")),
+    ] {
+        assert_eq!(
+            ctx.req(m, &uri, Some(&t), None, None).await.status,
+            StatusCode::NO_CONTENT,
+            "{uri}"
+        );
+    }
+    assert_eq!(
+        ctx.req(
+            Method::DELETE,
+            &format!("/api/databases/{an_id}"),
+            Some(&t),
+            None,
+            None
+        )
+        .await
+        .status,
+        StatusCode::NOT_FOUND
     );
 
     // ── 삭제 ──

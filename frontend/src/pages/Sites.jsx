@@ -16,7 +16,7 @@ export default function Sites() {
     <>
       <PageHeader
         title="사이트"
-        subtitle={rows.length ? `도메인 ${rows.length}개 · ${down ? `응답 이상 ${down}개` : '모두 응답 중'} — 이 서버의 Nginx 에 직접 요청해 확인합니다` : 'Rust · HTML · 리버스 프록시 사이트를 만들고 관리합니다'}
+        subtitle={rows.length ? `도메인 ${rows.length}개 · ${down ? `응답 이상 ${down}개` : '모두 응답 중'} — 이 서버의 Nginx 에 직접 요청해 확인합니다` : 'Rust · Python · HTML · 리버스 프록시 사이트를 만들고 관리합니다'}
         actions={
           <>
             <button className="btn-ghost" onClick={() => sites.reload()} disabled={sites.loading}>

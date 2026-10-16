@@ -344,7 +344,57 @@ async fn run(
 
     match kind {
         AppKind::Proxy => {
-            bail!("Git 배포는 rust / static / node 만 지원합니다")
+            bail!("Git 배포는 rust / python / static 만 지원합니다")
+        }
+        AppKind::Python => {
+            // 소스를 릴리스 폴더로 복사한 뒤 그 안에 가상환경을 만듦 (릴리스마다 독립 → 롤백 안전)
+            release_dir = paths.releases_dir.join(&release_id);
+            exec.mkdirs(&release_dir, log).await?;
+            run_ok(
+                exec,
+                CmdSpec::new(
+                    "rsync",
+                    &[
+                        "-a",
+                        "--delete",
+                        "--exclude",
+                        ".git",
+                        "--exclude",
+                        ".venv",
+                        &format!("{work_s}/"),
+                        &format!("{}/", release_dir.display()),
+                    ],
+                )
+                .timeout(900),
+                log,
+            )
+            .await?;
+            let pip_cache = state.cfg.data_dir.join("cache").join("pip");
+            exec.mkdirs(&pip_cache, log).await?;
+            let venv_bin = release_dir.join(".venv").join("bin");
+            let py_path = format!(
+                "{}:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+                venv_bin.display()
+            );
+            let in_release = |cmd: &str| {
+                with_env(CmdSpec::new("bash", &["-c", cmd]).cwd(&release_dir), &vars)
+                    .env("PIP_CACHE_DIR", pip_cache.display().to_string())
+                    .env("PATH", py_path.clone())
+                    .env(
+                        "VIRTUAL_ENV",
+                        release_dir.join(".venv").display().to_string(),
+                    )
+            };
+            run_ok(exec, in_release(PYTHON_SETUP_GIT).timeout(1800), log).await?;
+            if let Some(cmd) = app.build_cmd.clone().filter(|s| !s.trim().is_empty()) {
+                run_ok(exec, in_release(&cmd).timeout(1800), log).await?;
+            }
+            run_ok(
+                exec,
+                CmdSpec::new("chmod", &["-R", "a+rX", &release_dir.display().to_string()]),
+                log,
+            )
+            .await?;
         }
         AppKind::Rust => {
             let cmd = app
@@ -652,9 +702,18 @@ async fn apply_site(
             log,
         )
         .await?;
+        if kind == AppKind::Python {
+            log.step("Python 가상환경 (.venv · requirements.txt)").await;
+            crate::files::run_command(state, app, PYTHON_SETUP_SITE, vars, log).await?;
+        }
         if let Some(cmd) = app.build_cmd.as_deref().filter(|c| !c.trim().is_empty()) {
             log.step("빌드 명령 (사이트 유저 권한)").await;
-            crate::files::run_command(state, app, cmd, vars, log).await?;
+            let cmd = if kind == AppKind::Python {
+                format!("{PYTHON_ACTIVATE} {cmd}")
+            } else {
+                cmd.to_string()
+            };
+            crate::files::run_command(state, app, &cmd, vars, log).await?;
         }
     }
 
@@ -684,7 +743,7 @@ async fn apply_site(
         }
     }
 
-    if kind == AppKind::Rust {
+    if kind.is_service() {
         log.step("서비스").await;
         let unit = templates::systemd_unit(&templates::UnitInput {
             app,
@@ -719,6 +778,19 @@ async fn apply_site(
     .await?;
     Ok(String::new())
 }
+
+/// Git Python 앱: 릴리스 폴더 안에 가상환경을 만들고 requirements.txt 설치
+const PYTHON_SETUP_GIT: &str = "python3 -m venv .venv && \
+     if [ -f requirements.txt ]; then pip install --no-input --disable-pip-version-check -r requirements.txt; \
+     else echo 'requirements.txt 없음 — 패키지 설치 생략'; fi";
+
+/// 파일 Python 사이트: 문서 루트의 .venv (없을 때만 생성) + requirements.txt 설치
+const PYTHON_SETUP_SITE: &str = "test -x .venv/bin/python || python3 -m venv .venv; \
+     if [ -f requirements.txt ]; then .venv/bin/pip install --no-input --disable-pip-version-check -q -r requirements.txt; \
+     else echo 'requirements.txt 없음 — 패키지 설치 생략'; fi";
+
+/// 사이트 유저로 실행하는 명령 앞에 붙여 가상환경을 켬
+const PYTHON_ACTIVATE: &str = "export VIRTUAL_ENV=\"$PWD/.venv\" PATH=\"$PWD/.venv/bin:$PATH\";";
 
 enum BinaryState {
     Missing(String),

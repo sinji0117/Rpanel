@@ -155,6 +155,25 @@ fn unit_identity(
     }
 }
 
+/// Python 가상환경 위치 (파일 사이트: 문서 루트/.venv, Git 앱: current/.venv)
+pub fn python_venv(app: &App, paths: &AppPaths) -> PathBuf {
+    match (app.source(), app.site_root.as_deref()) {
+        (Source::Files, Some(root)) => Path::new(root).join(".venv"),
+        _ => paths.current.join(".venv"),
+    }
+}
+
+/// 서비스·크론의 PATH: Python 앱은 가상환경의 bin 을 맨 앞에 (python·pip·gunicorn 등이 venv 것으로)
+pub fn service_path(app: &App, paths: &AppPaths, base: &str) -> String {
+    if app.kind() == AppKind::Python {
+        format!("{}/bin:{base}", python_venv(app, paths).display())
+    } else {
+        base.to_string()
+    }
+}
+
+pub const PYTHON_DEFAULT_START: &str = "python app.py";
+
 pub fn systemd_unit(i: &UnitInput) -> anyhow::Result<String> {
     let app = i.app;
     let kind = app.kind();
@@ -163,18 +182,29 @@ pub fn systemd_unit(i: &UnitInput) -> anyhow::Result<String> {
             let bin = app.binary_name.as_deref().unwrap_or(&app.slug);
             i.paths.current.join(bin).display().to_string()
         }
-        (AppKind::Rust, _) => {
+        (AppKind::Rust | AppKind::Python, _) => {
+            let default = if kind == AppKind::Python {
+                PYTHON_DEFAULT_START
+            } else {
+                "./app"
+            };
             let cmd = app
                 .start_cmd
                 .as_deref()
                 .filter(|s| !s.trim().is_empty())
-                .unwrap_or("./app");
+                .unwrap_or(default);
             format!("/bin/bash -c {}", systemd_quote(cmd))
         }
         _ => anyhow::bail!("{} 앱은 systemd 유닛이 없습니다", kind.as_str()),
     };
     let (user, cwd, rw, protect_home) = unit_identity(app, i.paths, i.run_user);
-    let mdwe = "MemoryDenyWriteExecute=true\n";
+    // Python 확장 모듈(cffi 등)은 실행 가능한 메모리를 만들 수 있어 W^X 제한은 Rust 에만
+    let mdwe = if kind == AppKind::Rust {
+        "MemoryDenyWriteExecute=true\n"
+    } else {
+        ""
+    };
+    let path = service_path(app, i.paths, i.path_env);
     Ok(format!(
         "{MANAGED_MARKER} (app {slug}) — 직접 수정하지 마세요. 패널에서 재배포 시 덮어씁니다.
 [Unit]
@@ -203,7 +233,6 @@ WantedBy=multi-user.target
         slug = app.slug,
         name = app.name.replace(['\n', '\r'], " "),
         env = i.paths.env_file.display(),
-        path = i.path_env,
         exec = exec_start,
     ))
 }
@@ -249,7 +278,7 @@ TimeoutStartSec=3600
         id = job.id,
         name = job.name.replace(['\n', '\r', '%'], " "),
         env = paths.env_file.display(),
-        path = path_env,
+        path = service_path(app, paths, path_env),
         cmd = systemd_quote(&job.command),
     )
 }
@@ -363,7 +392,7 @@ fn site_body(i: &SiteInput) -> String {
     let app = i.app;
     let mut s = String::new();
     match (app.kind(), app.source()) {
-        (AppKind::Rust, _) => {
+        (AppKind::Rust | AppKind::Python, _) => {
             let port = app.port.unwrap_or(0);
             s.push_str(&format!(
                 "
@@ -814,5 +843,62 @@ mod tests {
         assert!(u.contains("WorkingDirectory=/home/beripick/htdocs/beripick.com\n"));
         assert!(u.contains("ReadWritePaths=/home/beripick\n"));
         assert!(!u.contains("ProtectHome"));
+    }
+
+    #[test]
+    fn python_units_use_venv() {
+        let mut a = files_app("python");
+        a.start_cmd = None;
+        let p = AppPaths::new(Path::new("/var/lib/rpanel"), &a.slug);
+        let u = systemd_unit(&UnitInput {
+            app: &a,
+            paths: &p,
+            run_user: "rpanel-app",
+            path_env: "/usr/bin:/bin",
+        })
+        .unwrap();
+        assert!(u.contains(
+            "Environment=PATH=/home/beripick/htdocs/beripick.com/.venv/bin:/usr/bin:/bin\n"
+        ));
+        assert!(u.contains(r#"ExecStart=/bin/bash -c "python app.py""#));
+        assert!(!u.contains("MemoryDenyWriteExecute"));
+        assert!(u.contains("User=beripick\n"));
+
+        let mut g = app("python");
+        g.start_cmd = Some("gunicorn -b 127.0.0.1:$PORT app:app".into());
+        let u = systemd_unit(&UnitInput {
+            app: &g,
+            paths: &p,
+            run_user: "rpanel-app",
+            path_env: "/usr/bin",
+        })
+        .unwrap();
+        assert!(u.contains(
+            "Environment=PATH=/var/lib/rpanel/apps/beripick-api/current/.venv/bin:/usr/bin\n"
+        ));
+        assert!(u.contains("User=rpanel-app"));
+        let job = CronJob {
+            id: 7,
+            app_id: 1,
+            name: "정리".into(),
+            schedule: "*-*-* 03:00:00".into(),
+            command: "python manage.py clean".into(),
+            enabled: true,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        };
+        let cron = cron_service(&g, &p, &job, "rpanel-app", "/usr/bin");
+        assert!(cron.contains("current/.venv/bin:/usr/bin"));
+        // Rust 는 그대로
+        let r = app("rust");
+        assert_eq!(service_path(&r, &p, "/usr/bin"), "/usr/bin");
+        let s = nginx_site(&SiteInput {
+            app: &a,
+            paths: &p,
+            trusted_proxy: "",
+            ipv6: false,
+        })
+        .unwrap();
+        assert!(s.contains("proxy_pass http://127.0.0.1:8101;"));
     }
 }

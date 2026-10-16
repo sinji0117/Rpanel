@@ -1,4 +1,4 @@
-//! 사이트: 만들기(Rust 실행 파일·HTML·리버스 프록시), 사이트 유저, SSL
+//! 사이트: 만들기(Rust 실행 파일·Python·HTML·리버스 프록시), 사이트 유저, SSL
 
 use axum::{
     extract::{Path, State},
@@ -210,8 +210,13 @@ pub async fn create(
     let (kind, source) = match b.site_type.as_str() {
         "html" | "static" => (AppKind::Static, Source::Files),
         "rust" => (AppKind::Rust, Source::Files),
+        "python" => (AppKind::Python, Source::Files),
         "proxy" => (AppKind::Proxy, Source::None),
-        _ => return Err(AppError::bad("type 은 rust / html / proxy 중 하나입니다")),
+        _ => {
+            return Err(AppError::bad(
+                "type 은 rust / python / html / proxy 중 하나입니다",
+            ))
+        }
     };
     let domains = validate::domains(&b.domains).map_err(AppError::BadRequest)?;
     let primary = domains
@@ -227,7 +232,12 @@ pub async fn create(
     validate::name(&name).map_err(AppError::BadRequest)?;
 
     let start_cmd = if kind.is_service() {
-        let c = opt(&b.start_cmd).unwrap_or_else(|| "./app".into());
+        let default = if kind == AppKind::Python {
+            crate::deploy::templates::PYTHON_DEFAULT_START
+        } else {
+            "./app"
+        };
+        let c = opt(&b.start_cmd).unwrap_or_else(|| default.into());
         validate::command(&c).map_err(AppError::BadRequest)?;
         Some(c)
     } else {
@@ -303,6 +313,7 @@ pub async fn create(
             let log = LogSink::capture();
             let helper_kind = match kind {
                 AppKind::Rust => "rust",
+                AppKind::Python => "python",
                 _ => "static",
             };
             if let Err(e) = helper::call(&state, &["site-create", &slug, u, &primary, helper_kind], &log).await {

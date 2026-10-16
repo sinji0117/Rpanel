@@ -114,13 +114,15 @@ fn site(kind: &str) -> String {
 
 #[test]
 fn generated_units_pass() {
-    let (ok, err) = validate("validate_unit", &unit("rust"), "beripick-api");
-    assert!(ok, "rust unit rejected: {err}");
+    for kind in ["rust", "python"] {
+        let (ok, err) = validate("validate_unit", &unit(kind), "beripick-api");
+        assert!(ok, "{kind} unit rejected: {err}\n{}", unit(kind));
+    }
 }
 
 #[test]
 fn generated_sites_pass() {
-    for kind in ["rust", "static"] {
+    for kind in ["rust", "python", "static"] {
         let (ok, err) = validate("validate_site", &site(kind), "beripick-api");
         assert!(ok, "{kind} site rejected: {err}\n{}", site(kind));
     }
@@ -417,7 +419,7 @@ fn site_of(a: &App) -> String {
 
 #[test]
 fn file_sites_pass() {
-    for kind in ["rust", "static"] {
+    for kind in ["rust", "python", "static"] {
         for (ssl, force) in [("none", false), ("letsencrypt", true), ("custom", false)] {
             let mut a = files_app(kind);
             a.ssl_mode = ssl.into();
@@ -485,8 +487,8 @@ fn dangerous_file_sites_rejected() {
 
 #[test]
 fn site_units_contract() {
-    {
-        let a = files_app("rust");
+    for kind in ["rust", "python"] {
+        let a = files_app(kind);
         let p = AppPaths::new(Path::new(DATA), &a.slug);
         let u = systemd_unit(&UnitInput {
             app: &a,
@@ -555,4 +557,55 @@ fn helper_rejects_bad_site_args() {
             .status
             .success()
     );
+}
+
+/// helper 함수 하나를 인자와 함께 실행 (source 후 호출)
+fn helper_fn(call: &str) -> bool {
+    let script = format!("set -euo pipefail; source '{}'; {call}", helper());
+    Command::new("bash")
+        .arg("-c")
+        .arg(script)
+        .output()
+        .expect("bash")
+        .status
+        .success()
+}
+
+#[test]
+fn account_and_backup_args() {
+    // Redis 계정 이름·키 패턴: 설정 파일·명령 주입에 쓰일 수 있는 문자는 거부
+    assert!(helper_fn("valid_redis_user cache_ro"));
+    for bad in [
+        "default",
+        "ab",
+        "Bad",
+        "'a b'",
+        "'x\nuser evil on'",
+        "'a;b'",
+    ] {
+        assert!(!helper_fn(&format!("valid_redis_user {bad}")), "{bad}");
+    }
+    assert!(helper_fn("valid_key_pattern 'myapp:*'"));
+    for bad in ["'a b'", "'~* +@all'", "'x\nuser evil'", "''", "'&*'"] {
+        assert!(!helper_fn(&format!("valid_key_pattern {bad}")), "{bad}");
+    }
+    // 비밀번호: URL·SQL 에 그대로 넣을 수 있는 문자만
+    assert!(helper_fn("echo Good_pass-123 | read_password >/dev/null"));
+    for bad in [
+        "short",
+        "\"has space 123\"",
+        "\"quote'1234567\"",
+        "\"semi;colon123\"",
+    ] {
+        assert!(
+            !helper_fn(&format!("echo {bad} | read_password >/dev/null")),
+            "{bad}"
+        );
+    }
+    // 백업 폴더: 앱 slug 또는 _databases 만
+    assert!(helper_fn("valid_backup_scope _databases"));
+    assert!(helper_fn("valid_backup_scope beripick-api"));
+    for bad in ["../etc", "_other", "''"] {
+        assert!(!helper_fn(&format!("valid_backup_scope {bad}")), "{bad}");
+    }
 }

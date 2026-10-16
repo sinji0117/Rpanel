@@ -25,7 +25,7 @@ export function StatusBadge({ status, deployment = false }) {
 }
 
 export function KindBadge({ kind, source }) {
-  const map = { rust: 'Rust', static: source === 'files' ? 'HTML' : 'Static', proxy: 'Proxy' }
+  const map = { rust: 'Rust', python: 'Python', static: source === 'files' ? 'HTML' : 'Static', proxy: 'Proxy' }
   return <span className="kbd uppercase">{map[kind] || kind}</span>
 }
 
@@ -98,6 +98,21 @@ export function Modal({ open, title, onClose, children, wide = false }) {
         <div className="p-5">{children}</div>
       </div>
     </div>
+  )
+}
+
+export function Section({ title, desc, actions, children }) {
+  return (
+    <section className="card p-5">
+      <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h3 className="font-medium">{title}</h3>
+          {desc && <p className="mt-1 max-w-2xl text-sm text-ink-400">{desc}</p>}
+        </div>
+        {actions && <div className="flex gap-2">{actions}</div>}
+      </div>
+      {children}
+    </section>
   )
 }
 

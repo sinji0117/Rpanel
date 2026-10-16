@@ -1,6 +1,6 @@
 #!/bin/bash
 # Rpanel 설치 엔진 — Ubuntu 24.04 에 패널과 필요한 프로그램을 설치·설정합니다.
-# (Nginx · MariaDB · Redis · Rust · Node.js(프런트 빌드용) · Let's Encrypt)
+# (Nginx · MariaDB · Redis · Rust · Python · Node.js(프런트 빌드용) · Let's Encrypt)
 #
 #   보통은 저장소 맨 위의 install.sh / update.sh 로 실행합니다:
 #     curl -fsSL https://raw.githubusercontent.com/sinji0117/Rpanel/main/install.sh | sudo bash
@@ -94,7 +94,8 @@ info "설치 모드: $EDGE${PROXY_IP:+ (앞단 프록시 $PROXY_IP)}"
 say "1/8 기본 패키지"
 apt-get update -q >/dev/null
 apt-get install -y -q curl ca-certificates gnupg git rsync openssl sudo build-essential pkg-config libssl-dev \
-  openssh-client openssh-server nginx mariadb-server mariadb-client redis-server ufw certbot unzip zip >/dev/null
+  openssh-client openssh-server nginx mariadb-server mariadb-client redis-server ufw certbot unzip zip \
+  python3 python3-venv python3-pip python3-dev >/dev/null
 # 가상머신이면 게스트 에이전트 (없어도 무관)
 apt-get install -y -q qemu-guest-agent >/dev/null 2>&1 || true
 # 시간대가 UTC 기본값이면 서울로 (이미 정했다면 유지)
@@ -184,6 +185,11 @@ redis_set requirepass "$REDIS_PW"
 redis_set supervised systemd
 grep -Eq '^[[:space:]]*maxmemory[[:space:]]' "$RCONF" || redis_set maxmemory 1gb
 grep -Eq '^[[:space:]]*maxmemory-policy[[:space:]]' "$RCONF" || redis_set maxmemory-policy allkeys-lru
+# 패널에서 만드는 Redis 계정(ACL)은 별도 파일에 저장 (비밀번호는 해시로만)
+RUSERS=/etc/redis/rpanel-users.conf
+[[ -f $RUSERS ]] || { echo "# managed by rpanel — 패널의 데이터베이스 화면에서 관리합니다" > "$RUSERS"; }
+chown root:redis "$RUSERS"; chmod 0640 "$RUSERS"
+grep -qx "include $RUSERS" "$RCONF" || echo "include $RUSERS" >> "$RCONF"
 chmod 0640 "$RCONF"
 systemctl enable redis-server >/dev/null 2>&1 || true
 systemctl restart redis-server

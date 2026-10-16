@@ -23,7 +23,7 @@ export default function AppDetail() {
   if (app.loading) return <Spinner className="text-ink-400" />
   if (app.error) return <ErrorBox error={app.error} />
   const a = app.data
-  const isService = a.kind === 'rust'
+  const isService = a.kind === 'rust' || a.kind === 'python'
   const isGit = a.source === 'git'
   const isFiles = a.source === 'files'
   const tab = tabState ?? (isGit ? 'deployments' : isFiles ? 'files' : 'settings')

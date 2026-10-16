@@ -68,7 +68,37 @@ pub fn router(state: AppState) -> Router {
             get(apps::get_webhook).post(apps::rotate_webhook),
         )
         // DB · Redis
-        .route("/databases", get(databases::list_all))
+        .route(
+            "/databases",
+            get(databases::list_all).post(databases::create_global),
+        )
+        .route(
+            "/databases/{db}",
+            put(databases::link).delete(databases::drop_global),
+        )
+        .route(
+            "/databases/{db}/password",
+            post(databases::rotate_password_global),
+        )
+        .route("/databases/{db}/users", post(databases::user_create))
+        .route("/databases/{db}/users/{uid}", delete(databases::user_drop))
+        .route(
+            "/databases/{db}/users/{uid}/password",
+            post(databases::user_password),
+        )
+        .route(
+            "/databases/{db}/backups",
+            post(backups::create_for_database),
+        )
+        .route("/redis-users", post(databases::redis_user_create))
+        .route(
+            "/redis-users/{id}",
+            put(databases::redis_user_update).delete(databases::redis_user_drop),
+        )
+        .route(
+            "/redis-users/{id}/password",
+            post(databases::redis_user_password),
+        )
         .route(
             "/apps/{id}/databases",
             get(databases::get_for_app).post(databases::create),
@@ -116,7 +146,15 @@ pub fn router(state: AppState) -> Router {
         // 백업
         .route("/backups", get(backups::list))
         .route("/apps/{id}/backups", post(backups::create))
-        .route("/apps/{id}/backup-settings", put(backups::update_settings))
+        .route(
+            "/backup-jobs",
+            get(backups::list_jobs).post(backups::create_job),
+        )
+        .route(
+            "/backup-jobs/{id}",
+            put(backups::update_job).delete(backups::delete_job),
+        )
+        .route("/backup-jobs/{id}/run", post(backups::run_job))
         .route("/backups/{id}", delete(backups::delete))
         .route("/backups/{id}/restore", post(backups::restore))
         .route("/backups/{id}/download", get(backups::download))

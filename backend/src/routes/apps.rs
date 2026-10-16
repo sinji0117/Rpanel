@@ -125,7 +125,12 @@ fn clean(input: &AppInput, kind: AppKind) -> AppResult<Clean> {
         git_branch,
         root_dir,
         build_cmd,
-        start_cmd: None,
+        // Git Python 앱만 시작 명령을 씀 (Rust 는 빌드한 바이너리를 바로 실행)
+        start_cmd: if kind == AppKind::Python {
+            Some(start_cmd.unwrap_or_else(|| crate::deploy::templates::PYTHON_DEFAULT_START.into()))
+        } else {
+            None
+        },
         binary_name: if kind == AppKind::Rust {
             binary_name
         } else {
@@ -237,9 +242,9 @@ pub async fn create(
         .kind
         .as_deref()
         .and_then(AppKind::parse)
-        .filter(|k| matches!(k, AppKind::Rust | AppKind::Static))
+        .filter(|k| matches!(k, AppKind::Rust | AppKind::Python | AppKind::Static))
         .ok_or_else(|| {
-            AppError::bad("Git 앱의 kind 는 rust / static 중 하나입니다 (업로드형 사이트·프록시는 사이트 만들기에서)")
+            AppError::bad("Git 앱의 kind 는 rust / python / static 중 하나입니다 (업로드형 사이트·프록시는 사이트 만들기에서)")
         })?;
     let c = clean(&input, kind)?;
     let slug = match opt(&input.slug) {
@@ -378,7 +383,7 @@ async fn update_site(
         validate::command(c).map_err(bad)?;
     }
     let start_cmd = match app.kind() {
-        AppKind::Rust => {
+        AppKind::Rust | AppKind::Python => {
             let c = opt(&input.start_cmd).ok_or_else(|| AppError::bad("시작 명령이 필요합니다"))?;
             validate::command(&c).map_err(bad)?;
             Some(c)

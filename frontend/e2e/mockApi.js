@@ -13,6 +13,9 @@ export function createMockBackend({ needsSetup = false } = {}) {
     deployments: [],
     dbs: [],
     backups: [],
+    jobs: [],
+    dbUsers: [],
+    redisUsers: [],
     crons: [],
     files: {},
     ssl: {},
@@ -227,10 +230,6 @@ export function createMockBackend({ needsSetup = false } = {}) {
         db.backups.unshift({ id: id(), app_id: a.id, app_name: a.name, app_slug: a.slug, kind: 'data', target: 'data', file: `${stamp}-data.tar.gz`, size_bytes: 1024, status: 'success', error: null, trigger_by: 'manual', created_at: now(), finished_at: now() })
         return json(route, 202, { backup_ids: [] })
       }
-      if (sub === '/backup-settings') {
-        Object.assign(a, { backup_schedule: body.schedule, backup_keep: body.keep })
-        return json(route, 200, { ...body, hour: 3 })
-      }
       if (sub === '/cron' && method === 'GET') return json(route, 200, db.crons.filter((c) => c.app_id === a.id))
       if (sub === '/cron' && method === 'POST') {
         if (/[;$`]/.test(body.schedule)) return json(route, 400, { error: 'bad_request', message: '일정 형식이 올바르지 않습니다' })
@@ -289,13 +288,133 @@ export function createMockBackend({ needsSetup = false } = {}) {
             })),
           ),
       )
-    if (path === '/databases')
+    // ── 데이터베이스 · 계정 ──
+    const dbUrl = (name, user, pw = 'secretpw') => `mysql://${user}:${pw}@127.0.0.1:3306/${name}`
+    const redisUrl = (u) => `redis://${u.username}:${u.password}@127.0.0.1:6379/${u.db_index}`
+    const pw = () => 'Gen' + Math.random().toString(36).slice(2, 14) + 'x9'
+    if (path === '/databases' && method === 'GET')
       return json(route, 200, {
-        databases: db.dbs.map((d) => ({ ...d, app_name: db.apps.find((a) => a.id === d.app_id)?.name })),
+        databases: db.dbs.map((d) => ({
+          ...d,
+          app_id: d.app_id ?? null,
+          app_name: db.apps.find((a) => a.id === d.app_id)?.name ?? null,
+          users: [
+            { id: null, username: d.username, privileges: 'all', primary: true, url: dbUrl(d.name, d.username) },
+            ...db.dbUsers.filter((u) => u.database_id === d.id).map((u) => ({ ...u, primary: false, url: dbUrl(d.name, u.username, u.password) })),
+          ],
+        })),
         redis: db.apps.filter((a) => a.redis_db != null).map((a) => ({ app_id: a.id, app_name: a.name, app_slug: a.slug, db: a.redis_db, keys: 0 })),
+        redis_users: db.redisUsers.map((u) => ({ ...u, password: undefined, url: redisUrl(u) })),
         redis_range: [4, 15],
         panel_redis_db: 10,
       })
+    if (path === '/databases' && method === 'POST') {
+      if (!/^[a-z][a-z0-9_]{1,63}$/.test(body.name || '')) return json(route, 400, { error: 'bad_request', message: 'DB 이름은 소문자로 시작하는 소문자·숫자·_ 2~64자여야 합니다' })
+      if (db.dbs.some((d) => d.name === body.name)) return json(route, 409, { error: 'conflict', message: '이미 사용 중인 DB 이름입니다' })
+      const d = { id: id(), app_id: body.app_id ?? null, name: body.name, username: body.username || body.name, env_key: body.env_key || 'DATABASE_URL', created_at: now() }
+      db.dbs.push(d)
+      return json(route, 201, { ...d, url: dbUrl(d.name, d.username) })
+    }
+    m = path.match(/^\/databases\/(\d+)(\/.*)?$/)
+    if (m) {
+      const d = db.dbs.find((x) => x.id === Number(m[1]))
+      if (!d) return json(route, 404, { error: 'not_found', message: '찾을 수 없습니다' })
+      const sub = m[2] || ''
+      if (!sub && method === 'PUT') {
+        Object.assign(d, { app_id: body.app_id, env_key: body.env_key || d.env_key })
+        return json(route, 200, { ok: true })
+      }
+      if (!sub && method === 'DELETE') {
+        db.dbs = db.dbs.filter((x) => x !== d)
+        db.dbUsers = db.dbUsers.filter((u) => u.database_id !== d.id)
+        return json(route, 204)
+      }
+      if (sub === '/password') return json(route, 200, { ok: true, url: dbUrl(d.name, d.username, 'NewPrimary123') })
+      if (sub === '/backups') {
+        db.backups.unshift({ id: id(), app_id: d.app_id, app_name: null, app_slug: null, database_id: d.id, kind: 'db', target: d.name, file: `20261013-030000-db-${d.name}.sql.gz`, size_bytes: 4096, status: 'success', error: null, trigger_by: 'manual', created_at: now(), finished_at: now() })
+        return json(route, 202, { backup_ids: [] })
+      }
+      if (sub === '/users' && method === 'POST') {
+        if (!/^[a-z][a-z0-9_]{1,31}$/.test(body.username || '')) return json(route, 400, { error: 'bad_request', message: '사용자 이름은 소문자로 시작하는 소문자·숫자·_ 2~32자여야 합니다' })
+        if ([...db.dbs.map((x) => x.username), ...db.dbUsers.map((u) => u.username)].includes(body.username))
+          return json(route, 409, { error: 'conflict', message: `사용자 이름 ${body.username} 은(는) 이미 있습니다` })
+        const u = { id: id(), database_id: d.id, username: body.username, privileges: body.privileges || 'all', password: body.password || pw(), created_at: now() }
+        db.dbUsers.push(u)
+        return json(route, 201, { ...u, url: dbUrl(d.name, u.username, u.password) })
+      }
+      const um = sub.match(/^\/users\/(\d+)(\/password)?$/)
+      if (um) {
+        const u = db.dbUsers.find((x) => x.id === Number(um[1]))
+        if (um[2]) {
+          u.password = body?.password || pw()
+          return json(route, 200, { ok: true, password: u.password, url: dbUrl(d.name, u.username, u.password) })
+        }
+        db.dbUsers = db.dbUsers.filter((x) => x !== u)
+        return json(route, 204)
+      }
+    }
+    if (path === '/redis-users' && method === 'POST') {
+      if (!/^[a-z][a-z0-9_-]{2,31}$/.test(body.username || '') || body.username === 'default')
+        return json(route, 400, { error: 'bad_request', message: 'Redis 계정 이름은 소문자로 시작하는 소문자·숫자·_- 3~32자여야 합니다' })
+      const u = { id: id(), username: body.username, password: body.password || pw(), key_pattern: body.key_pattern || `${body.username}:*`, readonly: !!body.readonly, db_index: body.db_index ?? 0, note: body.note || null, created_at: now() }
+      db.redisUsers.push(u)
+      return json(route, 201, { id: u.id, username: u.username, password: u.password, url: redisUrl(u) })
+    }
+    m = path.match(/^\/redis-users\/(\d+)(\/password)?$/)
+    if (m) {
+      const u = db.redisUsers.find((x) => x.id === Number(m[1]))
+      if (m[2]) {
+        u.password = pw()
+        return json(route, 200, { ok: true, password: u.password, url: redisUrl(u) })
+      }
+      if (method === 'PUT') {
+        Object.assign(u, { key_pattern: body.key_pattern || u.key_pattern, readonly: !!body.readonly, db_index: body.db_index, note: body.note || null })
+        return json(route, 200, { ok: true, url: redisUrl(u) })
+      }
+      db.redisUsers = db.redisUsers.filter((x) => x !== u)
+      return json(route, 204)
+    }
+
+    // ── 백업 예약 ──
+    const pad = (n) => String(n).padStart(2, '0')
+    const jobView = (j) => ({
+      ...j,
+      target_name: j.target === 'app' ? db.apps.find((a) => a.id === j.app_id)?.name : j.target === 'database' ? db.dbs.find((d) => d.id === j.database_id)?.name : '모든 앱·데이터베이스',
+      next_run_at: j.enabled ? `2026-10-17T${pad(j.hour)}:${pad(j.minute)}:00Z` : null,
+      last_status: db.backups.find((b) => b.job_id === j.id)?.status ?? null,
+      backup_count: db.backups.filter((b) => b.job_id === j.id).length,
+    })
+    if (path === '/backup-jobs' && method === 'GET') {
+      const appId = Number(url.searchParams.get('app_id'))
+      return json(route, 200, { jobs: db.jobs.filter((j) => !appId || j.app_id === appId || j.target === 'all').map(jobView), timezone: '+09:00' })
+    }
+    if ((path === '/backup-jobs' && method === 'POST') || (/^\/backup-jobs\/\d+$/.test(path) && method === 'PUT')) {
+      if (!['hourly', 'daily', 'weekly'].includes(body.schedule)) return json(route, 400, { error: 'bad_request', message: '주기는 hourly / daily / weekly 중 하나입니다' })
+      if (body.target === 'app' && !body.app_id) return json(route, 400, { error: 'bad_request', message: '백업할 앱을 고르세요' })
+      const name = body.name || (body.target === 'all' ? '전체 백업' : `${jobView({ ...body, id: 0 }).target_name} 백업`)
+      if (method === 'POST') {
+        const j = { id: id(), ...body, name, last_run_at: null, created_at: now() }
+        db.jobs.push(j)
+        return json(route, 201, jobView(j))
+      }
+      const j = db.jobs.find((x) => x.id === Number(path.split('/')[2]))
+      Object.assign(j, body, { name })
+      return json(route, 200, jobView(j))
+    }
+    m = path.match(/^\/backup-jobs\/(\d+)(\/run)?$/)
+    if (m) {
+      const j = db.jobs.find((x) => x.id === Number(m[1]))
+      if (m[2]) {
+        const apps = j.target === 'app' ? db.apps.filter((a) => a.id === j.app_id) : db.apps
+        for (const a of apps)
+          db.backups.unshift({ id: id(), app_id: a.id, app_name: a.name, app_slug: a.slug, job_id: j.id, job_name: j.name, kind: 'data', target: 'data', file: '20261013-040000-data.tar.gz', size_bytes: 2048, status: 'success', error: null, trigger_by: 'manual', created_at: now(), finished_at: now() })
+        j.last_run_at = now()
+        return json(route, 202, { started: apps.length })
+      }
+      if (body?.delete_files) db.backups = db.backups.filter((b) => b.job_id !== j.id)
+      db.jobs = db.jobs.filter((x) => x !== j)
+      return json(route, 204)
+    }
     m = path.match(/^\/deployments\/(\d+)$/)
     if (m) {
       const d = db.deployments.find((x) => x.id === Number(m[1]))

@@ -1,22 +1,31 @@
-//! 앱 백업: 연결된 MariaDB 덤프(.sql.gz) + 앱 data 디렉토리(.tar.gz)
-//! 파일은 /var/lib/rpanel/backups/<slug>/ 에 저장되며(NAS가 rsync로 가져가기 좋은 위치),
-//! 앱별 보관 개수를 넘으면 오래된 것부터 지웁니다. 일/주 단위 예약 실행을 지원합니다.
+//! 백업: MariaDB 덤프(.sql.gz) + 사이트 파일 / 앱 data 디렉토리(.tar.gz)
+//!
+//! - 파일은 /var/lib/rpanel/backups/<앱 slug>/ 에 저장합니다. 앱에 연결하지 않은 데이터베이스는
+//!   /var/lib/rpanel/backups/_databases/ 에 저장합니다.
+//! - 백업 예약(backup_jobs)은 여러 개 만들 수 있고, 예약마다 대상(앱 / 데이터베이스 / 전체)·주기·보관 개수를 정합니다.
+//!   보관 개수는 그 예약이 만든 백업에만 적용됩니다 (직접 만든 백업은 지우기 전까지 남음).
 
 use std::{path::PathBuf, time::Duration};
 
-use chrono::{DateTime, Local, Timelike, Utc};
+use chrono::{DateTime, Datelike, Local, NaiveDate, Timelike, Utc};
 use redis::AsyncCommands;
 
 use crate::{
     deploy::{helper, logsink::LogSink},
     error::{AppError, AppResult},
-    models::{App, Backup, APP_COLUMNS, BACKUP_COLUMNS},
+    models::{
+        App, AppDatabase, Backup, BackupJob, APP_COLUMNS, BACKUP_COLUMNS, BACKUP_JOB_COLUMNS,
+        DB_COLUMNS,
+    },
     routes::databases::list_for_app,
     state::AppState,
 };
 
-pub fn backup_dir(state: &AppState, slug: &str) -> PathBuf {
-    state.cfg.data_dir.join("backups").join(slug)
+/// 앱에 연결하지 않은 데이터베이스의 백업 폴더 이름
+pub const DB_SCOPE: &str = "_databases";
+
+pub fn backup_dir(state: &AppState, scope: &str) -> PathBuf {
+    state.cfg.data_dir.join("backups").join(scope)
 }
 
 pub fn stamp_now() -> String {
@@ -32,16 +41,39 @@ pub fn valid_file_name(f: &str) -> bool {
     RE.is_match(f)
 }
 
-struct Job {
+/// 백업 행이 저장된 폴더 (앱 slug 또는 _databases)
+pub async fn scope_of(state: &AppState, b: &Backup) -> AppResult<String> {
+    match b.app_id {
+        Some(id) => {
+            let slug: Option<String> = sqlx::query_scalar("SELECT slug FROM apps WHERE id = ?")
+                .bind(id)
+                .fetch_optional(&state.db)
+                .await?;
+            slug.ok_or(AppError::NotFound)
+        }
+        None => Ok(DB_SCOPE.to_string()),
+    }
+}
+
+/// 예약에서 실행될 때의 정보: (예약 id, 보관 개수)
+pub type JobRef = Option<(u64, u32)>;
+
+struct Item {
+    kind: &'static str,
+    target: String,
+    file: String,
+    database_id: Option<u64>,
+}
+
+struct Running {
     id: u64,
-    kind: String,
+    kind: &'static str,
     target: String,
 }
 
-/// 백업 행을 만들고 백그라운드로 실행. 생성된 백업 id 목록 반환.
-pub async fn start(state: &AppState, app: &App, trigger: &str) -> AppResult<Vec<u64>> {
+async fn take_lock(state: &AppState, key: &str) -> AppResult<String> {
     let mut r = state.redis.clone();
-    let lock = state.key(&["lock", "backup", &app.id.to_string()]);
+    let lock = state.key(&["lock", "backup", key]);
     let got: Option<String> = redis::cmd("SET")
         .arg(&lock)
         .arg(1)
@@ -52,73 +84,143 @@ pub async fn start(state: &AppState, app: &App, trigger: &str) -> AppResult<Vec<
         .await?;
     if got.is_none() {
         return Err(AppError::Conflict(
-            "이 앱의 백업이 이미 진행 중입니다".into(),
+            "이 대상의 백업이 이미 진행 중입니다".into(),
         ));
     }
+    Ok(lock)
+}
 
+/// 앱 백업: 연결된 DB 전부 + 사이트 파일(파일 사이트) 또는 data 디렉토리(Git 서비스 앱)
+pub async fn start_app(
+    state: &AppState,
+    app: &App,
+    trigger: &str,
+    job: JobRef,
+) -> AppResult<Vec<u64>> {
     let stamp = stamp_now();
-    let mut jobs = Vec::new();
+    let mut items = Vec::new();
     for db in list_for_app(state, app.id).await? {
-        let file = format!("{stamp}-db-{}.sql.gz", db.name);
-        jobs.push(("db", db.name.clone(), file));
+        items.push(Item {
+            kind: "db",
+            target: db.name.clone(),
+            file: format!("{stamp}-db-{}.sql.gz", db.name),
+            database_id: Some(db.id),
+        });
     }
     if app.site_user.is_some() {
-        jobs.push((
-            "files",
-            "htdocs".to_string(),
-            format!("{stamp}-files.tar.gz"),
-        ));
+        items.push(Item {
+            kind: "files",
+            target: "htdocs".into(),
+            file: format!("{stamp}-files.tar.gz"),
+            database_id: None,
+        });
     } else if app.kind().is_service() {
-        jobs.push(("data", "data".to_string(), format!("{stamp}-data.tar.gz")));
+        items.push(Item {
+            kind: "data",
+            target: "data".into(),
+            file: format!("{stamp}-data.tar.gz"),
+            database_id: None,
+        });
     }
-    if jobs.is_empty() {
-        let _: () = r.del(&lock).await?;
+    if items.is_empty() {
         return Err(AppError::bad(
-            "백업할 대상이 없습니다 (연결된 데이터베이스가 없고, 정적 앱은 data 디렉토리가 없습니다)",
+            "백업할 대상이 없습니다 (연결된 데이터베이스가 없고, 이 앱은 파일·data 디렉토리가 없습니다)",
         ));
     }
-    let mut created = Vec::new();
-    for (kind, target, file) in jobs {
+    let lock = take_lock(state, &format!("app-{}", app.id)).await?;
+    launch(
+        state,
+        lock,
+        app.slug.clone(),
+        Some(app.id),
+        items,
+        stamp,
+        trigger,
+        job,
+    )
+    .await
+}
+
+/// 데이터베이스 하나만 백업
+pub async fn start_database(
+    state: &AppState,
+    db: &AppDatabase,
+    trigger: &str,
+    job: JobRef,
+) -> AppResult<Vec<u64>> {
+    let scope = match db.app_id {
+        Some(id) => {
+            let slug: Option<String> = sqlx::query_scalar("SELECT slug FROM apps WHERE id = ?")
+                .bind(id)
+                .fetch_optional(&state.db)
+                .await?;
+            slug.ok_or(AppError::NotFound)?
+        }
+        None => DB_SCOPE.to_string(),
+    };
+    let stamp = stamp_now();
+    let lock = take_lock(state, &format!("db-{}", db.id)).await?;
+    let items = vec![Item {
+        kind: "db",
+        target: db.name.clone(),
+        file: format!("{stamp}-db-{}.sql.gz", db.name),
+        database_id: Some(db.id),
+    }];
+    launch(state, lock, scope, db.app_id, items, stamp, trigger, job).await
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn launch(
+    state: &AppState,
+    lock: String,
+    scope: String,
+    app_id: Option<u64>,
+    items: Vec<Item>,
+    stamp: String,
+    trigger: &str,
+    job: JobRef,
+) -> AppResult<Vec<u64>> {
+    let mut running = Vec::new();
+    for it in items {
         let res = sqlx::query(
-            "INSERT INTO backups (app_id, kind, target, file, status, trigger_by) VALUES (?, ?, ?, ?, 'running', ?)",
+            "INSERT INTO backups (app_id, database_id, job_id, kind, target, file, status, trigger_by) \
+             VALUES (?, ?, ?, ?, ?, ?, 'running', ?)",
         )
-        .bind(app.id)
-        .bind(kind)
-        .bind(&target)
-        .bind(&file)
+        .bind(app_id)
+        .bind(it.database_id)
+        .bind(job.map(|j| j.0))
+        .bind(it.kind)
+        .bind(&it.target)
+        .bind(&it.file)
         .bind(trigger)
         .execute(&state.db)
         .await?;
-        created.push(Job {
+        running.push(Running {
             id: res.last_insert_id(),
-            kind: kind.into(),
-            target,
+            kind: it.kind,
+            target: it.target,
         });
     }
-    let ids = created.iter().map(|j| j.id).collect();
+    let ids = running.iter().map(|j| j.id).collect();
 
     let state = state.clone();
-    let app = app.clone();
     tokio::spawn(async move {
-        for job in created {
+        for job_item in running {
             let log = LogSink::capture();
-            let result = match job.kind.as_str() {
+            let result = match job_item.kind {
                 "db" => {
                     helper::call_long(
                         &state,
-                        &["backup-db", &app.slug, &job.target, &stamp],
+                        &["backup-db", &scope, &job_item.target, &stamp],
                         &log,
                         3600,
                     )
                     .await
                 }
                 "files" => {
-                    helper::call_long(&state, &["backup-files", &app.slug, &stamp], &log, 3600)
-                        .await
+                    helper::call_long(&state, &["backup-files", &scope, &stamp], &log, 3600).await
                 }
-                _ => {
-                    helper::call_long(&state, &["backup-data", &app.slug, &stamp], &log, 3600).await
-                }
+                _ => helper::call_long(&state, &["backup-data", &scope, &stamp], &log, 3600).await,
             };
             let (status, size, err) = match result {
                 Ok(out) => (
@@ -138,12 +240,14 @@ pub async fn start(state: &AppState, app: &App, trigger: &str) -> AppResult<Vec<
             .bind(status)
             .bind(size)
             .bind(err)
-            .bind(job.id)
+            .bind(job_item.id)
             .execute(&state.db)
             .await;
         }
-        if let Err(e) = prune(&state, &app).await {
-            tracing::warn!(error = %e, app = %app.slug, "backup prune failed");
+        if let Some((job_id, keep)) = job {
+            if let Err(e) = prune_job(&state, job_id, keep).await {
+                tracing::warn!(error = %e, job_id, "backup prune failed");
+            }
         }
         let mut r = state.redis.clone();
         let _: Result<(), _> = r.del(&lock).await;
@@ -151,29 +255,33 @@ pub async fn start(state: &AppState, app: &App, trigger: &str) -> AppResult<Vec<
     Ok(ids)
 }
 
-/// 대상(DB 이름 / data)별로 최근 keep 개만 남기고 삭제
-pub async fn prune(state: &AppState, app: &App) -> AppResult<()> {
-    let keep = app.backup_keep.max(1) as usize;
+/// 예약 하나가 만든 백업을 대상(앱·DB·종류)별로 최근 keep 개만 남기고 삭제
+pub async fn prune_job(state: &AppState, job_id: u64, keep: u32) -> AppResult<()> {
+    let keep = keep.max(1) as usize;
     let rows = sqlx::query_as::<_, Backup>(&format!(
-        "SELECT {BACKUP_COLUMNS} FROM backups WHERE app_id = ? AND status <> 'running' ORDER BY id DESC"
+        "SELECT {BACKUP_COLUMNS} FROM backups WHERE job_id = ? AND status <> 'running' ORDER BY id DESC"
     ))
-    .bind(app.id)
+    .bind(job_id)
     .fetch_all(&state.db)
     .await?;
-    let mut seen: std::collections::HashMap<(String, String), usize> = Default::default();
+    let mut seen: std::collections::HashMap<(Option<u64>, String, String), usize> =
+        Default::default();
     for b in rows {
-        let n = seen.entry((b.kind.clone(), b.target.clone())).or_default();
+        let n = seen
+            .entry((b.app_id, b.kind.clone(), b.target.clone()))
+            .or_default();
         *n += 1;
         if *n > keep {
-            delete_row(state, &app.slug, &b).await?;
+            let scope = scope_of(state, &b).await?;
+            delete_row(state, &scope, &b).await?;
         }
     }
     Ok(())
 }
 
-pub async fn delete_row(state: &AppState, slug: &str, b: &Backup) -> AppResult<()> {
+pub async fn delete_row(state: &AppState, scope: &str, b: &Backup) -> AppResult<()> {
     if !state.exec.is_dry_run() && valid_file_name(&b.file) {
-        let p = backup_dir(state, slug).join(&b.file);
+        let p = backup_dir(state, scope).join(&b.file);
         match tokio::fs::remove_file(&p).await {
             Ok(()) => {}
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
@@ -192,29 +300,148 @@ pub async fn delete_row(state: &AppState, slug: &str, b: &Backup) -> AppResult<(
     Ok(())
 }
 
-/// 예약 백업이 지금 실행되어야 하는가
-pub fn is_due(
+// ───────────── 백업 예약 ─────────────
+
+fn at(d: NaiveDate, h: u32, m: u32) -> Option<DateTime<Local>> {
+    d.and_hms_opt(h, m, 0)?.and_local_timezone(Local).earliest()
+}
+
+/// 지금(now) 이전의 가장 최근 예약 시각
+pub fn prev_fire(
     schedule: &str,
-    last: Option<DateTime<Utc>>,
-    now_local: DateTime<Local>,
     hour: u32,
-) -> bool {
-    let period = match schedule {
-        "daily" => chrono::Duration::hours(24),
-        "weekly" => chrono::Duration::days(7),
-        _ => return false,
-    };
-    if now_local.hour() != hour {
-        return false;
-    }
-    match last {
-        None => true,
-        // 같은 시각대에 두 번 돌지 않도록 30분 여유
-        Some(t) => now_local.with_timezone(&Utc) - t >= period - chrono::Duration::minutes(30),
+    minute: u32,
+    weekday: u32,
+    now: DateTime<Local>,
+) -> Option<DateTime<Local>> {
+    let today = now.date_naive();
+    match schedule {
+        "hourly" => {
+            let c = at(today, now.hour(), minute)?;
+            Some(if c > now {
+                c - chrono::Duration::hours(1)
+            } else {
+                c
+            })
+        }
+        "daily" => {
+            let c = at(today, hour, minute)?;
+            if c > now {
+                at(today.pred_opt()?, hour, minute)
+            } else {
+                Some(c)
+            }
+        }
+        "weekly" => {
+            let back = (now.weekday().num_days_from_sunday() + 7 - weekday % 7) % 7;
+            let d = today - chrono::Days::new(back as u64);
+            let c = at(d, hour, minute)?;
+            if c > now {
+                at(d - chrono::Days::new(7), hour, minute)
+            } else {
+                Some(c)
+            }
+        }
+        _ => None,
     }
 }
 
-/// 1분마다 예약 백업 확인 (패널 프로세스 안에서 실행)
+/// 다음 예약 시각 (화면 표시용)
+pub fn next_fire(
+    schedule: &str,
+    hour: u32,
+    minute: u32,
+    weekday: u32,
+    now: DateTime<Local>,
+) -> Option<DateTime<Local>> {
+    let prev = prev_fire(schedule, hour, minute, weekday, now)?;
+    let step = match schedule {
+        "hourly" => chrono::Duration::hours(1),
+        "daily" => chrono::Duration::days(1),
+        _ => chrono::Duration::days(7),
+    };
+    Some(prev + step)
+}
+
+/// 이 예약이 지금 실행되어야 하는가
+/// (마지막 실행 — 없으면 만든 시각 — 이후에 예약 시각이 지났고, 그 시각에서 6시간이 넘지 않았을 때)
+pub fn is_due(job: &BackupJob, now: DateTime<Local>) -> bool {
+    if !job.enabled {
+        return false;
+    }
+    let Some(prev) = prev_fire(
+        &job.schedule,
+        job.hour as u32,
+        job.minute as u32,
+        job.weekday as u32,
+        now,
+    ) else {
+        return false;
+    };
+    let since = job.last_run_at.unwrap_or(job.created_at);
+    prev.with_timezone(&Utc) > since && now - prev < chrono::Duration::hours(6)
+}
+
+/// 예약 실행: 대상에 맞는 백업을 시작하고 마지막 실행 시각을 기록. 시작한 백업 수 반환
+pub async fn run_job(state: &AppState, job: &BackupJob, trigger: &str) -> AppResult<usize> {
+    sqlx::query("UPDATE backup_jobs SET last_run_at = CURRENT_TIMESTAMP(3) WHERE id = ?")
+        .bind(job.id)
+        .execute(&state.db)
+        .await?;
+    let jr: JobRef = Some((job.id, job.keep_count));
+    match job.target.as_str() {
+        "app" => {
+            let id = job.app_id.ok_or(AppError::NotFound)?;
+            let app =
+                sqlx::query_as::<_, App>(&format!("SELECT {APP_COLUMNS} FROM apps WHERE id = ?"))
+                    .bind(id)
+                    .fetch_optional(&state.db)
+                    .await?
+                    .ok_or(AppError::NotFound)?;
+            Ok(start_app(state, &app, trigger, jr).await?.len())
+        }
+        "database" => {
+            let id = job.database_id.ok_or(AppError::NotFound)?;
+            let db = sqlx::query_as::<_, AppDatabase>(&format!(
+                "SELECT {DB_COLUMNS} FROM app_databases WHERE id = ?"
+            ))
+            .bind(id)
+            .fetch_optional(&state.db)
+            .await?
+            .ok_or(AppError::NotFound)?;
+            Ok(start_database(state, &db, trigger, jr).await?.len())
+        }
+        _ => {
+            // 전체: 모든 앱 + 앱에 연결하지 않은 데이터베이스
+            let mut n = 0;
+            let apps =
+                sqlx::query_as::<_, App>(&format!("SELECT {APP_COLUMNS} FROM apps ORDER BY id"))
+                    .fetch_all(&state.db)
+                    .await?;
+            for app in apps {
+                match start_app(state, &app, trigger, jr).await {
+                    Ok(ids) => n += ids.len(),
+                    Err(AppError::BadRequest(_)) => {} // 백업할 것이 없는 앱 (프록시 등)
+                    Err(e) => tracing::warn!(app = %app.slug, error = %e, "backup skipped"),
+                }
+            }
+            let dbs = sqlx::query_as::<_, AppDatabase>(&format!(
+                "SELECT {DB_COLUMNS} FROM app_databases WHERE app_id IS NULL ORDER BY id"
+            ))
+            .fetch_all(&state.db)
+            .await?;
+            for db in dbs {
+                match start_database(state, &db, trigger, jr).await {
+                    Ok(ids) => n += ids.len(),
+                    Err(e) => tracing::warn!(db = %db.name, error = %e, "backup skipped"),
+                }
+            }
+            Ok(n)
+        }
+    }
+}
+
+/// 1분마다 예약 확인 (패널 프로세스 안에서 실행)
 pub fn spawn_scheduler(state: AppState) {
     tokio::spawn(async move {
         let mut tick = tokio::time::interval(Duration::from_secs(60));
@@ -228,30 +455,19 @@ pub fn spawn_scheduler(state: AppState) {
 }
 
 async fn scheduler_tick(state: &AppState) -> AppResult<()> {
-    let apps = sqlx::query_as::<_, App>(&format!(
-        "SELECT {APP_COLUMNS} FROM apps WHERE backup_schedule <> 'off'"
+    let jobs = sqlx::query_as::<_, BackupJob>(&format!(
+        "SELECT {BACKUP_JOB_COLUMNS} FROM backup_jobs WHERE enabled = 1"
     ))
     .fetch_all(&state.db)
     .await?;
     let now = Local::now();
-    for app in apps {
-        if !is_due(
-            &app.backup_schedule,
-            app.backup_last_scheduled,
-            now,
-            state.cfg.backup_hour,
-        ) {
+    for job in jobs {
+        if !is_due(&job, now) {
             continue;
         }
-        sqlx::query("UPDATE apps SET backup_last_scheduled = CURRENT_TIMESTAMP(3) WHERE id = ?")
-            .bind(app.id)
-            .execute(&state.db)
-            .await?;
-        match start(state, &app, "schedule").await {
-            Ok(ids) => {
-                tracing::info!(app = %app.slug, count = ids.len(), "scheduled backup started")
-            }
-            Err(e) => tracing::warn!(app = %app.slug, error = %e, "scheduled backup skipped"),
+        match run_job(state, &job, "schedule").await {
+            Ok(n) => tracing::info!(job = job.id, count = n, "scheduled backup started"),
+            Err(e) => tracing::warn!(job = job.id, error = %e, "scheduled backup skipped"),
         }
     }
     Ok(())
@@ -272,19 +488,90 @@ mod tests {
         assert!(!valid_file_name("20261013-030000-other.tar.gz"));
     }
 
+    fn job(schedule: &str, hour: u8, minute: u8, weekday: u8) -> BackupJob {
+        let created = Local
+            .with_ymd_and_hms(2026, 10, 1, 0, 0, 0)
+            .unwrap()
+            .with_timezone(&Utc);
+        BackupJob {
+            id: 1,
+            name: "t".into(),
+            target: "all".into(),
+            app_id: None,
+            database_id: None,
+            schedule: schedule.into(),
+            hour,
+            minute,
+            weekday,
+            keep_count: 7,
+            enabled: true,
+            last_run_at: None,
+            created_at: created,
+            updated_at: created,
+        }
+    }
+
+    #[test]
+    fn fire_times() {
+        // 2026-10-14 는 수요일 (weekday 3)
+        let now = Local.with_ymd_and_hms(2026, 10, 14, 3, 20, 0).unwrap();
+        let p = |s, h, m, w| prev_fire(s, h, m, w, now).unwrap();
+        assert_eq!(
+            p("hourly", 0, 15, 0),
+            Local.with_ymd_and_hms(2026, 10, 14, 3, 15, 0).unwrap()
+        );
+        assert_eq!(
+            p("hourly", 0, 30, 0),
+            Local.with_ymd_and_hms(2026, 10, 14, 2, 30, 0).unwrap()
+        );
+        assert_eq!(
+            p("daily", 3, 0, 0),
+            Local.with_ymd_and_hms(2026, 10, 14, 3, 0, 0).unwrap()
+        );
+        assert_eq!(
+            p("daily", 4, 0, 0),
+            Local.with_ymd_and_hms(2026, 10, 13, 4, 0, 0).unwrap()
+        );
+        assert_eq!(
+            p("weekly", 3, 0, 3),
+            Local.with_ymd_and_hms(2026, 10, 14, 3, 0, 0).unwrap()
+        );
+        assert_eq!(
+            p("weekly", 3, 0, 0),
+            Local.with_ymd_and_hms(2026, 10, 11, 3, 0, 0).unwrap()
+        );
+        assert_eq!(
+            p("weekly", 5, 0, 3),
+            Local.with_ymd_and_hms(2026, 10, 7, 5, 0, 0).unwrap()
+        );
+        assert_eq!(
+            next_fire("daily", 4, 0, 0, now).unwrap(),
+            Local.with_ymd_and_hms(2026, 10, 14, 4, 0, 0).unwrap()
+        );
+        assert!(prev_fire("off", 3, 0, 0, now).is_none());
+    }
+
     #[test]
     fn due_logic() {
         let at3 = Local.with_ymd_and_hms(2026, 10, 13, 3, 5, 0).unwrap();
-        let at4 = Local.with_ymd_and_hms(2026, 10, 13, 4, 5, 0).unwrap();
-        assert!(is_due("daily", None, at3, 3));
-        assert!(!is_due("daily", None, at4, 3));
-        assert!(!is_due("off", None, at3, 3));
-        let yesterday = (at3 - chrono::Duration::hours(24)).with_timezone(&Utc);
-        assert!(is_due("daily", Some(yesterday), at3, 3));
-        let minutes_ago = (at3 - chrono::Duration::minutes(2)).with_timezone(&Utc);
-        assert!(!is_due("daily", Some(minutes_ago), at3, 3));
-        assert!(!is_due("weekly", Some(yesterday), at3, 3));
-        let week = (at3 - chrono::Duration::days(7)).with_timezone(&Utc);
-        assert!(is_due("weekly", Some(week), at3, 3));
+        let mut j = job("daily", 3, 0, 0);
+        assert!(is_due(&j, at3));
+        // 방금 실행했으면 다시 돌지 않음
+        j.last_run_at = Some((at3 - chrono::Duration::minutes(2)).with_timezone(&Utc));
+        assert!(!is_due(&j, at3));
+        // 어제 실행 → 오늘 3시가 지났으니 실행
+        j.last_run_at = Some((at3 - chrono::Duration::hours(24)).with_timezone(&Utc));
+        assert!(is_due(&j, at3));
+        // 꺼진 예약
+        j.enabled = false;
+        assert!(!is_due(&j, at3));
+        // 예약 시각에서 6시간 넘게 지났으면 (패널이 오래 꺼져 있었던 경우) 다음 예약까지 기다림
+        let j = job("daily", 3, 0, 0);
+        let at10 = Local.with_ymd_and_hms(2026, 10, 13, 10, 0, 0).unwrap();
+        assert!(!is_due(&j, at10));
+        // 방금 만든 예약은 지난 시각으로 바로 돌지 않음
+        let mut j = job("daily", 3, 0, 0);
+        j.created_at = (at3 - chrono::Duration::minutes(1)).with_timezone(&Utc);
+        assert!(!is_due(&j, at3));
     }
 }

@@ -5,9 +5,12 @@ import { CopyButton, ErrorBox, Field, Modal } from './ui'
 
 export const SITE_TYPES = [
   { id: 'rust', label: 'Rust', desc: '빌드한 실행 파일을 올리면 서비스로 실행' },
+  { id: 'python', label: 'Python', desc: 'Flask·FastAPI·Django 등 — 가상환경 자동' },
   { id: 'html', label: 'HTML', desc: '정적 사이트 — 파일을 올리면 바로 서비스' },
   { id: 'proxy', label: '리버스 프록시', desc: '다른 주소(내부 서버·포트)로 연결' },
 ]
+
+export const DEFAULT_START = { rust: './app', python: 'python app.py' }
 
 /** 서버와 같은 규칙: www.beripick.co.kr → beripick */
 export function userFromDomain(domain) {
@@ -29,8 +32,13 @@ export function genPassword(len = 16) {
 
 export default function CreateSiteModal({ open, onClose }) {
   const nav = useNavigate()
-  const [type, setType] = useState('rust')
+  const [type, setTypeRaw] = useState('rust')
   const [v, setV] = useState({ domains: '', site_user: '', password: '', start_cmd: './app', proxy_target: '' })
+  // 종류를 바꾸면 (직접 고치지 않은) 시작 명령도 그 종류의 기본값으로
+  const setType = (t) => {
+    setTypeRaw(t)
+    setV((s) => (Object.values(DEFAULT_START).includes(s.start_cmd) && DEFAULT_START[t] ? { ...s, start_cmd: DEFAULT_START[t] } : s))
+  }
   const [userTouched, setUserTouched] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
@@ -56,7 +64,7 @@ export default function CreateSiteModal({ open, onClose }) {
         if (v.site_user) body.site_user = v.site_user
         if (v.password) body.password = v.password
       }
-      if (type === 'rust') body.start_cmd = v.start_cmd
+      if (type === 'rust' || type === 'python') body.start_cmd = v.start_cmd
       if (type === 'proxy') body.proxy_target = v.proxy_target
       const r = await post('/sites', body)
       setDone(r)
@@ -87,6 +95,12 @@ export default function CreateSiteModal({ open, onClose }) {
               <b>파일</b> 탭(또는 SFTP)으로 <span className="font-mono">{done.app.start_cmd?.split(' ')[0]?.replace('./', '') || 'app'}</span> 이름으로 올리고 <b>적용</b>을 누르세요.
               <br />
               서버와 같은 리눅스용(보통 x86_64)으로 빌드해야 합니다 — Mac·Windows 에서는 <span className="font-mono">cross</span> 또는 <span className="font-mono">--target x86_64-unknown-linux-gnu</span> 를 쓰세요.
+            </p>
+          )}
+          {done.app.kind === 'python' && (
+            <p className="rounded-lg border border-signal/30 bg-signal/5 p-3 text-xs leading-relaxed text-ink-300" data-testid="python-next">
+              예시 <span className="font-mono">app.py</span> 가 실행 중입니다. 내 프로그램 파일과 <span className="font-mono">requirements.txt</span> 를 <b>파일</b> 탭(또는 SFTP)으로 올리고, 필요하면 설정 탭에서 시작 명령을
+              바꾼 뒤 <b>적용</b>을 누르세요. 적용할 때마다 <span className="font-mono">.venv</span> 가상환경에 패키지를 설치합니다.
             </p>
           )}
           {done.site_user && (
@@ -198,6 +212,15 @@ export default function CreateSiteModal({ open, onClose }) {
 
         {type === 'rust' && (
           <Field label="시작 명령" htmlFor="site-start" hint="문서 루트에 올린 실행 파일 — 예: ./app (PORT 환경변수의 포트로 127.0.0.1 에서 열어야 합니다)">
+            <input id="site-start" className="input font-mono" required value={v.start_cmd} onChange={set('start_cmd')} />
+          </Field>
+        )}
+        {type === 'python' && (
+          <Field
+            label="시작 명령"
+            htmlFor="site-start"
+            hint="예: python app.py · gunicorn -b 127.0.0.1:$PORT app:app · uvicorn main:app --host 127.0.0.1 --port $PORT — requirements.txt 는 적용할 때 자동 설치"
+          >
             <input id="site-start" className="input font-mono" required value={v.start_cmd} onChange={set('start_cmd')} />
           </Field>
         )}

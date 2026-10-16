@@ -19,7 +19,7 @@
                                     └─ /api, ws → 127.0.0.1:8090 (rpanel, 일반 사용자 권한)
                                                    │ sudo rpanel-helper  (검증된 시스템 작업만)
                                                    │ sudo -u <사이트유저> rpanel-files  (사이트 파일만)
- 방문자 ──▶ :80 / :443 (Nginx, 사이트별 설정) ─┬─ Rust 앱       → 127.0.0.1:81xx (systemd 서비스)
+ 방문자 ──▶ :80 / :443 (Nginx, 사이트별 설정) ─┬─ Rust·Python 앱 → 127.0.0.1:81xx (systemd 서비스)
                                                ├─ HTML 사이트   → /home/<사이트유저>/htdocs/<도메인>
                                                └─ 리버스 프록시  → 지정한 주소
 ```
@@ -61,7 +61,7 @@
 | Nginx | 기본 서버는 등록되지 않은 도메인·IP 직접 접속을 끊음(444 / TLS 거부), Let's Encrypt 확인 경로, 갱신 시 자동 reload |
 | MariaDB 10.11 | `127.0.0.1` 바인딩, 익명 계정·test DB·원격 root 제거, RAM 기준 튜닝(없을 때만), 패널 DB |
 | Redis 7 | `127.0.0.1` 바인딩, 비밀번호 생성(이미 있으면 유지), `maxmemory 1gb` |
-| Node.js 22 / Rust | NodeSource(패널 UI·React 정적 앱 빌드용), rustup (Rust 앱 빌드용) |
+| Node.js 22 / Rust / Python | NodeSource(패널 UI·React 정적 앱 빌드용), rustup (Rust 앱 빌드용), `python3` + `python3-venv`·`pip`·`dev` (Python 앱) |
 | 패널 | `rpanel`·`rpanel-app` 사용자, `rpanel-sites` 그룹, 빌드·설치, helper + sudoers, systemd, HTTPS :8443 |
 | SSH | `rpanel-sites` 그룹만 비밀번호 로그인 허용 (`Match Group`) |
 | 비밀값 | `/etc/rpanel/rpanel.env` — DB·Redis 비밀번호, JWT 키 자동 생성 (재실행해도 유지) |
@@ -69,7 +69,7 @@
 
 이미 MariaDB·Redis 를 쓰고 있는 서버에서 실행해도 기존 데이터와 Redis 비밀번호는 유지되고, 패널용 DB·설정만 추가됩니다.
 
-Rust 전용 패널입니다. 실행하는 서버 프로그램은 Rust 뿐이고, PHP·Node.js 런타임은 지원하지 않습니다 (Node.js 는 프런트 빌드 도구로만 사용). 다른 언어의 서비스는 다른 서버에 두고 리버스 프록시 사이트로 연결할 수 있습니다.
+실행하는 서버 프로그램은 Rust 와 Python 입니다. PHP·Node.js 런타임은 지원하지 않습니다 (Node.js 는 프런트 빌드 도구로만 사용). 다른 언어의 서비스는 다른 서버에 두고 리버스 프록시 사이트로 연결할 수 있습니다.
 
 ## 보안 모델
 
@@ -78,7 +78,9 @@ Rust 전용 패널입니다. 실행하는 서버 프로그램은 Rust 뿐이고,
   - Nginx: 허용된 지시어·location 만, `root` 는 해당 사이트 폴더로 고정, 인증서 경로 고정, `include`·`fastcgi_*` 불가, 다른 설정과 도메인 중복 금지, `nginx -t` 실패 시 원복
   - systemd: 실행 사용자 고정(앱은 `rpanel-app`, 사이트는 그 사이트 유저), `NoNewPrivileges` 필수, 경로는 해당 앱/사이트 안
   - 사이트 유저: `rpanel-sites` 그룹, 시스템 계정 이름 거부, 레지스트리(`/etc/rpanel/site-users`)에 있는 계정만 삭제
-  - MariaDB: 패널이 만든 DB(`/etc/rpanel/managed-dbs`)만 삭제·덤프·복원
+  - MariaDB: 패널이 만든 DB(`/etc/rpanel/managed-dbs`)·추가 계정(`/etc/rpanel/managed-db-users`)만 삭제·덤프·복원·비밀번호 변경. 추가 계정 권한은 `ALL` 또는 `SELECT, SHOW VIEW` 를 그 DB 에만
+  - Redis 계정: ACL 사용자. 이름·키 패턴을 화이트리스트로 검사하고, 비밀번호는 stdin 으로 받아 SHA-256 해시만 `/etc/redis/rpanel-users.conf`(root:redis 0640, redis.conf 가 include)에 저장. 권한은 `+@all -@admin -@dangerous`(읽기·쓰기) 또는 `+@read`(읽기 전용) + 키·채널 패턴 제한. `default` 등 예약 이름 거부
+  - 비밀번호(DB 추가 계정·Redis 계정)는 명령줄이 아닌 stdin 으로 전달하고 `[A-Za-z0-9_.~-]{10,64}` 만 허용 (URL·SQL 에 그대로 넣어도 안전)
   - SSL: 인증서와 개인키 일치 검사, 키는 root 0600
 - **사이트 파일은 그 사이트 유저 권한으로만** 다룹니다 (`sudo -u <사이트유저> rpanel-files`). 홈 디렉토리 밖을 가리키는 경로·심볼릭 링크는 거부합니다.
 - 사이트끼리는 리눅스 계정으로 격리됩니다 (홈 0750, 업로드한 Rust 프로그램은 사이트 유저로 실행). Nginx(`www-data`)만 각 사이트 그룹에 들어가 정적 파일을 읽습니다.
@@ -92,6 +94,20 @@ Rust 전용 패널입니다. 실행하는 서버 프로그램은 Rust 뿐이고,
    - 실행 파일이 아직 없으면 Nginx 만 설정하고 서비스는 띄우지 않습니다 (상태 `idle`)
    - 적용할 때 `chmod u+x` 를 자동으로 하고, systemd 서비스(사이트 유저, `NoNewPrivileges`, `MemoryDenyWriteExecute`)로 실행한 뒤 헬스체크
 4. 프로그램은 `PORT` 환경변수의 포트로 127.0.0.1 에서 열어야 합니다 (`BIND_ADDR=127.0.0.1:<포트>` 도 함께 들어감). 데이터베이스·Redis 를 만들면 접속 URL 이 환경변수로 자동 추가됩니다.
+
+## Python 앱
+
+- **파일 사이트**: 사이트 추가 → Python. 문서 루트에 예시 `app.py`·`requirements.txt`·`README.txt` 를 만듭니다. 적용할 때마다 사이트 유저 권한으로 `python3 -m venv .venv`(없을 때만) → `.venv/bin/pip install -r requirements.txt` → (선택) 빌드 명령 → systemd 서비스 → 헬스체크.
+- **Git 앱**: 종류 Python. 소스를 릴리스 폴더로 복사한 뒤 그 안에 새 가상환경을 만들고 `requirements.txt` 를 설치합니다(`PIP_CACHE_DIR=/var/lib/rpanel/cache/pip` 재사용). 릴리스마다 가상환경이 따로라 롤백해도 안전합니다.
+- 서비스·크론의 `PATH` 맨 앞에 `.venv/bin` 이 들어가므로 시작 명령에 `python`, `gunicorn`, `uvicorn` 을 그대로 씁니다. 기본 시작 명령은 `python app.py`.
+- Python 서비스에는 `MemoryDenyWriteExecute` 를 걸지 않습니다 (cffi 등 확장 모듈 호환). 나머지 격리 설정은 Rust 와 같습니다.
+
+## 백업 예약
+
+- `backup_jobs`: 대상 `app`(연결된 DB + 사이트 파일/data) · `database`(DB 하나) · `all`(모든 앱 + 앱에 연결하지 않은 DB), 주기 `hourly`·`daily`·`weekly`(분·시·요일), 보관 개수, 켜기/끄기.
+- 패널 안 스케줄러가 1분마다 확인합니다. 마지막 실행 이후 예약 시각이 지났고 그 시각에서 6시간이 넘지 않았으면 실행합니다 (패널이 잠깐 꺼져 있었던 경우 따라잡기, 오래 꺼져 있었으면 다음 예약까지 대기). 방금 만든 예약은 지난 시각으로 바로 돌지 않습니다.
+- 보관 개수는 그 예약이 만든 백업에만 대상(앱·DB·종류)별로 적용됩니다. 직접 만든 백업은 지우기 전까지 남습니다.
+- 앱에 연결하지 않은 DB 의 백업은 `/var/lib/rpanel/backups/_databases/` 에 저장합니다.
 
 ## Git 앱 예시 — Rust API + React 프런트
 1. **프로젝트** 생성 → 앱 1 **Rust**: Git 저장소, 바이너리 이름, 헬스체크 `/api/health` (도메인 비움)
@@ -107,7 +123,8 @@ Rust 전용 패널입니다. 실행하는 서버 프로그램은 Rust 뿐이고,
 /usr/local/lib/rpanel/rpanel-files         사이트 파일 도구 (사이트 유저로 실행)
 /usr/share/rpanel/www/                     패널 UI
 /etc/rpanel/rpanel.env                     설정·비밀값 (root:rpanel 0640)
-/etc/rpanel/site-users, managed-dbs        helper 레지스트리
+/etc/rpanel/site-users, managed-dbs, managed-db-users   helper 레지스트리
+/etc/redis/rpanel-users.conf               Redis 계정(ACL, 비밀번호 해시)
 /etc/rpanel/certs/<slug>/                  직접 올린 인증서 (root 0600)
 /etc/letsencrypt/live/rpanel-<slug>/       Let's Encrypt 인증서
 /etc/nginx/conf.d/rpanel.conf              기본 서버(444) · 공통 map
@@ -125,6 +142,9 @@ Rust 전용 패널입니다. 실행하는 서버 프로그램은 Rust 뿐이고,
   www/<slug>/current                       Git 정적 앱
   backups/<slug>/                          백업 (앱을 삭제해도 남김)
   backups/_panel/                          업데이트 전 패널 DB 덤프·이전 바이너리
+  backups/_databases/                      앱에 연결하지 않은 DB 의 백업
+  cache/pip/                               Git Python 앱 pip 캐시
+/home/<사이트유저>/htdocs/<도메인>/.venv/    Python 사이트 가상환경
   acme/                                    Let's Encrypt 확인 경로
 ```
 
@@ -162,7 +182,7 @@ npx playwright install chromium && npm run e2e # E2E (가짜 API, 백엔드 불�
 |---|---|---|
 | GET | `/api/health` | DB·Redis 상태 |
 | GET/POST | `/api/auth/status`, `/setup`, `/login`, `/refresh`, `/logout`, `/me`, `/password`, `/ws-ticket` | 인증 |
-| GET/POST | `/api/sites` | 사이트 목록(응답 확인) / 만들기 (`type`: rust·html·proxy) |
+| GET/POST | `/api/sites` | 사이트 목록(응답 확인) / 만들기 (`type`: rust·python·html·proxy) |
 | PUT | `/api/apps/{id}/site-user/password` | 사이트 유저(SSH·SFTP) 비밀번호 |
 | GET/POST/PUT/DELETE | `/api/apps/{id}/ssl`, `/ssl/letsencrypt`, `/ssl/custom`, `/ssl/force` | SSL |
 | GET/PUT/POST | `/api/apps/{id}/files`, `/files/content`, `/files/upload`, `/files/download`, `/files/op` | 파일 관리자 |
@@ -170,8 +190,11 @@ npx playwright install chromium && npm run e2e # E2E (가짜 API, 백엔드 불�
 | GET/PUT/DELETE | `/api/apps/{id}` · GET/PUT `/env` · POST `/deploy` | 앱 |
 | GET/POST | `/api/apps/{id}/deployments`, `/api/deployments/{id}`, `/cancel`, `/rollback` | 배포·적용 기록 |
 | GET/POST | `/api/apps/{id}/service`, `/journal`, `/deploy-key`, `/webhook`, POST `/api/hooks/{slug}` | 운영 |
-| GET/POST/DELETE | `/api/databases`, `/api/apps/{id}/databases`, `/api/apps/{id}/redis` | DB·Redis |
-| GET/POST/PUT/DELETE | `/api/backups`, `/api/apps/{id}/backups`, `/backup-settings`, `/api/backups/{id}/restore`, `/download` | 백업 |
+| GET/POST/PUT/DELETE | `/api/databases`, `/api/databases/{id}` (앱 연결), `/password`, `/backups`, `/api/apps/{id}/databases`, `/api/apps/{id}/redis` | DB·Redis |
+| POST/DELETE | `/api/databases/{id}/users`, `/users/{uid}`, `/users/{uid}/password` | DB 추가 계정 |
+| POST/PUT/DELETE | `/api/redis-users`, `/api/redis-users/{id}`, `/password` | Redis 계정 |
+| GET/POST/PUT/DELETE | `/api/backups`, `/api/apps/{id}/backups`, `/api/backups/{id}/restore`, `/download` | 백업 |
+| GET/POST/PUT/DELETE | `/api/backup-jobs`, `/api/backup-jobs/{id}`, `/run` | 백업 예약 |
 | GET/POST/PUT/DELETE | `/api/apps/{id}/cron`, `/api/cron/{id}`, `/run`, `/log`, `/api/cron/preview` | 크론 |
 | GET | `/api/apps/{id}/nginx-logs`, `/api/system/info`, `/overview`, `/edge`, `/api/audit` | 로그·시스템 |
 | WS | `/api/ws/metrics?ticket=`, `/api/ws/deployments/{id}?ticket=` | 실시간 |

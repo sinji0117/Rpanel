@@ -42,6 +42,7 @@ pub struct Project {
 #[serde(rename_all = "lowercase")]
 pub enum AppKind {
     Rust,
+    Python,
     Static,
     Proxy,
 }
@@ -50,6 +51,7 @@ impl AppKind {
     pub fn as_str(&self) -> &'static str {
         match self {
             AppKind::Rust => "rust",
+            AppKind::Python => "python",
             AppKind::Static => "static",
             AppKind::Proxy => "proxy",
         }
@@ -57,6 +59,7 @@ impl AppKind {
     pub fn parse(s: &str) -> Option<Self> {
         match s {
             "rust" => Some(Self::Rust),
+            "python" => Some(Self::Python),
             "static" => Some(Self::Static),
             "proxy" => Some(Self::Proxy),
             _ => None,
@@ -64,7 +67,7 @@ impl AppKind {
     }
     /// systemd 서비스로 상주하는 앱인가 (포트 필요)
     pub fn is_service(&self) -> bool {
-        matches!(self, AppKind::Rust)
+        matches!(self, AppKind::Rust | AppKind::Python)
     }
 }
 
@@ -209,7 +212,8 @@ pub const DEPLOY_COLUMNS: &str =
 #[derive(Debug, Clone, Serialize, sqlx::FromRow)]
 pub struct AppDatabase {
     pub id: u64,
-    pub app_id: u64,
+    /// None = 앱에 연결하지 않은 독립 데이터베이스
+    pub app_id: Option<u64>,
     pub name: String,
     pub username: String,
     #[serde(skip_serializing)]
@@ -223,7 +227,10 @@ pub const DB_COLUMNS: &str = "id, app_id, name, username, password, env_key, cre
 #[derive(Debug, Clone, Serialize, sqlx::FromRow)]
 pub struct Backup {
     pub id: u64,
-    pub app_id: u64,
+    /// None = 앱에 연결하지 않은 데이터베이스의 백업
+    pub app_id: Option<u64>,
+    pub database_id: Option<u64>,
+    pub job_id: Option<u64>,
     pub kind: String,
     pub target: String,
     pub file: String,
@@ -236,7 +243,63 @@ pub struct Backup {
 }
 
 pub const BACKUP_COLUMNS: &str =
-    "id, app_id, kind, target, file, size_bytes, status, error, trigger_by, created_at, finished_at";
+    "id, app_id, database_id, job_id, kind, target, file, size_bytes, status, error, trigger_by, created_at, finished_at";
+
+/// 데이터베이스에 추가로 만든 계정
+#[derive(Debug, Clone, Serialize, sqlx::FromRow)]
+pub struct DbUser {
+    pub id: u64,
+    pub database_id: u64,
+    pub username: String,
+    #[serde(skip_serializing)]
+    pub password: String,
+    /// all | read
+    pub privileges: String,
+    pub created_at: DateTime<Utc>,
+}
+
+pub const DB_USER_COLUMNS: &str = "id, database_id, username, password, privileges, created_at";
+
+/// Redis ACL 계정
+#[derive(Debug, Clone, Serialize, sqlx::FromRow)]
+pub struct RedisUser {
+    pub id: u64,
+    pub username: String,
+    #[serde(skip_serializing)]
+    pub password: String,
+    pub key_pattern: String,
+    pub readonly: bool,
+    pub db_index: u32,
+    pub note: Option<String>,
+    pub created_at: DateTime<Utc>,
+}
+
+pub const REDIS_USER_COLUMNS: &str =
+    "id, username, password, key_pattern, readonly, db_index, note, created_at";
+
+/// 백업 예약
+#[derive(Debug, Clone, Serialize, sqlx::FromRow)]
+pub struct BackupJob {
+    pub id: u64,
+    pub name: String,
+    /// app | database | all
+    pub target: String,
+    pub app_id: Option<u64>,
+    pub database_id: Option<u64>,
+    /// hourly | daily | weekly
+    pub schedule: String,
+    pub hour: u8,
+    pub minute: u8,
+    /// 0 = 일요일 … 6 = 토요일
+    pub weekday: u8,
+    pub keep_count: u32,
+    pub enabled: bool,
+    pub last_run_at: Option<DateTime<Utc>>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+pub const BACKUP_JOB_COLUMNS: &str = "id, name, target, app_id, database_id, schedule, hour, minute, weekday, keep_count, enabled, last_run_at, created_at, updated_at";
 
 #[derive(Debug, Clone, Serialize, sqlx::FromRow)]
 pub struct CronJob {

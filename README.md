@@ -2,6 +2,7 @@
 
 [![license](https://img.shields.io/github/license/sinji0117/Rpanel?label=license&color=blue)](LICENSE)
 [![language](https://img.shields.io/badge/language-Rust-dea584?logo=rust&logoColor=white)](https://www.rust-lang.org/)
+[![python](https://img.shields.io/badge/apps-Rust%20%C2%B7%20Python-3776ab?logo=python&logoColor=white)](#이런-걸-할-수-있어요)
 [![frontend](https://img.shields.io/badge/frontend-React%2019-61dafb?logo=react&logoColor=black)](frontend)
 [![os](https://img.shields.io/badge/OS-Ubuntu%2024.04-e95420?logo=ubuntu&logoColor=white)](#준비물)
 [![CI](https://github.com/sinji0117/Rpanel/actions/workflows/ci.yml/badge.svg)](https://github.com/sinji0117/Rpanel/actions/workflows/ci.yml)
@@ -9,10 +10,15 @@
 [![stars](https://img.shields.io/github/stars/sinji0117/Rpanel?label=stars&color=yellow)](https://github.com/sinji0117/Rpanel/stargazers)
 [![Buy Me a Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-%ED%9B%84%EC%9B%90%ED%95%98%EA%B8%B0-ffdd00?logo=buymeacoffee&logoColor=black)](https://buymeacoffee.com/bandiuri)
 
-**Rust로 만든 웹 서비스를 내 서버에 올리고 관리하는 무료 관리 화면(웹 패널)입니다.**
+**Rust·Python으로 만든 웹 서비스를 내 서버에 올리고 관리하는 무료 관리 화면(웹 패널)입니다.**
 
 리눅스 명령어를 잘 몰라도 브라우저에서 클릭으로 사이트를 만들고, 프로그램을 올리고, https 자물쇠를 붙이고, 백업할 수 있습니다.
 누구나 무료로 쓰고 고칠 수 있는 오픈소스(MIT 라이선스)입니다.
+
+<p align="center">
+  <a href="https://buymeacoffee.com/bandiuri" target="_blank" rel="noopener noreferrer"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee — 후원하기" width="320"></a>
+</p>
+<p align="center"><b>Rpanel이 도움이 되셨다면 커피 한 잔으로 응원해 주세요 ☕</b></p>
 
 ---
 
@@ -20,19 +26,22 @@
 
 - **사이트 만들기**: 주소(도메인)만 넣으면 사이트가 생깁니다.
   - **Rust 프로그램**: 내 컴퓨터에서 빌드한 실행 파일을 올리면 서비스로 실행됩니다.
+  - **Python 프로그램**: Flask·FastAPI·Django 등. 파일과 `requirements.txt`를 올리면 가상환경을 만들고 패키지를 설치해서 실행합니다.
   - **HTML 사이트**: HTML·CSS·JS 파일을 올리면 바로 보입니다. React·Vue 등을 빌드한 결과물도 됩니다.
   - **연결(리버스 프록시)**: 다른 서버나 포트로 넘겨줍니다.
-- **Git 자동 배포**: GitHub·GitLab에 코드를 올리면 서버가 알아서 `cargo build`하고 새 버전으로 바꿉니다. 실패하면 이전 버전으로 되돌아갑니다.
+- **Git 자동 배포**: GitHub·GitLab에 코드를 올리면 서버가 알아서 빌드(`cargo build`, Python은 패키지 설치)하고 새 버전으로 바꿉니다. 실패하면 이전 버전으로 되돌아갑니다.
 - **파일 올리기**: 브라우저에서 끌어다 놓거나, FileZilla 같은 프로그램으로 올립니다.
 - **https 자물쇠**: 무료 인증서(Let's Encrypt)를 클릭 한 번으로 받고, 자동으로 갱신합니다.
 - **데이터베이스**: MariaDB와 Redis를 클릭 한 번으로 만들고, 접속 주소를 프로그램에 자동으로 알려 줍니다.
-- **백업과 복원**: 매일·매주 자동 백업하고, 문제가 생기면 그때로 되돌립니다.
+  - **DB 계정 관리**: 데이터베이스마다 계정을 더 만들거나 지울 수 있습니다 (예: 통계용 읽기 전용 계정).
+  - **Redis 계정 관리**: 프로그램마다 따로 쓸 Redis 계정을 만들고, 쓸 수 있는 키와 읽기 전용 여부를 정합니다.
+- **백업과 복원**: 백업 예약을 원하는 만큼 추가·수정·삭제합니다 (매시간·매일·매주, 앱·DB·전체). 문제가 생기면 그때로 되돌립니다.
 - **예약 작업(크론)**: 정해진 시간마다 명령을 실행합니다.
 - **상태 보기**: CPU·메모리·디스크 사용량, 프로그램 로그, 방문·오류 기록을 실시간으로 봅니다.
 
 사이트마다 별도의 리눅스 계정으로 나뉘어 있어서, 한 사이트에 문제가 생겨도 다른 사이트는 안전합니다.
 
-> **Rust 전용 패널입니다.** PHP(WordPress 등)나 Node.js 서버 프로그램은 실행하지 않습니다.
+> **Rust와 Python 프로그램을 위한 패널입니다.** PHP(WordPress 등)나 Node.js 서버 프로그램은 실행하지 않습니다.
 > (React·Vue 같은 화면은 빌드한 HTML 파일로 올리면 됩니다.)
 
 ---
@@ -145,12 +154,33 @@ async fn main() {
 
 ---
 
+## Python 프로그램 올리기
+
+1. **사이트** → **+ 사이트 추가** → 종류 **Python**, 도메인을 넣고 만듭니다. 예시 프로그램(`app.py`)이 바로 실행됩니다.
+2. 내 프로그램 파일과 `requirements.txt`(필요한 패키지 목록)를 **파일** 탭이나 SFTP로 올립니다.
+3. **설정** 탭에서 시작 명령을 내 프로그램에 맞게 바꿉니다. 프로그램은 `PORT` 환경변수의 포트로 `127.0.0.1`에서 열어야 합니다.
+
+   | 프레임워크 | 시작 명령 예 (`requirements.txt`에 적을 것) |
+   |---|---|
+   | 그냥 Python | `python app.py` |
+   | Flask | `gunicorn -b 127.0.0.1:$PORT app:app` (`flask`, `gunicorn`) |
+   | FastAPI | `uvicorn main:app --host 127.0.0.1 --port $PORT` (`fastapi`, `uvicorn`) |
+   | Django | `gunicorn -b 127.0.0.1:$PORT mysite.wsgi` (`django`, `gunicorn`) |
+
+4. **적용**을 누르면 사이트 폴더 안에 가상환경(`.venv`)을 만들고 패키지를 설치한 뒤 실행합니다. 패키지를 바꾸면 다시 **적용**을 누르세요.
+
+Git 저장소에 있는 Python 프로그램은 아래 "Git으로 자동 배포하기"에서 종류 **Python**을 고르면 됩니다.
+
+---
+
 ## Git으로 자동 배포하기
 
 코드를 GitHub·GitLab에 올려 두었다면, 서버가 직접 빌드하고 실행하게 할 수 있습니다.
 
 1. 왼쪽 메뉴 **프로젝트** → **+ 새 프로젝트**를 만들고, 그 안에서 **+ 새 앱**을 누릅니다.
-2. 종류 **Rust**를 고르고, Git 저장소 주소와 **바이너리 이름**(`Cargo.toml`의 `name`)을 넣습니다.
+2. 종류를 고르고 Git 저장소 주소를 넣습니다.
+   - **Rust**: **바이너리 이름**(`Cargo.toml`의 `name`)을 넣습니다.
+   - **Python**: **시작 명령**을 넣습니다 (위 표 참고). 배포할 때마다 새 가상환경에 `requirements.txt`를 설치합니다.
 3. 비공개 저장소라면 앱의 **Git · 웹훅** 탭에 나오는 **Deploy key**를 GitHub/GitLab 저장소 설정에 등록합니다.
 4. **배포**를 누르면 화면에 빌드 과정이 실시간으로 나옵니다.
 5. 같은 탭의 **Webhook 주소**를 GitHub/GitLab에 등록하면, 앞으로는 코드를 올릴 때마다 자동으로 배포됩니다.
@@ -169,12 +199,26 @@ async fn main() {
 3. Redis가 필요하면 같은 탭에서 Redis를 배정합니다. `REDIS_URL`로 전달됩니다.
 4. 다른 설정값(API 키 등)은 **환경변수** 탭에 넣으면 프로그램에 전달됩니다. 바꾼 뒤에는 **적용**(또는 **배포**)을 눌러야 반영됩니다.
 
+### 계정 추가·삭제 (왼쪽 메뉴 **데이터베이스**)
+
+- **+ 데이터베이스**: 앱과 상관없이 데이터베이스를 만들 수 있습니다. 나중에 **앱 연결**로 원하는 앱에 붙일 수 있습니다.
+- **+ 계정**: 데이터베이스마다 계정을 더 만듭니다. 권한은 **읽기·쓰기** 또는 **읽기 전용** 중에 고릅니다. 비밀번호는 직접 정하거나 자동으로 만듭니다.
+- **비밀번호 변경 / 삭제**: 계정 줄 오른쪽 버튼으로 합니다. (기본 계정은 지울 수 없고, 데이터베이스를 지우면 함께 지워집니다.)
+- **+ Redis 계정**: 프로그램마다 Redis 계정을 따로 만듭니다.
+  - **쓸 수 있는 키**: 예를 들어 `shop:*` 로 정하면 `shop:`으로 시작하는 키만 읽고 쓸 수 있습니다. 다른 프로그램의 데이터를 건드릴 수 없습니다.
+  - **읽기 전용**을 켜면 읽기만 가능합니다. `FLUSHALL`처럼 전체를 지우는 명령은 어느 계정이든 막혀 있습니다.
+- 계정을 만들거나 비밀번호를 바꾸면 **접속 주소**가 한 번 크게 표시됩니다. 목록에서 **보기**를 눌러 다시 볼 수 있습니다.
+
 ---
 
 ## 백업
 
 - 사이트 → **백업** 탭에서 `지금 백업`을 누르면 바로 백업합니다. 데이터베이스와 사이트 파일이 함께 저장됩니다.
-- 같은 화면에서 **매일/매주 자동 백업**을 켤 수 있습니다.
+- **백업 예약**은 원하는 만큼 추가할 수 있습니다 (왼쪽 메뉴 **백업** → **+ 예약 추가**).
+  - **대상**: 앱 하나 / 데이터베이스 하나 / 전체
+  - **주기**: 매시간 / 매일 / 매주 (요일·시각 선택)
+  - **보관 개수**: 최근 몇 개를 남길지. 오래된 것은 자동으로 지웁니다.
+  - 예약마다 **지금 실행 · 끄기/켜기 · 수정 · 삭제**를 할 수 있습니다. 삭제할 때 그 예약이 만든 백업 파일도 지울지 고릅니다.
 - 백업 목록에서 **다운로드**하거나, **복원**을 눌러 그 시점으로 되돌릴 수 있습니다.
 
 > 백업 파일은 같은 서버에 저장됩니다. 서버 자체가 고장 나는 경우에 대비해서, 중요한 서비스는 백업 파일을 가끔 내 컴퓨터로 내려받아 두세요.
@@ -283,7 +327,11 @@ sudo rpanel-uninstall
 
 Rpanel이 도움이 되셨다면 커피 한 잔으로 응원해 주세요. 후원은 기능 개선과 유지보수에 큰 힘이 됩니다. ☕
 
-<a href="https://buymeacoffee.com/bandiuri" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" height="50"></a>
+<p align="center">
+  <a href="https://buymeacoffee.com/bandiuri" target="_blank" rel="noopener noreferrer"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee — 후원하기" width="320"></a>
+</p>
+
+<p align="center"><a href="https://buymeacoffee.com/bandiuri" target="_blank" rel="noopener noreferrer">buymeacoffee.com/bandiuri</a></p>
 
 - 후원이 어렵다면 GitHub에서 ⭐ **Star**를 눌러 주는 것도 큰 응원이 됩니다.
 - 버그나 아이디어는 [이슈](https://github.com/sinji0117/Rpanel/issues)로 남겨 주세요.

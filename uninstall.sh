@@ -175,7 +175,7 @@ EOF
 fi
 
 # ───────────── 4. (전부 삭제) 데이터 ─────────────
-say "사이트 데이터베이스·Redis 삭제"
+say "데이터베이스·계정·Redis 삭제"
 systemctl start mariadb >/dev/null 2>&1 || true
 DB_NAME="$(sed -nE 's#^DATABASE_URL=.*/([^/?]+)(\?.*)?$#\1#p' "$ENVF" 2>/dev/null || true)"
 DB_NAME="${DB_NAME:-rpanel}"
@@ -192,6 +192,22 @@ if [[ -f /etc/rpanel/managed-dbs ]]; then
     mariadb -e "DROP DATABASE IF EXISTS \`$db\`; DROP USER IF EXISTS '$user'@'localhost';" 2>/dev/null \
       && info "데이터베이스 $db 삭제"
   done < /etc/rpanel/managed-dbs
+fi
+if [[ -f /etc/rpanel/managed-db-users ]]; then
+  while read -r _db user; do
+    [[ "$user" =~ ^[a-z][a-z0-9_]+$ ]] || continue
+    mariadb -e "DROP USER IF EXISTS '$user'@'localhost';" 2>/dev/null && info "DB 계정 $user 삭제"
+  done < /etc/rpanel/managed-db-users
+fi
+if [[ -f /etc/redis/rpanel-users.conf ]]; then
+  REDIS_ADMIN_PW="$(grep -E '^[[:space:]]*requirepass[[:space:]]' /etc/redis/redis.conf 2>/dev/null | tail -n1 | awk '{print $2}' | tr -d '"')"
+  while read -r kw user _rest; do
+    [[ "$kw" == user && "$user" =~ ^[a-z][a-z0-9_-]+$ ]] || continue
+    REDISCLI_AUTH="$REDIS_ADMIN_PW" redis-cli --no-auth-warning ACL DELUSER "$user" >/dev/null 2>&1 || true
+    info "Redis 계정 $user 삭제"
+  done < /etc/redis/rpanel-users.conf
+  sed -i '\#^include /etc/redis/rpanel-users.conf$#d' /etc/redis/redis.conf
+  rm -f /etc/redis/rpanel-users.conf
 fi
 if [[ "$DB_NAME" =~ ^[a-zA-Z0-9_]+$ ]]; then
   mariadb -e "DROP DATABASE IF EXISTS \`$DB_NAME\`; DROP USER IF EXISTS 'rpanel'@'localhost'; FLUSH PRIVILEGES;" 2>/dev/null \

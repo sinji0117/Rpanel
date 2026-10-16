@@ -1,27 +1,13 @@
 import { useState } from 'react'
 import LogViewer from '../components/LogViewer'
-import { CopyButton, ErrorBox, Field, Spinner, StatusBadge } from '../components/ui'
+import { CopyButton, ErrorBox, Field, Section, Spinner, StatusBadge } from '../components/ui'
+import { BackupJobs } from './BackupJobs'
 import { useToast } from '../context/ToastContext'
 import { api, del, download, get, post, put } from '../lib/api'
 import { ago, bytes, CRON_PRESETS, dateTime } from '../lib/format'
 import { useFetch, useInterval } from '../lib/useFetch'
 
-function Section({ title, desc, actions, children }) {
-  return (
-    <section className="card p-5">
-      <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h3 className="font-medium">{title}</h3>
-          {desc && <p className="mt-1 max-w-2xl text-sm text-ink-400">{desc}</p>}
-        </div>
-        {actions && <div className="flex gap-2">{actions}</div>}
-      </div>
-      {children}
-    </section>
-  )
-}
-
-function Secret({ value }) {
+export function Secret({ value }) {
   const [show, setShow] = useState(false)
   return (
     <div className="flex items-center gap-2">
@@ -50,7 +36,7 @@ export function parseDbUrl(url) {
   return { user: dec(m[1]), password: dec(m[2]), host: m[3], port: m[4] || '3306', database: dec(m[5]) }
 }
 
-function DbCredentials({ url }) {
+export function DbCredentials({ url }) {
   const [show, setShow] = useState(false)
   const c = parseDbUrl(url)
   if (!c) return null
@@ -254,11 +240,9 @@ export function DatabaseTab({ app, onChanged }) {
 
 // ───────────────────────── 백업 ─────────────────────────
 
-export function BackupTab({ app, onChanged }) {
+export function BackupTab({ app }) {
   const toast = useToast()
   const list = useFetch(() => get(`/backups?app_id=${app.id}`), [app.id])
-  const [schedule, setSchedule] = useState(app.backup_schedule)
-  const [keep, setKeep] = useState(app.backup_keep)
   const [busy, setBusy] = useState(false)
   const running = list.data?.some((b) => b.status === 'running')
   useInterval(() => list.reload(true), 2000, running)
@@ -267,7 +251,7 @@ export function BackupTab({ app, onChanged }) {
     <div className="space-y-4">
       <Section
         title="백업"
-        desc={`연결된 DB 덤프(.sql.gz)와 ${app.site_user ? '사이트 파일(htdocs, .tar.gz)을 ' : app.kind === 'rust' ? '앱 data 디렉토리(.tar.gz)를 ' : ''}/var/lib/rpanel/backups/${app.slug}/ 에 저장합니다. NAS·다른 서버가 이 폴더를 가져가도록(rsync 등) 해두면 오프사이트 백업이 됩니다.`}
+        desc={`연결된 DB 덤프(.sql.gz)와 ${app.site_user ? '사이트 파일(htdocs, .tar.gz)을 ' : app.kind === 'rust' || app.kind === 'python' ? '앱 data 디렉토리(.tar.gz)를 ' : ''}/var/lib/rpanel/backups/${app.slug}/ 에 저장합니다. NAS·다른 서버가 이 폴더를 가져가도록(rsync 등) 해두면 오프사이트 백업이 됩니다.`}
         actions={
           <button
             className="btn-primary"
@@ -289,32 +273,9 @@ export function BackupTab({ app, onChanged }) {
           </button>
         }
       >
-        <form
-          className="flex flex-wrap items-end gap-3 rounded-lg border border-ink-700 p-4"
-          onSubmit={async (e) => {
-            e.preventDefault()
-            try {
-              const r = await put(`/apps/${app.id}/backup-settings`, { schedule, keep: Number(keep) })
-              toast.push(r.schedule === 'off' ? '예약 백업을 껐습니다' : `예약 백업: ${r.schedule === 'daily' ? '매일' : '매주'} ${r.hour}시, ${r.keep}개 보관`, 'success')
-              onChanged?.()
-            } catch (err) {
-              toast.push(err.message, 'error')
-            }
-          }}
-        >
-          <Field label="예약" htmlFor="bk-schedule">
-            <select id="bk-schedule" className="input w-36" value={schedule} onChange={(e) => setSchedule(e.target.value)}>
-              <option value="off">끄기</option>
-              <option value="daily">매일</option>
-              <option value="weekly">매주</option>
-            </select>
-          </Field>
-          <Field label="대상별 보관 개수" htmlFor="bk-keep">
-            <input id="bk-keep" type="number" min="1" max="100" className="input w-28" value={keep} onChange={(e) => setKeep(e.target.value)} />
-          </Field>
-          <button className="btn-ghost">저장</button>
-        </form>
+        <p className="text-xs text-ink-400">아래 백업 파일 목록에서 다운로드·복원·삭제할 수 있습니다. 자동 백업은 “백업 예약”에서 추가하세요.</p>
       </Section>
+      <BackupJobs appId={app.id} onRan={() => list.reload(true)} />
       <BackupTable rows={list.data} loading={list.loading} onChanged={() => list.reload(true)} />
     </div>
   )
@@ -340,11 +301,11 @@ export function BackupTable({ rows, loading, onChanged, showApp = false }) {
         <tbody className="divide-y divide-ink-800">
           {rows.map((b) => (
             <tr key={b.id} className="hover:bg-ink-850">
-              {showApp && <td className="px-5 py-3 font-medium">{b.app_name}</td>}
+              {showApp && <td className="px-5 py-3 font-medium">{b.app_name ?? <span className="text-ink-400">독립 DB</span>}</td>}
               <td className="px-5 py-3">
                 <span className="kbd mr-2">{b.kind === 'db' ? 'DB' : b.kind === 'files' ? '파일' : 'data'}</span>
                 <span className="font-mono text-xs">{b.target}</span>
-                {b.trigger_by === 'schedule' && <span className="ml-2 text-[11px] text-ink-400">예약</span>}
+                {b.job_name ? <span className="ml-2 text-[11px] text-ink-400">예약 · {b.job_name}</span> : b.trigger_by === 'schedule' && <span className="ml-2 text-[11px] text-ink-400">예약</span>}
                 {b.error && <p className="mt-1 max-w-md text-xs text-red-300">{b.error}</p>}
               </td>
               <td className="px-3 py-3">
@@ -359,7 +320,7 @@ export function BackupTable({ rows, loading, onChanged, showApp = false }) {
                   <>
                     <button
                       className="btn-ghost mr-1.5 px-2.5 py-1 text-xs"
-                      onClick={() => download(`/backups/${b.id}/download`, `${b.app_slug}-${b.file}`).catch((e) => toast.push(e.message, 'error'))}
+                      onClick={() => download(`/backups/${b.id}/download`, `${b.app_slug ?? 'databases'}-${b.file}`).catch((e) => toast.push(e.message, 'error'))}
                     >
                       다운로드
                     </button>

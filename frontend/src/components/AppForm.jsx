@@ -3,6 +3,7 @@ import { Field } from './ui'
 
 export const KINDS = [
   { id: 'rust', label: 'Rust', desc: 'cargo build → systemd 서비스 (Axum 등)' },
+  { id: 'python', label: 'Python', desc: 'venv + requirements.txt → systemd 서비스' },
   { id: 'static', label: 'Static', desc: 'npm run build → Nginx 정적 (React·Vite)' },
 ]
 
@@ -45,6 +46,7 @@ export function toPayload(v) {
 
 const BUILD_PLACEHOLDER = {
   rust: 'cargo build --release',
+  python: '(선택) python manage.py collectstatic --noinput',
   static: 'npm run build',
 }
 
@@ -139,6 +141,11 @@ export default function AppForm({ initial, mode = 'create', onSubmit, submitting
       {v.kind === 'rust' && (
         <Field label="바이너리 이름" htmlFor="app-bin" hint="target/release/<이름> — Cargo.toml의 package name (비우면 slug)">
           <input id="app-bin" className="input font-mono" value={v.binary_name ?? ''} onChange={set('binary_name')} placeholder={v.slug || 'hello-api'} />
+        </Field>
+      )}
+      {v.kind === 'python' && (
+        <Field label="시작 명령" htmlFor="app-start" hint="가상환경(.venv)이 켜진 상태로 실행 · PORT 환경변수의 포트로 127.0.0.1 에서 열어야 합니다">
+          <input id="app-start" className="input font-mono" value={v.start_cmd ?? ''} onChange={set('start_cmd')} placeholder="gunicorn -b 127.0.0.1:$PORT app:app" />
         </Field>
       )}
       {v.kind === 'static' && (

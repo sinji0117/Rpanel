@@ -7,6 +7,7 @@ import { dateTime, duration, shortSha } from '../lib/format'
 import { useFetch } from '../lib/useFetch'
 import { useDeploymentLog } from '../lib/useSockets'
 import { useEffect } from 'react'
+import { t } from '../i18n'
 
 export default function DeploymentView() {
   const { id } = useParams()
@@ -31,13 +32,13 @@ export default function DeploymentView() {
       <nav className="mb-3 text-xs text-ink-400">
         <Link to={`/apps/${dep.app_id}`} className="hover:text-ink-100">
           {dep.app_name}
-        </Link>{' '}
-        / 배포 #{dep.id}
+        </Link>
+        {t('/ 배포 #{id}', { id: dep.id })}
       </nav>
       <PageHeader
         title={
           <span className="flex items-center gap-3">
-            배포 #{dep.id} <StatusBadge status={live} deployment />
+            {t('배포 #{id}', { id: dep.id })} <StatusBadge status={live} deployment />
           </span>
         }
         actions={
@@ -48,28 +49,28 @@ export default function DeploymentView() {
                 onClick={async () => {
                   try {
                     await post(`/deployments/${dep.id}/cancel`)
-                    toast.push('취소 요청을 보냈습니다')
+                    toast.push(t('취소 요청을 보냈습니다'))
                   } catch (e) {
                     toast.push(e.message, 'error')
                   }
                 }}
               >
-                취소
+                {t('취소')}
               </button>
             )}
             <Link to={`/apps/${dep.app_id}`} className="btn-ghost">
-              앱으로
+              {t('앱으로')}
             </Link>
           </>
         }
       >
         <dl className="mt-3 flex flex-wrap gap-x-6 gap-y-1 text-xs text-ink-400">
           <div>
-            커밋 <span className="font-mono text-ink-300">{shortSha(dep.commit_sha)}</span>
+            {t('커밋')} <span className="font-mono text-ink-300">{shortSha(dep.commit_sha)}</span>
           </div>
-          <div>시작 {dateTime(dep.started_at ?? dep.created_at)}</div>
-          <div>소요 {duration(dep.started_at, dep.finished_at)}</div>
-          {active && <div className={connected ? 'text-signal' : ''}>{connected ? '● 실시간 스트리밍' : '연결 중…'}</div>}
+          <div>{t('시작 {dateTime}', { dateTime: dateTime(dep.started_at ?? dep.created_at) })}</div>
+          <div>{t('소요 {duration}', { duration: duration(dep.started_at, dep.finished_at) })}</div>
+          {active && <div className={connected ? 'text-signal' : ''}>{connected ? t('● 실시간 스트리밍') : t('연결 중…')}</div>}
         </dl>
       </PageHeader>
       {dep.error && !active && (
@@ -77,7 +78,7 @@ export default function DeploymentView() {
           <ErrorBox error={{ message: dep.error }} />
         </div>
       )}
-      <LogViewer lines={lines} emptyText={active ? '로그를 기다리는 중…' : '로그가 없습니다'} />
+      <LogViewer lines={lines} emptyText={active ? t('로그를 기다리는 중…') : t('로그가 없습니다')} />
     </>
   )
 }

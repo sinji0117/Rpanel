@@ -7,6 +7,7 @@ import { del, get, post, put } from '../lib/api'
 import { shortSha } from '../lib/format'
 import { useFetch, useInterval } from '../lib/useFetch'
 import { ProjectFormModal } from './Projects'
+import { t, tx } from '../i18n'
 
 export default function ProjectDetail() {
   const { id } = useParams()
@@ -29,7 +30,7 @@ export default function ProjectDetail() {
     <>
       <nav className="mb-3 text-xs text-ink-400">
         <Link to="/projects" className="hover:text-ink-100">
-          프로젝트
+          {t('프로젝트')}
         </Link>{' '}
         / {p.name}
       </nav>
@@ -39,25 +40,25 @@ export default function ProjectDetail() {
         actions={
           <>
             <button className="btn-ghost" onClick={() => setEditing(true)}>
-              수정
+              {t('수정')}
             </button>
             <button
               className="btn-ghost"
               onClick={async () => {
-                if (!window.confirm(`프로젝트 '${p.name}' 를 삭제할까요?`)) return
+                if (!window.confirm(t("프로젝트 '{name}' 를 삭제할까요?", { name: p.name }))) return
                 try {
                   await del(`/projects/${id}`)
-                  toast.push('프로젝트 삭제됨', 'success')
+                  toast.push(t('프로젝트 삭제됨'), 'success')
                   nav('/projects')
                 } catch (e) {
                   toast.push(e.message, 'error')
                 }
               }}
             >
-              삭제
+              {t('삭제')}
             </button>
             <button className="btn-primary" onClick={() => setCreating(true)}>
-              + 새 앱
+              {t('+ 새 앱')}
             </button>
           </>
         }
@@ -68,11 +69,11 @@ export default function ProjectDetail() {
           <table className="w-full text-sm">
             <thead className="border-b border-ink-700/70 text-left text-xs text-ink-400">
               <tr>
-                <th className="px-5 py-3 font-medium">앱</th>
-                <th className="px-3 py-3 font-medium">상태</th>
-                <th className="px-3 py-3 font-medium">도메인</th>
-                <th className="px-3 py-3 font-medium">포트</th>
-                <th className="px-5 py-3 font-medium">커밋</th>
+                <th className="px-5 py-3 font-medium">{t('앱')}</th>
+                <th className="px-3 py-3 font-medium">{t('상태')}</th>
+                <th className="px-3 py-3 font-medium">{t('도메인')}</th>
+                <th className="px-3 py-3 font-medium">{t('포트')}</th>
+                <th className="px-5 py-3 font-medium">{t('커밋')}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-ink-800">
@@ -97,19 +98,21 @@ export default function ProjectDetail() {
         </div>
       ) : (
         <Empty
-          title="앱이 없습니다"
+          title={t('앱이 없습니다')}
           action={
             <button className="btn-primary" onClick={() => setCreating(true)}>
-              앱 추가
+              {t('앱 추가')}
             </button>
           }
         >
-          Git 저장소에서 빌드하는 앱입니다. Rust(Axum) 백엔드는 <b>Rust</b>, React + Vite 프런트는 <b>Static</b>으로 만들고, 프런트의 “/api/ 프록시 포트”에
-          백엔드 포트를 넣으면 한 도메인에서 프런트와 API 를 함께 서비스합니다. 빌드한 실행 파일·HTML 을 직접 올리는 사이트는 <b>사이트</b> 메뉴에서 만드세요.
+          {tx(
+            'Git 저장소에서 빌드하는 앱입니다. Rust(Axum) 백엔드는 {rust}, Flask·FastAPI·Django 는 {python}, React + Vite 프런트는 {static}으로 만들고, 프런트의 “/api/ 프록시 포트”에 백엔드 포트를 넣으면 한 도메인에서 프런트와 API 를 함께 서비스합니다. 빌드한 실행 파일·HTML 을 직접 올리는 사이트는 {sites} 메뉴에서 만드세요.',
+            { rust: <b>Rust</b>, python: <b>Python</b>, static: <b>Static</b>, sites: <b>{t('사이트')}</b> },
+          )}
         </Empty>
       )}
 
-      <Modal open={creating} onClose={() => setCreating(false)} title="새 앱" wide>
+      <Modal open={creating} onClose={() => setCreating(false)} title={t('새 앱')} wide>
         <ErrorBox error={error} />
         <div className={error ? 'mt-4' : ''}>
           <AppForm
@@ -119,7 +122,7 @@ export default function ProjectDetail() {
               setError(null)
               try {
                 const a = await post(`/projects/${id}/apps`, payload)
-                toast.push(`앱 '${a.name}' 생성됨 — 포트 ${a.port ?? '없음'}`, 'success')
+                toast.push(t("앱 '{name}' 생성됨 — 포트 {v}", { name: a.name, v: a.port ?? t('없음') }), 'success')
                 nav(`/apps/${a.id}`)
               } catch (e) {
                 setError(e)

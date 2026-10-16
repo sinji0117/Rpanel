@@ -6,6 +6,7 @@ import { useToast } from '../context/ToastContext'
 import { del, download, get, post, put, uploadFile } from '../lib/api'
 import { bytes, dateTime } from '../lib/format'
 import { useFetch } from '../lib/useFetch'
+import { t, tx } from '../i18n'
 
 /** /home/<user>/htdocs/<domain> → htdocs/<domain> */
 export function relRoot(app) {
@@ -79,7 +80,7 @@ export function FileManager({ app }) {
     setEditing((s) => ({ ...s, saving: true }))
     try {
       await put(`/apps/${app.id}/files/content`, { path: editing.path, content: editing.content })
-      toast.push('저장했습니다', 'success')
+      toast.push(t('저장했습니다'), 'success')
       setEditing((s) => ({ ...s, saving: false, original: s.content }))
       load()
     } catch (e) {
@@ -95,9 +96,7 @@ export function FileManager({ app }) {
     for (let i = 0; i < list.length; i++) {
       const f = list[i]
       try {
-        await uploadFile(app.id, joinPath(cwd, f.name), f, (p) =>
-          setUploads((u) => u.map((x, j) => (j === i ? { ...x, progress: p } : x))),
-        )
+        await uploadFile(app.id, joinPath(cwd, f.name), f, (p) => setUploads((u) => u.map((x, j) => (j === i ? { ...x, progress: p } : x))))
         setUploads((u) => u.map((x, j) => (j === i ? { ...x, progress: 1, done: true } : x)))
       } catch (e) {
         setUploads((u) => u.map((x, j) => (j === i ? { ...x, error: e.message } : x)))
@@ -124,7 +123,7 @@ export function FileManager({ app }) {
       }}
     >
       <div className="flex flex-wrap items-center gap-2 border-b border-ink-700/70 px-4 py-3">
-        <nav className="flex min-w-0 flex-1 flex-wrap items-center gap-1 font-mono text-xs" aria-label="경로">
+        <nav className="flex min-w-0 flex-1 flex-wrap items-center gap-1 font-mono text-xs" aria-label={t('경로')}>
           <button className="text-ink-400 hover:text-ink-100" onClick={() => load('')}>
             ~{app.site_user}
           </button>
@@ -140,26 +139,26 @@ export function FileManager({ app }) {
         <button
           className="btn-ghost px-2.5 py-1 text-xs"
           onClick={() => {
-            const n = window.prompt('새 폴더 이름')
+            const n = window.prompt(t('새 폴더 이름'))
             if (n) op({ op: 'mkdir', path: joinPath(cwd, n) })
           }}
         >
-          새 폴더
+          {t('새 폴더')}
         </button>
         <button
           className="btn-ghost px-2.5 py-1 text-xs"
           onClick={() => {
-            const n = window.prompt('새 파일 이름 (예: index.html, config.toml)')
+            const n = window.prompt(t('새 파일 이름 (예: index.html, config.toml)'))
             if (n) setEditing({ path: joinPath(cwd, n), content: '', original: null })
           }}
         >
-          새 파일
+          {t('새 파일')}
         </button>
         <button className="btn-primary px-2.5 py-1 text-xs" onClick={() => fileInput.current?.click()}>
-          업로드
+          {t('업로드')}
         </button>
-        <input ref={fileInput} type="file" multiple className="hidden" aria-label="파일 업로드" onChange={(e) => doUpload(e.target.files)} />
-        <button className="btn-ghost px-2.5 py-1 text-xs" onClick={() => load()} aria-label="새로고침">
+        <input ref={fileInput} type="file" multiple className="hidden" aria-label={t('파일 업로드')} onChange={(e) => doUpload(e.target.files)} />
+        <button className="btn-ghost px-2.5 py-1 text-xs" onClick={() => load()} aria-label={t('새로고침')}>
           ↻
         </button>
       </div>
@@ -172,7 +171,7 @@ export function FileManager({ app }) {
               <div className="h-1.5 flex-1 overflow-hidden rounded bg-ink-800">
                 <div className={`h-full ${u.error ? 'bg-fail' : 'bg-signal'}`} style={{ width: `${Math.round((u.progress || 0) * 100)}%` }} />
               </div>
-              <span className={u.error ? 'text-fail' : 'text-ink-400'}>{u.error || (u.done ? '완료' : `${Math.round((u.progress || 0) * 100)}%`)}</span>
+              <span className={u.error ? 'text-fail' : 'text-ink-400'}>{u.error || (u.done ? t('완료') : `${Math.round((u.progress || 0) * 100)}%`)}</span>
             </li>
           ))}
         </ul>
@@ -193,10 +192,10 @@ export function FileManager({ app }) {
             <table className="w-full text-sm">
               <thead className="text-left text-xs text-ink-400">
                 <tr>
-                  <th className="px-4 py-2 font-medium">이름</th>
-                  <th className="px-3 py-2 font-medium">크기</th>
-                  <th className="px-3 py-2 font-medium">권한</th>
-                  <th className="px-3 py-2 font-medium">수정</th>
+                  <th className="px-4 py-2 font-medium">{t('이름')}</th>
+                  <th className="px-3 py-2 font-medium">{t('크기')}</th>
+                  <th className="px-3 py-2 font-medium">{t('권한')}</th>
+                  <th className="px-3 py-2 font-medium">{t('수정')}</th>
                   <th className="px-4 py-2" />
                 </tr>
               </thead>
@@ -223,7 +222,9 @@ export function FileManager({ app }) {
                           <button
                             className="flex max-w-full items-center gap-2 truncate font-mono hover:text-signal"
                             title={e.target ? `→ ${e.target}` : ''}
-                            onClick={() => (TEXT_EXT.test(e.name) || e.size < 64 * 1024 ? openEditor(path) : download(`/apps/${app.id}/files/download?path=${encodeURIComponent(path)}`, e.name))}
+                            onClick={() =>
+                              TEXT_EXT.test(e.name) || e.size < 64 * 1024 ? openEditor(path) : download(`/apps/${app.id}/files/download?path=${encodeURIComponent(path)}`, e.name)
+                            }
                           >
                             <span className="text-ink-600">{e.kind === 'link' ? '↪' : '·'}</span> {e.name}
                           </button>
@@ -233,9 +234,9 @@ export function FileManager({ app }) {
                       <td className="px-3 py-2">
                         <button
                           className="font-mono text-xs text-ink-400 hover:text-ink-100"
-                          title="권한 변경"
+                          title={t('권한 변경')}
                           onClick={() => {
-                            const m = window.prompt(`${e.name} 권한 (예: 644, 755)`, e.mode.slice(1))
+                            const m = window.prompt(t('{name} 권한 (예: 644, 755)', { name: e.name }), e.mode.slice(1))
                             if (m) op({ op: 'chmod', path, mode: m })
                           }}
                         >
@@ -246,30 +247,42 @@ export function FileManager({ app }) {
                       <td className="px-4 py-2 text-right whitespace-nowrap">
                         <span className="inline-flex gap-1 opacity-70 group-hover:opacity-100">
                           {e.kind === 'file' && ARCHIVE.test(e.name) && (
-                            <button className="btn-ghost px-2 py-0.5 text-xs" onClick={() => window.confirm(`${e.name} 를 이 폴더에 풀까요? (같은 이름은 덮어씁니다)`) && op({ op: 'extract', path, to: cwd }, '압축을 풀었습니다')}>
-                              풀기
+                            <button
+                              className="btn-ghost px-2 py-0.5 text-xs"
+                              onClick={() =>
+                                window.confirm(t('{name} 를 이 폴더에 풀까요? (같은 이름은 덮어씁니다)', { name: e.name })) &&
+                                op({ op: 'extract', path, to: cwd }, t('압축을 풀었습니다'))
+                              }
+                            >
+                              {t('풀기')}
                             </button>
                           )}
                           {e.kind === 'file' && (
-                            <button className="btn-ghost px-2 py-0.5 text-xs" onClick={() => download(`/apps/${app.id}/files/download?path=${encodeURIComponent(path)}`, e.name).catch((er) => toast.push(er.message, 'error'))}>
-                              받기
+                            <button
+                              className="btn-ghost px-2 py-0.5 text-xs"
+                              onClick={() => download(`/apps/${app.id}/files/download?path=${encodeURIComponent(path)}`, e.name).catch((er) => toast.push(er.message, 'error'))}
+                            >
+                              {t('받기')}
                             </button>
                           )}
                           <button
                             className="btn-ghost px-2 py-0.5 text-xs"
                             onClick={() => {
-                              const n = window.prompt('새 이름', e.name)
+                              const n = window.prompt(t('새 이름'), e.name)
                               if (n && n !== e.name) op({ op: 'mv', path, to: joinPath(cwd, n) })
                             }}
                           >
-                            이름
+                            {t('이름')}
                           </button>
                           <button
                             className="btn-ghost px-2 py-0.5 text-xs text-fail"
-                            aria-label={`${e.name} 삭제`}
-                            onClick={() => window.confirm(`${e.name}${e.kind === 'dir' ? ' 폴더와 안의 모든 파일' : ''}을(를) 삭제할까요?`) && op({ op: 'rm', path }, '삭제했습니다')}
+                            aria-label={t('{name} 삭제', { name: e.name })}
+                            onClick={() =>
+                              window.confirm(t('{name}{v}을(를) 삭제할까요?', { name: e.name, v: e.kind === 'dir' ? t(' 폴더와 안의 모든 파일') : '' })) &&
+                              op({ op: 'rm', path }, t('삭제했습니다'))
+                            }
                           >
-                            삭제
+                            {t('삭제')}
                           </button>
                         </span>
                       </td>
@@ -278,19 +291,26 @@ export function FileManager({ app }) {
                 })}
               </tbody>
             </table>
-            {data.entries.length === 0 && <p className="px-4 py-8 text-center text-sm text-ink-400">빈 폴더입니다 — 파일을 끌어다 놓거나 업로드하세요</p>}
+            {data.entries.length === 0 && <p className="px-4 py-8 text-center text-sm text-ink-400">{t('빈 폴더입니다 — 파일을 끌어다 놓거나 업로드하세요')}</p>}
           </div>
         )
       )}
       <p className="border-t border-ink-700/70 px-4 py-2 text-xs text-ink-400">
-        파일은 사이트 유저 <span className="font-mono">{app.site_user}</span> 권한으로 다뤄집니다. 큰 사이트는 zip 으로 올린 뒤 “풀기”를 쓰거나 SFTP 를 쓰세요.
+        {tx('파일은 사이트 유저 {user} 권한으로 다뤄집니다. 큰 사이트는 zip 으로 올린 뒤 “풀기”를 쓰거나 SFTP 를 쓰세요.', {
+          user: <span className="font-mono">{app.site_user}</span>,
+        })}
       </p>
 
-      <Modal open={!!editing} onClose={() => (editing?.content === editing?.original || window.confirm('저장하지 않은 변경이 있습니다. 닫을까요?')) && setEditing(null)} title={editing?.path || ''} wide>
+      <Modal
+        open={!!editing}
+        onClose={() => (editing?.content === editing?.original || window.confirm(t('저장하지 않은 변경이 있습니다. 닫을까요?'))) && setEditing(null)}
+        title={editing?.path || ''}
+        wide
+      >
         {editing && (
           <div className="space-y-3">
             <textarea
-              aria-label="파일 내용"
+              aria-label={t('파일 내용')}
               spellCheck={false}
               className="input h-[60vh] font-mono text-xs leading-relaxed"
               value={editing.content}
@@ -311,9 +331,9 @@ export function FileManager({ app }) {
               }}
             />
             <div className="flex items-center justify-between">
-              <span className="text-xs text-ink-400">Ctrl+S 로 저장</span>
+              <span className="text-xs text-ink-400">{t('Ctrl+S 로 저장')}</span>
               <button className="btn-primary" disabled={editing.saving} onClick={save}>
-                {editing.saving ? '저장 중…' : '저장'}
+                {editing.saving ? t('저장 중…') : t('저장')}
               </button>
             </div>
           </div>
@@ -359,16 +379,18 @@ export function SslTab({ app, onChanged }) {
     <div className="space-y-4">
       {proxyMode && (
         <div className="rounded-lg border border-sky-400/30 bg-sky-400/10 px-4 py-3 text-sm text-sky-200">
-          이 서버는 <b>앞단 프록시 모드</b>로 설치되었습니다. HTTPS 인증서는 앞단 프록시(예: Nginx Proxy Manager)에서 발급·관리하세요.
-          Let&apos;s Encrypt 확인 요청이 이 서버까지 오지 않기 때문입니다.
+          {tx(
+            "이 서버는 {mode}로 설치되었습니다. HTTPS 인증서는 앞단 프록시(예: Nginx Proxy Manager)에서 발급·관리하세요. Let's Encrypt 확인 요청이 이 서버까지 오지 않기 때문입니다.",
+            { mode: <b>{t('앞단 프록시 모드')}</b> },
+          )}
         </div>
       )}
       <section className="card p-5">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h3 className="font-medium">현재 상태</h3>
+            <h3 className="font-medium">{t('현재 상태')}</h3>
             <p className="mt-1 text-sm text-ink-400">
-              {d.mode === 'none' ? 'HTTPS 없음 (HTTP 로만 서비스)' : d.mode === 'letsencrypt' ? "Let's Encrypt 인증서 (자동 갱신)" : '직접 올린 인증서'}
+              {d.mode === 'none' ? t('HTTPS 없음 (HTTP 로만 서비스)') : d.mode === 'letsencrypt' ? t("Let's Encrypt 인증서 (자동 갱신)") : t('직접 올린 인증서')}
             </p>
           </div>
           {d.mode !== 'none' && (
@@ -378,12 +400,21 @@ export function SslTab({ app, onChanged }) {
                   type="checkbox"
                   checked={d.force_https}
                   disabled={busy}
-                  onChange={(e) => run(() => put(`/apps/${app.id}/ssl/force`, { force_https: e.target.checked }), e.target.checked ? 'HTTP → HTTPS 리다이렉트를 켰습니다' : '리다이렉트를 껐습니다')}
+                  onChange={(e) =>
+                    run(
+                      () => put(`/apps/${app.id}/ssl/force`, { force_https: e.target.checked }),
+                      e.target.checked ? t('HTTP → HTTPS 리다이렉트를 켰습니다') : t('리다이렉트를 껐습니다'),
+                    )
+                  }
                 />
-                HTTP → HTTPS 강제
+                {t('HTTP → HTTPS 강제')}
               </label>
-              <button className="btn-danger px-2.5 py-1 text-xs" disabled={busy} onClick={() => window.confirm('HTTPS 를 끄고 인증서를 삭제할까요?') && run(() => del(`/apps/${app.id}/ssl`), 'HTTPS 를 껐습니다')}>
-                인증서 삭제
+              <button
+                className="btn-danger px-2.5 py-1 text-xs"
+                disabled={busy}
+                onClick={() => window.confirm(t('HTTPS 를 끄고 인증서를 삭제할까요?')) && run(() => del(`/apps/${app.id}/ssl`), t('HTTPS 를 껐습니다'))}
+              >
+                {t('인증서 삭제')}
               </button>
             </div>
           )}
@@ -393,7 +424,7 @@ export function SslTab({ app, onChanged }) {
             {d.certificates.map((c) => (
               <li key={c.path} className="rounded-lg border border-ink-700 bg-ink-950 px-4 py-3 text-xs">
                 <p>
-                  만료 <b className="font-mono">{c.not_after}</b>
+                  {t('만료')} <b className="font-mono">{c.not_after}</b>
                 </p>
                 <p className="mt-1 text-ink-400">{c.issuer}</p>
                 {c.domains && <p className="mt-1 font-mono text-ink-300">{c.domains.join(', ')}</p>}
@@ -405,25 +436,25 @@ export function SslTab({ app, onChanged }) {
 
       {!proxyMode && (
         <section className="card p-5">
-          <h3 className="font-medium">Let&apos;s Encrypt 무료 인증서</h3>
+          <h3 className="font-medium">{t("Let's Encrypt 무료 인증서")}</h3>
           <p className="mt-1 text-sm text-ink-400">
-            도메인({d.domains.join(', ')})의 DNS 가 이 서버를 가리키고 80 포트가 열려 있어야 합니다. 발급 후 자동 갱신됩니다.
+            {t('도메인({domains})의 DNS 가 이 서버를 가리키고 80 포트가 열려 있어야 합니다. 발급 후 자동 갱신됩니다.', { domains: d.domains.join(', ') })}
           </p>
           <form
             className="mt-4 flex flex-wrap items-end gap-3"
             onSubmit={(e) => {
               e.preventDefault()
-              run(() => post(`/apps/${app.id}/ssl/letsencrypt`, { email, force_https: force }), '인증서를 발급했습니다')
+              run(() => post(`/apps/${app.id}/ssl/letsencrypt`, { email, force_https: force }), t('인증서를 발급했습니다'))
             }}
           >
-            <Field label="이메일 (만료 알림용)" htmlFor="le-email">
+            <Field label={t('이메일 (만료 알림용)')} htmlFor="le-email">
               <input id="le-email" type="email" required className="input w-72" value={email} onChange={(e) => setEmail(e.target.value)} />
             </Field>
             <label className="mb-2 flex items-center gap-2 text-sm">
-              <input type="checkbox" checked={force} onChange={(e) => setForce(e.target.checked)} /> HTTP → HTTPS 강제
+              <input type="checkbox" checked={force} onChange={(e) => setForce(e.target.checked)} /> {t('HTTP → HTTPS 강제')}
             </label>
             <button className="btn-primary" disabled={busy}>
-              {busy ? '발급 중…' : d.mode === 'letsencrypt' ? '다시 발급' : '발급'}
+              {busy ? t('발급 중…') : d.mode === 'letsencrypt' ? t('다시 발급') : t('발급')}
             </button>
           </form>
         </section>
@@ -432,12 +463,12 @@ export function SslTab({ app, onChanged }) {
       <section className="card p-5">
         <div className="flex items-center justify-between">
           <div>
-            <h3 className="font-medium">가지고 있는 인증서 올리기</h3>
-            <p className="mt-1 text-sm text-ink-400">유료 인증서·와일드카드 인증서 (PEM). 개인키는 암호가 없어야 합니다.</p>
+            <h3 className="font-medium">{t('가지고 있는 인증서 올리기')}</h3>
+            <p className="mt-1 text-sm text-ink-400">{t('유료 인증서·와일드카드 인증서 (PEM). 개인키는 암호가 없어야 합니다.')}</p>
           </div>
           {!custom && (
             <button className="btn-ghost text-xs" onClick={() => setCustom({ certificate: '', private_key: '' })}>
-              인증서 붙여넣기
+              {t('인증서 붙여넣기')}
             </button>
           )}
         </div>
@@ -446,21 +477,35 @@ export function SslTab({ app, onChanged }) {
             className="mt-4 space-y-3"
             onSubmit={(e) => {
               e.preventDefault()
-              run(() => post(`/apps/${app.id}/ssl/custom`, { ...custom, force_https: force }), '인증서를 설치했습니다').then((ok) => ok && setCustom(null))
+              run(() => post(`/apps/${app.id}/ssl/custom`, { ...custom, force_https: force }), t('인증서를 설치했습니다')).then((ok) => ok && setCustom(null))
             }}
           >
-            <Field label="인증서 (체인 포함)" htmlFor="crt">
-              <textarea id="crt" className="input h-32 font-mono text-[11px]" required placeholder="-----BEGIN CERTIFICATE-----" value={custom.certificate} onChange={(e) => setCustom({ ...custom, certificate: e.target.value })} />
+            <Field label={t('인증서 (체인 포함)')} htmlFor="crt">
+              <textarea
+                id="crt"
+                className="input h-32 font-mono text-[11px]"
+                required
+                placeholder="-----BEGIN CERTIFICATE-----"
+                value={custom.certificate}
+                onChange={(e) => setCustom({ ...custom, certificate: e.target.value })}
+              />
             </Field>
-            <Field label="개인키" htmlFor="key">
-              <textarea id="key" className="input h-32 font-mono text-[11px]" required placeholder="-----BEGIN PRIVATE KEY-----" value={custom.private_key} onChange={(e) => setCustom({ ...custom, private_key: e.target.value })} />
+            <Field label={t('개인키')} htmlFor="key">
+              <textarea
+                id="key"
+                className="input h-32 font-mono text-[11px]"
+                required
+                placeholder="-----BEGIN PRIVATE KEY-----"
+                value={custom.private_key}
+                onChange={(e) => setCustom({ ...custom, private_key: e.target.value })}
+              />
             </Field>
             <div className="flex justify-end gap-2">
               <button type="button" className="btn-ghost" onClick={() => setCustom(null)}>
-                취소
+                {t('취소')}
               </button>
               <button className="btn-primary" disabled={busy}>
-                설치
+                {t('설치')}
               </button>
             </div>
           </form>
@@ -472,100 +517,6 @@ export function SslTab({ app, onChanged }) {
 }
 
 // ───────────────────────── SSH · SFTP ─────────────────────────
-
-export function SshTab({ app }) {
-  const toast = useToast()
-  const [pw, setPw] = useState('')
-  const [keys, setKeys] = useState(null)
-  const [busy, setBusy] = useState(false)
-  const host = window.location.hostname
-
-  useEffect(() => {
-    get(`/apps/${app.id}/files/content?path=${encodeURIComponent('.ssh/authorized_keys')}`)
-      .then((r) => setKeys(r.content))
-      .catch(() => setKeys(''))
-  }, [app.id])
-
-  return (
-    <div className="grid gap-4 lg:grid-cols-2">
-      <section className="card p-5">
-        <h3 className="font-medium">접속 정보</h3>
-        <p className="mt-1 text-sm text-ink-400">FileZilla·WinSCP(SFTP) 나 터미널(SSH)로 사이트 파일에 접속합니다.</p>
-        <dl className="mt-4 grid grid-cols-[90px_1fr] gap-y-2 text-sm">
-          <dt className="text-ink-400">호스트</dt>
-          <dd className="font-mono">{host}</dd>
-          <dt className="text-ink-400">포트</dt>
-          <dd className="font-mono">22</dd>
-          <dt className="text-ink-400">사용자</dt>
-          <dd className="flex items-center gap-2 font-mono">
-            {app.site_user} <CopyButton text={app.site_user} />
-          </dd>
-          <dt className="text-ink-400">문서 루트</dt>
-          <dd className="font-mono text-xs break-all">{app.site_root}</dd>
-        </dl>
-        <pre className="mt-4 overflow-x-auto rounded-lg border border-ink-700 bg-ink-950 p-3 font-mono text-xs text-ink-300">{`ssh ${app.site_user}@${host}\nsftp ${app.site_user}@${host}`}</pre>
-        <form
-          className="mt-5 flex flex-wrap items-end gap-2"
-          onSubmit={async (e) => {
-            e.preventDefault()
-            setBusy(true)
-            try {
-              await put(`/apps/${app.id}/site-user/password`, { password: pw })
-              toast.push('비밀번호를 바꿨습니다', 'success')
-              setPw('')
-            } catch (err) {
-              toast.push(err.message, 'error')
-            } finally {
-              setBusy(false)
-            }
-          }}
-        >
-          <Field label="새 비밀번호 (10자 이상)" htmlFor="ssh-pw">
-            <input id="ssh-pw" type="text" autoComplete="new-password" minLength={10} required className="input w-64 font-mono" value={pw} onChange={(e) => setPw(e.target.value)} />
-          </Field>
-          <button className="btn-primary" disabled={busy}>
-            비밀번호 변경
-          </button>
-        </form>
-      </section>
-      <section className="card p-5">
-        <h3 className="font-medium">SSH 공개키</h3>
-        <p className="mt-1 text-sm text-ink-400">
-          한 줄에 하나씩 (<span className="font-mono">~/.ssh/authorized_keys</span>). 키로 접속하면 비밀번호가 필요 없습니다.
-        </p>
-        {keys === null ? (
-          <Spinner className="mt-4 text-ink-400" />
-        ) : (
-          <>
-            <textarea aria-label="SSH 공개키" className="input mt-4 h-40 font-mono text-[11px]" placeholder="ssh-ed25519 AAAA... me@laptop" value={keys} onChange={(e) => setKeys(e.target.value)} />
-            <div className="mt-3 flex justify-end">
-              <button
-                className="btn-ghost"
-                onClick={async () => {
-                  const bad = keys.split('\n').filter((l) => l.trim() && !/^(ssh-(ed25519|rsa|dss)|ecdsa-sha2-\S+|sk-\S+) [A-Za-z0-9+/=]+/.test(l.trim()))
-                  if (bad.length) {
-                    toast.push(`공개키 형식이 아닌 줄이 있습니다: ${bad[0].slice(0, 40)}`, 'error')
-                    return
-                  }
-                  try {
-                    await put(`/apps/${app.id}/files/content`, { path: '.ssh/authorized_keys', content: keys.trim() ? `${keys.trim()}\n` : '' })
-                    toast.push('공개키를 저장했습니다', 'success')
-                  } catch (err) {
-                    toast.push(err.message, 'error')
-                  }
-                }}
-              >
-                저장
-              </button>
-            </div>
-          </>
-        )}
-      </section>
-    </div>
-  )
-}
-
-// ───────────────────────── 사이트 설정 ─────────────────────────
 
 export function SiteSettings({ app, onSaved }) {
   const toast = useToast()
@@ -595,7 +546,7 @@ export function SiteSettings({ app, onSaved }) {
           try {
             const n = await put(`/apps/${app.id}`, { ...v, client_max_body_mb: Number(v.client_max_body_mb) })
             onSaved(n)
-            toast.push('저장했습니다 — 바로 적용합니다', 'success')
+            toast.push(t('저장했습니다 — 바로 적용합니다'), 'success')
           } catch (err) {
             setError(err)
           } finally {
@@ -604,87 +555,90 @@ export function SiteSettings({ app, onSaved }) {
         }}
       >
         <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="이름" htmlFor="s-name">
+          <Field label={t('이름')} htmlFor="s-name">
             <input id="s-name" className="input" required value={v.name} onChange={set('name')} />
           </Field>
-          <Field label="업로드 크기 제한 (MB)" htmlFor="s-body" hint="Nginx client_max_body_size">
+          <Field label={t('업로드 크기 제한 (MB)')} htmlFor="s-body" hint="Nginx client_max_body_size">
             <input id="s-body" type="number" min="1" max="10240" className="input" value={v.client_max_body_mb} onChange={set('client_max_body_mb')} />
           </Field>
         </div>
-        <Field label="도메인" htmlFor="s-domains" hint="공백으로 구분. 대표 도메인(폴더 이름)은 바뀌지 않습니다">
+        <Field label={t('도메인')} htmlFor="s-domains" hint={t('공백으로 구분. 대표 도메인(폴더 이름)은 바뀌지 않습니다')}>
           <input id="s-domains" className="input font-mono" required value={v.domains} onChange={set('domains')} />
         </Field>
         {app.kind === 'static' && (
-          <Field label="웹 루트 (하위 폴더)" htmlFor="s-webroot" hint={`${app.site_root}/ 아래에서 서비스할 폴더 — 예: dist, public`}>
-            <input id="s-webroot" className="input font-mono" value={v.web_root} onChange={set('web_root')} placeholder="(문서 루트 그대로)" />
+          <Field label={t('웹 루트 (하위 폴더)')} htmlFor="s-webroot" hint={t('{site_root}/ 아래에서 서비스할 폴더 — 예: dist, public', { site_root: app.site_root })}>
+            <input id="s-webroot" className="input font-mono" value={v.web_root} onChange={set('web_root')} placeholder={t('(문서 루트 그대로)')} />
           </Field>
         )}
         {(app.kind === 'rust' || app.kind === 'python') && (
           <div className="grid gap-4 sm:grid-cols-[1fr_180px]">
             <Field
-              label="시작 명령"
+              label={t('시작 명령')}
               htmlFor="s-start"
               hint={
                 app.kind === 'python'
-                  ? '가상환경(.venv)이 켜진 상태로 실행 — 예: python app.py · gunicorn -b 127.0.0.1:$PORT app:app'
-                  : '문서 루트에 올린 실행 파일 — 예: ./app · PORT·BIND_ADDR 가 자동 주입됩니다'
+                  ? t('가상환경(.venv)이 켜진 상태로 실행 — 예: python app.py · gunicorn -b 127.0.0.1:$PORT app:app')
+                  : t('문서 루트에 올린 실행 파일 — 예: ./app · PORT·BIND_ADDR 가 자동 주입됩니다')
               }
             >
               <input id="s-start" className="input font-mono" required value={v.start_cmd} onChange={set('start_cmd')} />
             </Field>
-            <Field label="헬스체크 경로" htmlFor="s-health">
+            <Field label={t('헬스체크 경로')} htmlFor="s-health">
               <input id="s-health" className="input font-mono" value={v.health_path} onChange={set('health_path')} />
             </Field>
           </div>
         )}
         {(app.kind === 'static' || app.kind === 'python') && (
           <Field
-            label="적용 전 실행할 명령 (선택)"
+            label={t('적용 전 실행할 명령 (선택)')}
             htmlFor="s-build"
             hint={
               app.kind === 'python'
-                ? '패키지 설치 뒤 사이트 유저 권한으로 실행 — 예: python manage.py migrate && python manage.py collectstatic --noinput'
-                : '사이트 유저 권한으로 문서 루트에서 실행 — 예: npm ci && npm run build'
+                ? t('패키지 설치 뒤 사이트 유저 권한으로 실행 — 예: python manage.py migrate && python manage.py collectstatic --noinput')
+                : t('사이트 유저 권한으로 문서 루트에서 실행 — 예: npm ci && npm run build')
             }
           >
             <input id="s-build" className="input font-mono" value={v.build_cmd} onChange={set('build_cmd')} />
           </Field>
         )}
         {app.kind === 'proxy' && (
-          <Field label="대상 URL" htmlFor="s-target">
+          <Field label={t('대상 URL')} htmlFor="s-target">
             <input id="s-target" className="input font-mono" required value={v.proxy_target} onChange={set('proxy_target')} />
           </Field>
         )}
         <ErrorBox error={error} />
         <div className="flex justify-end">
           <button className="btn-primary" disabled={busy}>
-            {busy ? '저장 중…' : '저장하고 적용'}
+            {busy ? t('저장 중…') : t('저장하고 적용')}
           </button>
         </div>
       </form>
       <div className="card border-fail/30 p-5">
-        <h3 className="font-medium text-fail">사이트 삭제</h3>
+        <h3 className="font-medium text-fail">{t('사이트 삭제')}</h3>
         <p className="mt-1 text-sm text-ink-400">
-          Nginx 설정, 인증서{app.site_user ? <>, 사이트 유저 <b className="font-mono">{app.site_user}</b> 와 홈 폴더의 모든 파일</> : ''}을 지웁니다. 백업 파일은 남습니다. 되돌릴 수 없습니다.
+          {app.site_user
+            ? tx('Nginx 설정, 인증서, 사이트 유저 {user}와 홈 폴더의 모든 파일을 지웁니다. 백업 파일은 남습니다. 되돌릴 수 없습니다.', {
+                user: <b className="font-mono">{app.site_user}</b>,
+              })
+            : t('Nginx 설정과 인증서를 지웁니다. 되돌릴 수 없습니다.')}
         </p>
         <button
           className="btn-danger mt-4"
           onClick={async () => {
-            const typed = window.prompt(`삭제하려면 slug 를 입력하세요: ${app.slug}`)
+            const typed = window.prompt(t('삭제하려면 slug 를 입력하세요: {slug}', { slug: app.slug }))
             if (typed !== app.slug) return
             try {
               await del(`/apps/${app.id}`)
-              toast.push(`${app.slug} 삭제됨`, 'success')
+              toast.push(t('{slug} 삭제됨', { slug: app.slug }), 'success')
               nav('/sites')
             } catch (e) {
               toast.push(e.message, 'error')
             }
           }}
         >
-          사이트 삭제
+          {t('사이트 삭제')}
         </button>
       </div>
     </div>
   )
 }
-

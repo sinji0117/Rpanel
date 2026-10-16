@@ -82,9 +82,24 @@
   - Redis 계정: ACL 사용자. 이름·키 패턴을 화이트리스트로 검사하고, 비밀번호는 stdin 으로 받아 SHA-256 해시만 `/etc/redis/rpanel-users.conf`(root:redis 0640, redis.conf 가 include)에 저장. 권한은 `+@all -@admin -@dangerous`(읽기·쓰기) 또는 `+@read`(읽기 전용) + 키·채널 패턴 제한. `default` 등 예약 이름 거부
   - 비밀번호(DB 추가 계정·Redis 계정)는 명령줄이 아닌 stdin 으로 전달하고 `[A-Za-z0-9_.~-]{10,64}` 만 허용 (URL·SQL 에 그대로 넣어도 안전)
   - SSL: 인증서와 개인키 일치 검사, 키는 root 0600
+  - 사이트 추가 계정: 레지스트리(`/etc/rpanel/site-accounts`)에 있는 계정만 수정·삭제. 주 그룹은 그 사이트 유저 그룹, `htdocs`·`logs` 에 POSIX ACL(`u:<계정>:rwX` + default ACL) 로 쓰기 권한. SSH 공개키는 키 종류로 시작하는 줄만 허용(옵션·제어문자 거부). 비밀번호는 stdin 으로 전달
 - **사이트 파일은 그 사이트 유저 권한으로만** 다룹니다 (`sudo -u <사이트유저> rpanel-files`). 홈 디렉토리 밖을 가리키는 경로·심볼릭 링크는 거부합니다.
 - 사이트끼리는 리눅스 계정으로 격리됩니다 (홈 0750, 업로드한 Rust 프로그램은 사이트 유저로 실행). Nginx(`www-data`)만 각 사이트 그룹에 들어가 정적 파일을 읽습니다.
 - 이 계약은 `backend/tests/helper_contract.rs` 가 생성 템플릿 통과 + 위험한 변형(설정 주입, 경로 탈출, 권한 상승 시도 등)으로 검증합니다.
+
+## 사이트 계정 (SSH · SFTP)
+
+- 사이트마다 기본 계정(사이트 유저) + 추가 계정. DB 테이블 `site_accounts`.
+- **SFTP 전용**: 셸 `nologin` + `rpanel-sftp` 그룹. `/etc/ssh/sshd_config.d/49-rpanel-access.conf` 의 `Match Group rpanel-sftp` → `ForceCommand internal-sftp -u 0002`, 포워딩 금지.
+- **잠금**: `rpanel-locked` 그룹 + `DenyGroups rpanel-locked`. 기본 계정을 잠가도 사이트 서비스는 그대로 돕니다.
+- 추가 계정 홈은 `/home/<계정>`(0700)이고 `htdocs` 심볼릭 링크가 사이트 폴더를 가리킵니다. 셸 umask 002.
+- SFTP 클라이언트가 원래 파일 권한(0644 등)을 그대로 보내면 다른 계정이 그 파일을 고칠 수 없습니다. 이럴 땐 패널 파일 관리자로 고치거나 클라이언트에서 권한 유지를 끄세요.
+- 설치 스크립트가 `acl` 패키지와 두 그룹, sshd 설정을 준비합니다 (`sshd -t` 검사 후 reload).
+
+## 관리자 · 화면 설정
+
+- 관리자는 모두 같은 권한입니다. 자기 자신과 마지막 관리자는 지울 수 없고, 비밀번호 변경·삭제 시 그 관리자의 세션을 모두 끊습니다. 로그인 시각은 `users.last_login_at`.
+- 테마(낮·밤·자동)와 언어(한국어·English)는 브라우저 `localStorage`(`rpanel.theme`, `rpanel.lang`)에 저장합니다. 번역은 `frontend/src/i18n/en.js` (한국어 원문이 키). 새 문구를 넣으면 `src/i18n/en.test.js` 가 번역 누락을 잡습니다.
 
 ## 업로드형 Rust 사이트
 
@@ -183,7 +198,8 @@ npx playwright install chromium && npm run e2e # E2E (가짜 API, 백엔드 불�
 | GET | `/api/health` | DB·Redis 상태 |
 | GET/POST | `/api/auth/status`, `/setup`, `/login`, `/refresh`, `/logout`, `/me`, `/password`, `/ws-ticket` | 인증 |
 | GET/POST | `/api/sites` | 사이트 목록(응답 확인) / 만들기 (`type`: rust·python·html·proxy) |
-| PUT | `/api/apps/{id}/site-user/password` | 사이트 유저(SSH·SFTP) 비밀번호 |
+| GET/POST/PUT/DELETE | `/api/apps/{id}/accounts`, `/accounts/{aid}`, POST `/accounts/{aid}/password` | 사이트 계정(SSH·SFTP) |
+| GET/POST/PUT/DELETE | `/api/users`, `/api/users/{id}` | 관리자 |
 | GET/POST/PUT/DELETE | `/api/apps/{id}/ssl`, `/ssl/letsencrypt`, `/ssl/custom`, `/ssl/force` | SSL |
 | GET/PUT/POST | `/api/apps/{id}/files`, `/files/content`, `/files/upload`, `/files/download`, `/files/op` | 파일 관리자 |
 | GET/POST | `/api/projects`, `/api/projects/{id}` (PUT/DELETE), `/api/projects/{id}/apps` | Git 프로젝트·앱 |

@@ -40,7 +40,10 @@ describe('BackupJobForm', () => {
     await userEvent.selectOptions(screen.getByLabelText('시'), '4')
     expect(screen.getByText(/매주 수요일 04:00/)).toBeInTheDocument()
     await userEvent.click(screen.getByRole('button', { name: '추가' }))
-    expect(post).toHaveBeenCalledWith('/backup-jobs', expect.objectContaining({ target: 'database', database_id: 9, app_id: null, schedule: 'weekly', weekday: 3, hour: 4, keep_count: 7 }))
+    expect(post).toHaveBeenCalledWith(
+      '/backup-jobs',
+      expect.objectContaining({ target: 'database', database_id: 9, app_id: null, schedule: 'weekly', weekday: 3, hour: 4, keep_count: 7 }),
+    )
     expect(onSaved).toHaveBeenCalled()
   })
 })

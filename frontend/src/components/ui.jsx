@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { t } from '../i18n'
 
 const STATUS = {
   running: { label: '실행 중', cls: 'text-signal bg-signal/10 border-signal/30', dot: 'bg-signal' },
@@ -19,7 +20,7 @@ export function StatusBadge({ status, deployment = false }) {
   return (
     <span className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-xs font-medium ${s.cls}`}>
       <span className={`h-1.5 w-1.5 rounded-full ${s.dot}`} />
-      {s.label}
+      {t(s.label)}
     </span>
   )
 }
@@ -30,12 +31,7 @@ export function KindBadge({ kind, source }) {
 }
 
 export function Spinner({ className = '' }) {
-  return (
-    <span
-      className={`inline-block h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent ${className}`}
-      aria-label="로딩 중"
-    />
-  )
+  return <span className={`inline-block h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent ${className}`} aria-label={t('로딩 중')} />
 }
 
 export function PageHeader({ title, subtitle, actions, children }) {
@@ -82,16 +78,10 @@ export function Modal({ open, title, onClose, children, wide = false }) {
   if (!open) return null
   return (
     <div className="fixed inset-0 z-40 flex items-start justify-center overflow-y-auto bg-black/60 p-4 pt-[8vh] backdrop-blur-sm">
-      <div
-        ref={ref}
-        role="dialog"
-        aria-modal="true"
-        aria-label={title}
-        className={`card w-full ${wide ? 'max-w-2xl' : 'max-w-md'} shadow-2xl shadow-black/50`}
-      >
+      <div ref={ref} role="dialog" aria-modal="true" aria-label={title} className={`card w-full ${wide ? 'max-w-2xl' : 'max-w-md'} shadow-2xl shadow-black/50`}>
         <div className="flex items-center justify-between border-b border-ink-700/70 px-5 py-3.5">
           <h2 className="font-semibold">{title}</h2>
-          <button className="text-ink-400 hover:text-ink-100" onClick={onClose} aria-label="닫기">
+          <button className="text-ink-400 hover:text-ink-100" onClick={onClose} aria-label={t('닫기')}>
             ✕
           </button>
         </div>
@@ -128,7 +118,7 @@ export function Field({ label, hint, children, htmlFor }) {
   )
 }
 
-export function CopyButton({ text, label = '복사' }) {
+export function CopyButton({ text, label = t('복사') }) {
   const [done, setDone] = useState(false)
   return (
     <button
@@ -141,11 +131,11 @@ export function CopyButton({ text, label = '복사' }) {
           setTimeout(() => setDone(false), 1500)
         } catch {
           // http(비보안 컨텍스트)에서는 clipboard API가 막힐 수 있음
-          window.prompt('복사하세요', text)
+          window.prompt(t('복사하세요'), text)
         }
       }}
     >
-      {done ? '복사됨' : label}
+      {done ? t('복사됨') : label}
     </button>
   )
 }
@@ -179,14 +169,7 @@ export function Meter({ value, label, detail }) {
         <span className="text-ink-300">{label}</span>
         <span className="font-mono text-ink-100">{detail ?? `${v}%`}</span>
       </div>
-      <div
-        className="h-1.5 overflow-hidden rounded-full bg-ink-800"
-        role="meter"
-        aria-label={label}
-        aria-valuenow={v}
-        aria-valuemin={0}
-        aria-valuemax={100}
-      >
+      <div className="h-1.5 overflow-hidden rounded-full bg-ink-800" role="meter" aria-label={label} aria-valuenow={v} aria-valuemin={0} aria-valuemax={100}>
         <div className={`h-full rounded-full ${color} transition-[width] duration-500`} style={{ width: `${v}%` }} />
       </div>
     </div>

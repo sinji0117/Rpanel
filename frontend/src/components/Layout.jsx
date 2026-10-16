@@ -1,13 +1,20 @@
 import { useState } from 'react'
 import { NavLink, Outlet } from 'react-router'
 import { useAuth } from '../context/AuthContext'
+import { LANGS, setLang, t, useLang } from '../i18n'
+import { getTheme, setTheme } from '../lib/prefs'
 
+const DB_ICON = 'M4 6c0-1.7 3.6-3 8-3s8 1.3 8 3-3.6 3-8 3-8-1.3-8-3zm0 0v12c0 1.7 3.6 3 8 3s8-1.3 8-3V6M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3'
+
+// label 은 한국어 원문 (화면에는 t() 로 번역해서 표시)
 const NAV = [
   { to: '/', label: '대시보드', icon: 'M3 12h4l3-8 4 16 3-8h4', end: true },
   { to: '/sites', label: '사이트', icon: 'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM3 12h18M12 3c2.5 2.7 2.5 15.3 0 18M12 3c-2.5 2.7-2.5 15.3 0 18' },
   { to: '/projects', label: '프로젝트', icon: 'M3 7h7l2 2h9v10H3z' },
-  { to: '/databases', label: '데이터베이스', icon: 'M4 6c0-1.7 3.6-3 8-3s8 1.3 8 3-3.6 3-8 3-8-1.3-8-3zm0 0v12c0 1.7 3.6 3 8 3s8-1.3 8-3V6M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3' },
+  { to: '/mariadb', label: 'MariaDB', icon: DB_ICON },
+  { to: '/redis', label: 'Redis', icon: 'M12 3 3 7.5 12 12l9-4.5L12 3zM3 12l9 4.5 9-4.5M3 16.5 12 21l9-4.5' },
   { to: '/backups', label: '백업', icon: 'M4 7h16v13H4zM4 7l2-3h12l2 3M9 12h6' },
+  { to: '/admins', label: '관리자', icon: 'M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM4 21c0-4 3.6-6 8-6s8 2 8 6' },
   { to: '/settings', label: '설정', icon: 'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM4 12h2m12 0h2M12 4v2m0 12v2' },
 ]
 
@@ -16,7 +23,7 @@ export const DONATE_URL = 'https://buymeacoffee.com/bandiuri'
 function DonateLink({ className = '' }) {
   return (
     <a href={DONATE_URL} target="_blank" rel="noopener noreferrer" className={`inline-flex items-center gap-1.5 text-xs text-ink-400 hover:text-warn ${className}`}>
-      <span aria-hidden="true">☕</span> 후원하기
+      <span aria-hidden="true">☕</span> {t('후원하기')}
     </a>
   )
 }
@@ -33,12 +40,59 @@ export function Logo() {
   )
 }
 
+const THEME_OPTIONS = [
+  { id: 'light', label: '낮', icon: '☀' },
+  { id: 'dark', label: '밤', icon: '☾' },
+  { id: 'system', label: '자동', icon: '◐' },
+]
+
+/** 테마(낮·밤·자동) 와 언어를 바로 바꾸는 작은 스위치 */
+export function ThemeLangSwitch({ compact = false }) {
+  const lang = useLang()
+  const [theme, setThemeState] = useState(getTheme())
+  return (
+    <div className={`flex items-center gap-2 ${compact ? '' : 'flex-wrap'}`}>
+      <div className="inline-flex rounded-lg border border-ink-700 p-0.5" role="radiogroup" aria-label={t('테마')}>
+        {THEME_OPTIONS.map((o) => (
+          <button
+            key={o.id}
+            type="button"
+            role="radio"
+            aria-checked={theme === o.id}
+            title={t(o.label)}
+            aria-label={t(o.label)}
+            onClick={() => {
+              setTheme(o.id)
+              setThemeState(o.id)
+            }}
+            className={`rounded-md px-2 py-0.5 text-xs transition ${theme === o.id ? 'bg-ink-800 text-ink-100' : 'text-ink-400 hover:text-ink-100'}`}
+          >
+            <span aria-hidden="true">{o.icon}</span>
+          </button>
+        ))}
+      </div>
+      <select
+        aria-label={t('언어')}
+        className="rounded-lg border border-ink-700 bg-ink-900 px-1.5 py-0.5 text-xs text-ink-300"
+        value={lang}
+        onChange={(e) => setLang(e.target.value)}
+      >
+        {LANGS.map((l) => (
+          <option key={l.id} value={l.id}>
+            {l.label}
+          </option>
+        ))}
+      </select>
+    </div>
+  )
+}
+
 export default function Layout() {
   const { user, logout } = useAuth()
   const [open, setOpen] = useState(false)
 
   const nav = (
-    <nav className="flex flex-col gap-0.5" aria-label="주 메뉴">
+    <nav className="flex flex-col gap-0.5" aria-label={t('주 메뉴')}>
       {NAV.map((n) => (
         <NavLink
           key={n.to}
@@ -46,15 +100,13 @@ export default function Layout() {
           end={n.end}
           onClick={() => setOpen(false)}
           className={({ isActive }) =>
-            `flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition ${
-              isActive ? 'bg-ink-800 text-ink-100' : 'text-ink-400 hover:bg-ink-850 hover:text-ink-100'
-            }`
+            `flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition ${isActive ? 'bg-ink-800 text-ink-100' : 'text-ink-400 hover:bg-ink-850 hover:text-ink-100'}`
           }
         >
           <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
             <path d={n.icon} />
           </svg>
-          {n.label}
+          {t(n.label)}
         </NavLink>
       ))}
     </nav>
@@ -67,13 +119,14 @@ export default function Layout() {
           <Logo />
         </div>
         {nav}
-        <div className="mt-auto border-t border-ink-800 px-2 pt-4">
+        <div className="mt-auto space-y-3 border-t border-ink-800 px-2 pt-4">
+          <ThemeLangSwitch compact />
           <p className="truncate text-xs text-ink-400" title={user?.email}>
             {user?.email}
           </p>
-          <div className="mt-2 flex items-center justify-between">
+          <div className="flex items-center justify-between">
             <button className="text-xs text-ink-400 hover:text-ink-100" onClick={logout}>
-              로그아웃
+              {t('로그아웃')}
             </button>
             <DonateLink />
           </div>
@@ -82,16 +135,19 @@ export default function Layout() {
 
       <header className="flex items-center justify-between border-b border-ink-800 px-4 py-3 md:hidden">
         <Logo />
-        <button className="btn-ghost px-2.5 py-1.5" onClick={() => setOpen((o) => !o)} aria-expanded={open} aria-label="메뉴">
+        <button className="btn-ghost px-2.5 py-1.5" onClick={() => setOpen((o) => !o)} aria-expanded={open} aria-label={t('메뉴')}>
           ☰
         </button>
       </header>
       {open && (
         <div className="border-b border-ink-800 px-3 py-3 md:hidden">
           {nav}
+          <div className="mt-3 px-3">
+            <ThemeLangSwitch />
+          </div>
           <div className="mt-2 flex items-center justify-between px-3">
             <button className="text-sm text-ink-400" onClick={logout}>
-              로그아웃
+              {t('로그아웃')}
             </button>
             <DonateLink />
           </div>

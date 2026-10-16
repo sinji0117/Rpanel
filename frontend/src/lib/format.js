@@ -1,3 +1,4 @@
+import { locale, t } from '../i18n'
 export function bytes(n) {
   if (n == null || Number.isNaN(n)) return '–'
   const units = ['B', 'KB', 'MB', 'GB', 'TB']
@@ -20,27 +21,27 @@ export function uptime(secs) {
   const d = Math.floor(secs / 86400)
   const h = Math.floor((secs % 86400) / 3600)
   const m = Math.floor((secs % 3600) / 60)
-  if (d > 0) return `${d}일 ${h}시간`
-  if (h > 0) return `${h}시간 ${m}분`
-  return `${m}분`
+  if (d > 0) return t('{d}일 {h}시간', { d, h })
+  if (h > 0) return t('{h}시간 {m}분', { h, m })
+  return t('{m}분', { m })
 }
 
 /** "3분 전" 형태 */
 export function ago(iso, now = Date.now()) {
   if (!iso) return '–'
   const diff = Math.round((now - new Date(iso).getTime()) / 1000)
-  if (diff < 10) return '방금'
-  if (diff < 60) return `${diff}초 전`
-  if (diff < 3600) return `${Math.floor(diff / 60)}분 전`
-  if (diff < 86400) return `${Math.floor(diff / 3600)}시간 전`
-  return `${Math.floor(diff / 86400)}일 전`
+  if (diff < 10) return t('방금')
+  if (diff < 60) return t('{diff}초 전', { diff })
+  if (diff < 3600) return t('{v}분 전', { v: Math.floor(diff / 60) })
+  if (diff < 86400) return t('{v}시간 전', { v: Math.floor(diff / 3600) })
+  return t('{v}일 전', { v: Math.floor(diff / 86400) })
 }
 
 export function duration(startIso, endIso) {
   if (!startIso || !endIso) return '–'
   const s = Math.max(0, Math.round((new Date(endIso) - new Date(startIso)) / 1000))
-  if (s < 60) return `${s}초`
-  return `${Math.floor(s / 60)}분 ${s % 60}초`
+  if (s < 60) return t('{s}초', { s })
+  return t('{v}분 {v2}초', { v: Math.floor(s / 60), v2: s % 60 })
 }
 
 export function shortSha(sha) {
@@ -49,7 +50,7 @@ export function shortSha(sha) {
 
 export function dateTime(iso) {
   if (!iso) return '–'
-  return new Date(iso).toLocaleString('ko-KR', { hour12: false })
+  return new Date(iso).toLocaleString(locale(), { hour12: false })
 }
 
 /** .env 텍스트 → [{key,value}] (주석/빈 줄 무시, 따옴표 제거, export 접두어 허용) */

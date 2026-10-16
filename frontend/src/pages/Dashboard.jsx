@@ -5,6 +5,7 @@ import { get } from '../lib/api'
 import { ago, bytes, percent, shortSha, uptime } from '../lib/format'
 import { useFetch, useInterval } from '../lib/useFetch'
 import { useMetrics } from '../lib/useSockets'
+import { t, tx } from '../i18n'
 
 function Stat({ label, value, sub }) {
   return (
@@ -30,28 +31,36 @@ export default function Dashboard() {
   return (
     <>
       <PageHeader
-        title="대시보드"
-        subtitle={host ? `${host.hostname ?? 'app-server'} · ${host.os ?? ''} · ${host.cpu_count} vCPU` : '서버 상태'}
+        title={t('대시보드')}
+        subtitle={host ? `${host.hostname ?? 'app-server'} · ${host.os ?? ''} · ${host.cpu_count} vCPU` : t('서버 상태')}
         actions={
-          <span className={`inline-flex items-center gap-2 text-xs ${connected ? 'text-signal' : 'text-ink-400'}`}>
-            <span className={`h-1.5 w-1.5 rounded-full ${connected ? 'bg-signal animate-pulse' : 'bg-ink-600'}`} />
-            {connected ? '실시간' : '연결 중…'}
-          </span>
+          <>
+            <span className={`inline-flex items-center gap-2 text-xs ${connected ? 'text-signal' : 'text-ink-400'}`}>
+              <span className={`h-1.5 w-1.5 rounded-full ${connected ? 'bg-signal animate-pulse' : 'bg-ink-600'}`} />
+              {connected ? t('실시간') : t('연결 중…')}
+            </span>
+            <Link to="/sites?new=1" className="btn-primary">
+              {t('+ 사이트 추가')}
+            </Link>
+          </>
         }
       />
 
       {info.data?.exec_mode === 'dry-run' && (
         <div className="mb-6 rounded-lg border border-warn/40 bg-warn/10 px-4 py-3 text-sm text-amber-200">
-          <b>DRY-RUN 모드</b> — 배포 명령을 실제로 실행하지 않고 로그만 남깁니다. 운영 시 <span className="kbd">RPANEL_EXEC_MODE=real</span>
+          {tx('{mode} — 배포 명령을 실제로 실행하지 않고 로그만 남깁니다. 운영 시 {env}', {
+            mode: <b>{t('DRY-RUN 모드')}</b>,
+            env: <span className="kbd">RPANEL_EXEC_MODE=real</span>,
+          })}
         </div>
       )}
       <ErrorBox error={overview.error} />
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <Stat label="프로젝트" value={o?.projects ?? '–'} />
-        <Stat label="앱" value={o?.apps.total ?? '–'} sub={o ? `실행 중 ${o.apps.by_status.running ?? 0} · 실패 ${o.apps.by_status.failed ?? 0}` : null} />
-        <Stat label="배포 (24시간)" value={o?.deployments_24h.total ?? '–'} sub={o ? `실패 ${o.deployments_24h.failed}` : null} />
-        <Stat label="가동 시간" value={latest ? uptime(latest.uptime) : '–'} sub={latest ? `load ${latest.load.map((l) => l.toFixed(2)).join(' · ')}` : null} />
+        <Stat label={t('프로젝트')} value={o?.projects ?? '–'} />
+        <Stat label={t('앱')} value={o?.apps.total ?? '–'} sub={o ? t('실행 중 {v} · 실패 {v2}', { v: o.apps.by_status.running ?? 0, v2: o.apps.by_status.failed ?? 0 }) : null} />
+        <Stat label={t('배포 (24시간)')} value={o?.deployments_24h.total ?? '–'} sub={o ? t('실패 {failed}', { failed: o.deployments_24h.failed }) : null} />
+        <Stat label={t('가동 시간')} value={latest ? uptime(latest.uptime) : '–'} sub={latest ? `load ${latest.load.map((l) => l.toFixed(2)).join(' · ')}` : null} />
       </div>
 
       <div className="mt-4 grid gap-4 lg:grid-cols-3">
@@ -68,7 +77,7 @@ export default function Dashboard() {
         </div>
         <div className="card p-5">
           <div className="flex items-baseline justify-between">
-            <p className="text-sm font-medium">메모리</p>
+            <p className="text-sm font-medium">{t('메모리')}</p>
             <p className="font-mono text-lg tabular-nums">{latest ? `${bytes(latest.mem_used)} / ${bytes(latest.mem_total)}` : '–'}</p>
           </div>
           <div className="mt-4 h-28">
@@ -76,11 +85,9 @@ export default function Dashboard() {
           </div>
         </div>
         <div className="card space-y-4 p-5">
-          <p className="text-sm font-medium">디스크</p>
+          <p className="text-sm font-medium">{t('디스크')}</p>
           {latest?.disks.length ? (
-            latest.disks.slice(0, 4).map((d) => (
-              <Meter key={d.mount} label={d.mount} value={percent(d.used, d.total)} detail={`${bytes(d.used)} / ${bytes(d.total)}`} />
-            ))
+            latest.disks.slice(0, 4).map((d) => <Meter key={d.mount} label={d.mount} value={percent(d.used, d.total)} detail={`${bytes(d.used)} / ${bytes(d.total)}`} />)
           ) : (
             <p className="text-sm text-ink-400">–</p>
           )}
@@ -88,31 +95,56 @@ export default function Dashboard() {
         </div>
       </div>
 
-      <div className="card mt-4">
-        <div className="flex items-center justify-between border-b border-ink-700/70 px-5 py-3.5">
-          <h2 className="text-sm font-medium">최근 배포</h2>
-          <Link to="/projects" className="text-xs text-ink-400 hover:text-ink-100">
-            프로젝트 →
-          </Link>
+      <div className="mt-4 grid gap-4 lg:grid-cols-3">
+        <div className="card p-5" aria-label={t('시스템')}>
+          <h2 className="text-sm font-medium">{t('시스템')}</h2>
+          {info.data && (
+            <dl className="mt-4 grid grid-cols-[96px_1fr] gap-y-2 text-sm">
+              <dt className="text-ink-400">Rpanel</dt>
+              <dd className="font-mono">v{info.data.version}</dd>
+              <dt className="text-ink-400">{t('실행 모드')}</dt>
+              <dd className="font-mono">{info.data.exec_mode}</dd>
+              <dt className="text-ink-400">{t('호스트')}</dt>
+              <dd className="truncate font-mono">{host?.hostname}</dd>
+              <dt className="text-ink-400">OS</dt>
+              <dd className="truncate">{host?.os}</dd>
+              <dt className="text-ink-400">{t('커널')}</dt>
+              <dd className="font-mono">{host?.kernel}</dd>
+              <dt className="text-ink-400">CPU</dt>
+              <dd className="truncate">
+                {host?.cpu_brand} × {host?.cpu_count}
+              </dd>
+              <dt className="text-ink-400">{t('앱 포트 범위')}</dt>
+              <dd className="font-mono">{info.data.app_port_range?.join('–')}</dd>
+            </dl>
+          )}
         </div>
-        {o?.recent_deployments.length ? (
-          <ul className="divide-y divide-ink-800">
-            {o.recent_deployments.map((d) => (
-              <li key={d.id}>
-                <Link to={`/deployments/${d.id}`} className="flex items-center gap-4 px-5 py-3 text-sm hover:bg-ink-850">
-                  <StatusBadge status={d.status} deployment />
-                  <span className="min-w-0 flex-1 truncate">
-                    {d.app_name} <span className="text-ink-400">#{d.id}</span>
-                  </span>
-                  <span className="hidden font-mono text-xs text-ink-400 sm:inline">{shortSha(d.commit_sha)}</span>
-                  <span className="w-20 text-right text-xs text-ink-400">{ago(d.created_at)}</span>
-                </Link>
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p className="px-5 py-8 text-center text-sm text-ink-400">아직 배포가 없습니다</p>
-        )}
+        <div className="card lg:col-span-2">
+          <div className="flex items-center justify-between border-b border-ink-700/70 px-5 py-3.5">
+            <h2 className="text-sm font-medium">{t('최근 배포')}</h2>
+            <Link to="/projects" className="text-xs text-ink-400 hover:text-ink-100">
+              {t('프로젝트 →')}
+            </Link>
+          </div>
+          {o?.recent_deployments.length ? (
+            <ul className="divide-y divide-ink-800">
+              {o.recent_deployments.map((d) => (
+                <li key={d.id}>
+                  <Link to={`/deployments/${d.id}`} className="flex items-center gap-4 px-5 py-3 text-sm hover:bg-ink-850">
+                    <StatusBadge status={d.status} deployment />
+                    <span className="min-w-0 flex-1 truncate">
+                      {d.app_name} <span className="text-ink-400">#{d.id}</span>
+                    </span>
+                    <span className="hidden font-mono text-xs text-ink-400 sm:inline">{shortSha(d.commit_sha)}</span>
+                    <span className="w-20 text-right text-xs text-ink-400">{ago(d.created_at)}</span>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="px-5 py-8 text-center text-sm text-ink-400">{t('아직 배포가 없습니다')}</p>
+          )}
+        </div>
       </div>
     </>
   )

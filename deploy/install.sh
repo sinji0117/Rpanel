@@ -95,7 +95,7 @@ say "1/8 기본 패키지"
 apt-get update -q >/dev/null
 apt-get install -y -q curl ca-certificates gnupg git rsync openssl sudo build-essential pkg-config libssl-dev \
   openssh-client openssh-server nginx mariadb-server mariadb-client redis-server ufw certbot unzip zip \
-  python3 python3-venv python3-pip python3-dev >/dev/null
+  python3 python3-venv python3-pip python3-dev acl >/dev/null
 # 가상머신이면 게스트 에이전트 (없어도 무관)
 apt-get install -y -q qemu-guest-agent >/dev/null 2>&1 || true
 # 시간대가 UTC 기본값이면 서울로 (이미 정했다면 유지)
@@ -222,6 +222,8 @@ install -d -o rpanel -g rpanel -m 0700 /var/lib/rpanel/keys
 install -d -o root -g rpanel -m 0750 /etc/rpanel
 install -d -o root -g root -m 0755 /var/lib/rpanel/acme
 getent group rpanel-sites >/dev/null || groupadd --system rpanel-sites
+getent group rpanel-sftp >/dev/null || groupadd --system rpanel-sftp       # SFTP 전용 사이트 계정
+getent group rpanel-locked >/dev/null || groupadd --system rpanel-locked   # 잠근 사이트 계정
 
 # rpanel 사용자로 실행 (프록시를 쓰는 서버라면 프록시 설정도 함께 전달)
 PROXY_ENV=()
@@ -425,6 +427,24 @@ if [[ -n "$PANEL_DOMAIN" ]]; then
 fi
 
 # ───────────────────────── 사이트 유저 SSH/SFTP ─────────────────────────
+# 잠근 계정은 접속 거부, SFTP 전용 계정은 셸 대신 SFTP 만
+if [[ -d /etc/ssh/sshd_config.d ]]; then
+  cat > /etc/ssh/sshd_config.d/49-rpanel-access.conf <<'EOF'
+# managed by rpanel — 사이트 계정 잠금 · SFTP 전용
+DenyGroups rpanel-locked
+Match Group rpanel-sftp
+    ForceCommand internal-sftp -u 0002
+    AllowTcpForwarding no
+    X11Forwarding no
+Match all
+EOF
+  install -d -m 0755 /run/sshd
+  if sshd -t 2>/dev/null; then
+    systemctl reload ssh 2>/dev/null || systemctl reload sshd 2>/dev/null || true
+  else
+    rm -f /etc/ssh/sshd_config.d/49-rpanel-access.conf; warn "sshd 설정 검사 실패 — 사이트 계정 잠금·SFTP 전용 설정을 건너뜁니다"
+  fi
+fi
 if [[ $SSH_PASSWORD -eq 0 && -f /etc/ssh/sshd_config.d/50-rpanel-sites.conf ]]; then
   rm -f /etc/ssh/sshd_config.d/50-rpanel-sites.conf
   systemctl reload ssh 2>/dev/null || systemctl reload sshd 2>/dev/null || true

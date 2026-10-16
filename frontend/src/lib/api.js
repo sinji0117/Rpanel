@@ -1,10 +1,11 @@
 // API 클라이언트
+import { t } from '../i18n'
 // - 액세스 토큰(JWT)은 메모리에만 보관 (XSS로 localStorage 탈취 방지)
 // - 401이면 HttpOnly 리프레시 쿠키로 1회 갱신 후 재시도 (동시 요청은 갱신 1번만)
 
 export class ApiError extends Error {
   constructor(status, message, code) {
-    super(message)
+    super(t(message)) // 서버 메시지도 사전에 있으면 선택한 언어로
     this.status = status
     this.code = code
   }
@@ -20,7 +21,7 @@ export function getAccessToken() {
 
 export function setSession(token, user) {
   accessToken = token
-  listeners.forEach((fn) => fn(token ? user ?? null : null))
+  listeners.forEach((fn) => fn(token ? (user ?? null) : null))
 }
 
 /** 세션 변경 구독 (로그인/로그아웃/만료). 반환값은 해제 함수 */
@@ -86,7 +87,7 @@ export async function api(path, { method = 'GET', body, retry = true } = {}) {
   }
   const data = await parse(res)
   if (!res.ok) {
-    throw new ApiError(res.status, data?.message || `요청 실패 (${res.status})`, data?.error)
+    throw new ApiError(res.status, data?.message || t('요청 실패 ({status})', { status: res.status }), data?.error)
   }
   return data
 }
@@ -134,7 +135,7 @@ export async function download(path, filename) {
   if (res.status === 401 && (await refreshSession())) res = await run()
   if (!res.ok) {
     const data = await parse(res)
-    throw new ApiError(res.status, data?.message || `다운로드 실패 (${res.status})`)
+    throw new ApiError(res.status, data?.message || t('다운로드 실패 ({status})', { status: res.status }))
   }
   const blob = await res.blob()
   const url = URL.createObjectURL(blob)
@@ -164,9 +165,9 @@ export function uploadFile(appId, path, file, onProgress) {
           /* ignore */
         }
         if (xhr.status >= 200 && xhr.status < 300) resolve(data)
-        else reject(new ApiError(xhr.status, data?.message || `업로드 실패 (${xhr.status})`))
+        else reject(new ApiError(xhr.status, data?.message || t('업로드 실패 ({status})', { status: xhr.status })))
       }
-      xhr.onerror = () => reject(new ApiError(0, '업로드 중 연결이 끊겼습니다'))
+      xhr.onerror = () => reject(new ApiError(0, t('업로드 중 연결이 끊겼습니다')))
       xhr.send(file)
     })
   return send().catch(async (e) => {

@@ -19,12 +19,13 @@ export function createMockBackend({ needsSetup = false } = {}) {
     crons: [],
     files: {},
     ssl: {},
+    accounts: [],
+    admins: [],
     seq: 1,
   }
   const id = () => db.seq++
 
-  const json = (route, status, body) =>
-    route.fulfill({ status, contentType: 'application/json', body: body === undefined ? '' : JSON.stringify(body) })
+  const json = (route, status, body) => route.fulfill({ status, contentType: 'application/json', body: body === undefined ? '' : JSON.stringify(body) })
   const token = () => ({ access_token: 'test-access-token', token_type: 'Bearer', expires_at: Date.now() / 1000 + 900, user: db.user })
 
   async function handle(route) {
@@ -52,8 +53,7 @@ export function createMockBackend({ needsSetup = false } = {}) {
       return json(route, 201, token())
     }
     if (path === '/auth/login' && method === 'POST') {
-      if (body.email !== db.user?.email || body.password !== db.password)
-        return json(route, 400, { error: 'bad_request', message: '이메일 또는 비밀번호가 올바르지 않습니다' })
+      if (body.email !== db.user?.email || body.password !== db.password) return json(route, 400, { error: 'bad_request', message: '이메일 또는 비밀번호가 올바르지 않습니다' })
       db.loggedIn = true
       return json(route, 200, token())
     }
@@ -82,9 +82,39 @@ export function createMockBackend({ needsSetup = false } = {}) {
       })
     if (path === '/audit') return json(route, 200, [])
 
+    // ── admins ──
+    const admins = () => [db.user, ...db.admins]
+    if (path === '/users' && method === 'GET') return json(route, 200, { users: admins().map((u) => ({ last_login_at: null, ...u })), me: db.user.id })
+    if (path === '/users' && method === 'POST') {
+      if (!/^[^@\s]+@[^@\s]+$/.test(body.email ?? '')) return json(route, 400, { error: 'bad_request', message: '이메일 형식이 올바르지 않습니다' })
+      if ((body.password ?? '').length < 10) return json(route, 400, { error: 'bad_request', message: '비밀번호는 10자 이상이어야 합니다' })
+      if (admins().some((u) => u.email === body.email.toLowerCase())) return json(route, 409, { error: 'conflict', message: '이미 존재하는 값입니다' })
+      const u = { id: 1000 + id(), email: body.email.toLowerCase(), role: 'admin', created_at: now(), last_login_at: null }
+      db.admins.push(u)
+      return json(route, 201, u)
+    }
+    let um = path.match(/^\/users\/(\d+)$/)
+    if (um) {
+      const u = admins().find((x) => x.id === Number(um[1]))
+      if (!u) return json(route, 404, { error: 'not_found', message: '찾을 수 없습니다' })
+      if (method === 'PUT') {
+        if (body.email) u.email = body.email.toLowerCase()
+        return json(route, 200, u)
+      }
+      if (method === 'DELETE') {
+        if (u.id === db.user.id) return json(route, 400, { error: 'bad_request', message: '자기 자신은 삭제할 수 없습니다' })
+        db.admins = db.admins.filter((x) => x !== u)
+        return json(route, 204)
+      }
+    }
+
     // ── projects ──
     if (path === '/projects' && method === 'GET')
-      return json(route, 200, db.projects.map((p) => ({ ...p, app_count: db.apps.filter((a) => a.project_id === p.id).length, running_count: 0 })))
+      return json(
+        route,
+        200,
+        db.projects.map((p) => ({ ...p, app_count: db.apps.filter((a) => a.project_id === p.id).length, running_count: 0 })),
+      )
     if (path === '/projects' && method === 'POST') {
       if (db.projects.some((p) => p.name === body.name)) return json(route, 409, { error: 'conflict', message: '이미 존재하는 값입니다' })
       const p = { id: id(), name: body.name, description: body.description ?? '', created_at: now(), updated_at: now() }
@@ -120,18 +150,40 @@ export function createMockBackend({ needsSetup = false } = {}) {
 
     if (path === '/system/edge') return json(route, 200, { edge_mode: 'direct', trusted_proxy: '', ssl_available: true })
     if (path === '/sites' && method === 'POST') {
-      const domains = body.domains.trim().toLowerCase().split(/[\s,]+/)
+      const domains = body.domains
+        .trim()
+        .toLowerCase()
+        .split(/[\s,]+/)
       if (db.apps.some((a) => (a.domains || '').split(' ').some((d) => domains.includes(d))))
         return json(route, 409, { error: 'conflict', message: `도메인 ${domains[0]} 은(는) 이미 사용 중입니다` })
       const kind = body.type === 'html' ? 'static' : body.type
       const user = body.type === 'proxy' ? null : body.site_user || domains[0].split('.')[0]
       const a = {
-        id: id(), project_id: null, name: domains[0], slug: domains[0].replace(/\./g, '-'), kind,
-        source: body.type === 'proxy' ? 'none' : 'files', git_url: null, git_branch: 'main', domains: domains.join(' '),
-        site_user: user, site_root: user ? `/home/${user}/htdocs/${domains[0]}` : null, web_root: '',
-        proxy_target: body.proxy_target || null, start_cmd: body.start_cmd || null, build_cmd: null, health_path: '/',
-        port: kind === 'rust' ? 8150 : null, status: kind === 'rust' ? 'idle' : 'running', ssl_mode: 'none', force_https: false, client_max_body_mb: 64,
-        current_release: 1, redis_db: null, backup_schedule: 'off', backup_keep: 7,
+        id: id(),
+        project_id: null,
+        name: domains[0],
+        slug: domains[0].replace(/\./g, '-'),
+        kind,
+        source: body.type === 'proxy' ? 'none' : 'files',
+        git_url: null,
+        git_branch: 'main',
+        domains: domains.join(' '),
+        site_user: user,
+        site_root: user ? `/home/${user}/htdocs/${domains[0]}` : null,
+        web_root: '',
+        proxy_target: body.proxy_target || null,
+        start_cmd: body.start_cmd || null,
+        build_cmd: null,
+        health_path: '/',
+        port: kind === 'rust' ? 8150 : null,
+        status: kind === 'rust' ? 'idle' : 'running',
+        ssl_mode: 'none',
+        force_https: false,
+        client_max_body_mb: 64,
+        current_release: 1,
+        redis_db: null,
+        backup_schedule: 'off',
+        backup_keep: 7,
       }
       db.apps.push(a)
       db.env[a.id] = []
@@ -142,7 +194,53 @@ export function createMockBackend({ needsSetup = false } = {}) {
     // ── apps ──
     if (path === '/apps') {
       const pid = Number(url.searchParams.get('project_id'))
-      return json(route, 200, db.apps.filter((a) => !pid || a.project_id === pid))
+      return json(
+        route,
+        200,
+        db.apps.filter((a) => !pid || a.project_id === pid),
+      )
+    }
+    // ── site accounts ──
+    m = path.match(/^\/apps\/(\d+)\/accounts(?:\/(\d+)(\/password)?)?$/)
+    if (m) {
+      const a = db.apps.find((x) => x.id === Number(m[1]))
+      if (!a?.site_user) return json(route, 400, { error: 'bad_request', message: '파일 기반 사이트에서만 쓸 수 있습니다' })
+      if (!db.accounts.some((x) => x.app_id === a.id && x.is_primary))
+        db.accounts.unshift({ id: id(), app_id: a.id, username: a.site_user, is_primary: true, access: 'ssh', enabled: true, key_count: 0, note: null, created_at: now() })
+      const mine = () => db.accounts.filter((x) => x.app_id === a.id)
+      if (!m[2] && method === 'GET') return json(route, 200, { accounts: mine(), site_user: a.site_user, site_root: a.site_root })
+      if (!m[2] && method === 'POST') {
+        if (!/^[a-z][a-z0-9-]{2,31}$/.test(body.username ?? '')) return json(route, 400, { error: 'bad_request', message: '계정 이름 형식이 올바르지 않습니다' })
+        if (db.accounts.some((x) => x.username === body.username)) return json(route, 409, { error: 'conflict', message: '이미 존재하는 값입니다' })
+        const acc = {
+          id: id(),
+          app_id: a.id,
+          username: body.username,
+          is_primary: false,
+          access: body.access || 'sftp',
+          enabled: true,
+          key_count: (body.ssh_keys || '').split('\n').filter(Boolean).length,
+          note: body.note ?? null,
+          created_at: now(),
+        }
+        db.accounts.push(acc)
+        return json(route, 201, { account: acc, password: body.password || (body.ssh_keys ? null : 'AutoGen3rated-pw-01') })
+      }
+      const acc = mine().find((x) => x.id === Number(m[2]))
+      if (!acc) return json(route, 404, { error: 'not_found', message: '찾을 수 없습니다' })
+      if (m[3]) {
+        if (body.password && body.password.length < 10) return json(route, 400, { error: 'bad_request', message: '비밀번호는 10자 이상이어야 합니다' })
+        return json(route, 200, { ok: true, password: body.password || 'AutoGen3rated-pw-02' })
+      }
+      if (method === 'PUT') {
+        for (const k of ['access', 'enabled', 'note']) if (body[k] !== undefined) acc[k] = body[k]
+        return json(route, 200, acc)
+      }
+      if (method === 'DELETE') {
+        if (acc.is_primary) return json(route, 400, { error: 'bad_request', message: '기본 계정은 삭제할 수 없습니다' })
+        db.accounts = db.accounts.filter((x) => x !== acc)
+        return json(route, 204)
+      }
     }
     m = path.match(/^\/apps\/(\d+)\/(files\/content|files\/op|files\/upload|ssl\/custom|ssl\/letsencrypt|ssl\/force|site-user\/password)$/)
     if (m) {
@@ -193,18 +291,29 @@ export function createMockBackend({ needsSetup = false } = {}) {
         return json(route, 200, a)
       }
       const managed = () => [
-        ...db.dbs.filter((d) => d.app_id === a.id).map((d) => ({ key: d.env_key, value: `mysql://${d.username}:secretpw@127.0.0.1:3306/${d.name}`, source: `MariaDB · ${d.name}` })),
+        ...db.dbs
+          .filter((d) => d.app_id === a.id)
+          .map((d) => ({ key: d.env_key, value: `mysql://${d.username}:secretpw@127.0.0.1:3306/${d.name}`, source: `MariaDB · ${d.name}` })),
         ...(a.redis_db != null ? [{ key: 'REDIS_URL', value: `redis://:pw@127.0.0.1:6379/${a.redis_db}`, source: `Redis · DB ${a.redis_db}` }] : []),
       ]
       if (sub === '/files') {
         const dir = url.searchParams.get('path') || ''
         const tree = db.files[a.id] || {}
         const entries = Object.entries(tree[dir] || {}).map(([name, content]) => ({ name, kind: 'file', size: content.length, mode: '0644', mtime: 1792100000 }))
-        for (const k of Object.keys(tree)) if (k.startsWith(dir + '/') && !k.slice(dir.length + 1).includes('/')) entries.unshift({ name: k.slice(dir.length + 1), kind: 'dir', size: 0, mode: '0750', mtime: 1792100000 })
+        for (const k of Object.keys(tree))
+          if (k.startsWith(dir + '/') && !k.slice(dir.length + 1).includes('/'))
+            entries.unshift({ name: k.slice(dir.length + 1), kind: 'dir', size: 0, mode: '0750', mtime: 1792100000 })
         return json(route, 200, { path: dir, entries, root: `htdocs/${a.domains.split(' ')[0]}`, user: a.site_user })
       }
       if (sub === '/content' || sub === '/files-content') return json(route, 404, {})
-      if (sub === '/ssl' && method === 'GET') return json(route, 200, { mode: a.ssl_mode, force_https: a.force_https, certificates: a.ssl_mode === 'none' ? [] : [{ path: 'x', not_after: 'Jan 14 00:00:00 2027 GMT', issuer: 'CN = Test CA', domains: a.domains.split(' ') }], edge_mode: 'direct', domains: a.domains.split(' ') })
+      if (sub === '/ssl' && method === 'GET')
+        return json(route, 200, {
+          mode: a.ssl_mode,
+          force_https: a.force_https,
+          certificates: a.ssl_mode === 'none' ? [] : [{ path: 'x', not_after: 'Jan 14 00:00:00 2027 GMT', issuer: 'CN = Test CA', domains: a.domains.split(' ') }],
+          edge_mode: 'direct',
+          domains: a.domains.split(' '),
+        })
       if (sub === '/env' && method === 'GET') return json(route, 200, { vars: db.env[a.id], managed: managed() })
       if (sub === '/databases' && method === 'GET')
         return json(route, 200, {
@@ -226,11 +335,44 @@ export function createMockBackend({ needsSetup = false } = {}) {
       if (sub === '/backups' && method === 'POST') {
         const stamp = '20261013-030000'
         for (const d of db.dbs.filter((x) => x.app_id === a.id))
-          db.backups.unshift({ id: id(), app_id: a.id, app_name: a.name, app_slug: a.slug, kind: 'db', target: d.name, file: `${stamp}-db-${d.name}.sql.gz`, size_bytes: 20480, status: 'success', error: null, trigger_by: 'manual', created_at: now(), finished_at: now() })
-        db.backups.unshift({ id: id(), app_id: a.id, app_name: a.name, app_slug: a.slug, kind: 'data', target: 'data', file: `${stamp}-data.tar.gz`, size_bytes: 1024, status: 'success', error: null, trigger_by: 'manual', created_at: now(), finished_at: now() })
+          db.backups.unshift({
+            id: id(),
+            app_id: a.id,
+            app_name: a.name,
+            app_slug: a.slug,
+            kind: 'db',
+            target: d.name,
+            file: `${stamp}-db-${d.name}.sql.gz`,
+            size_bytes: 20480,
+            status: 'success',
+            error: null,
+            trigger_by: 'manual',
+            created_at: now(),
+            finished_at: now(),
+          })
+        db.backups.unshift({
+          id: id(),
+          app_id: a.id,
+          app_name: a.name,
+          app_slug: a.slug,
+          kind: 'data',
+          target: 'data',
+          file: `${stamp}-data.tar.gz`,
+          size_bytes: 1024,
+          status: 'success',
+          error: null,
+          trigger_by: 'manual',
+          created_at: now(),
+          finished_at: now(),
+        })
         return json(route, 202, { backup_ids: [] })
       }
-      if (sub === '/cron' && method === 'GET') return json(route, 200, db.crons.filter((c) => c.app_id === a.id))
+      if (sub === '/cron' && method === 'GET')
+        return json(
+          route,
+          200,
+          db.crons.filter((c) => c.app_id === a.id),
+        )
       if (sub === '/cron' && method === 'POST') {
         if (/[;$`]/.test(body.schedule)) return json(route, 400, { error: 'bad_request', message: '일정 형식이 올바르지 않습니다' })
         const c = { id: id(), app_id: a.id, ...body, unit: `rpanel-cron-${a.slug}-x`, status: null }
@@ -241,7 +383,16 @@ export function createMockBackend({ needsSetup = false } = {}) {
         return json(route, 200, {
           kind: 'access',
           lines: ['203.0.113.5 - - [13/Oct/2026:11:00:00 +0900] "GET / HTTP/1.1" 200 512 "-" "Mozilla"'],
-          stats: { total: 4, by_class: { '2xx': 3, '5xx': 1 }, top_paths: [['/', 3], ['/api', 1]], top_ips: [['203.0.113.5', 4]], bytes: 2048 },
+          stats: {
+            total: 4,
+            by_class: { '2xx': 3, '5xx': 1 },
+            top_paths: [
+              ['/', 3],
+              ['/api', 1],
+            ],
+            top_ips: [['203.0.113.5', 4]],
+            bytes: 2048,
+          },
         })
       if (sub === '/env' && method === 'PUT') {
         const bad = body.vars.find((v) => !/^[A-Za-z_][A-Za-z0-9_]*$/.test(v.key))
@@ -272,7 +423,11 @@ export function createMockBackend({ needsSetup = false } = {}) {
     }
     if (path === '/backups') {
       const appId = Number(url.searchParams.get('app_id'))
-      return json(route, 200, db.backups.filter((b) => !appId || b.app_id === appId))
+      return json(
+        route,
+        200,
+        db.backups.filter((b) => !appId || b.app_id === appId),
+      )
     }
     if (path === '/cron/preview') return json(route, 200, { valid: !/[;$`]/.test(body.schedule), next: 'Wed 2026-10-14 03:00:00 KST', error: '일정 형식이 올바르지 않습니다' })
     if (path === '/sites')
@@ -283,8 +438,18 @@ export function createMockBackend({ needsSetup = false } = {}) {
           .filter((a) => a.domains)
           .flatMap((a) =>
             a.domains.split(' ').map((d, i) => ({
-              domain: d, app_id: a.id, app_name: a.name, app_slug: a.slug, kind: a.kind, app_status: a.status, project_id: a.project_id,
-              http_status: i === 0 ? 200 : 502, latency_ms: i === 0 ? 12 : null, error: i === 0 ? null : 'Bad Gateway', last_deploy_status: null, last_deploy_at: null,
+              domain: d,
+              app_id: a.id,
+              app_name: a.name,
+              app_slug: a.slug,
+              kind: a.kind,
+              app_status: a.status,
+              project_id: a.project_id,
+              http_status: i === 0 ? 200 : 502,
+              latency_ms: i === 0 ? 12 : null,
+              error: i === 0 ? null : 'Bad Gateway',
+              last_deploy_status: null,
+              last_deploy_at: null,
             })),
           ),
       )
@@ -331,11 +496,27 @@ export function createMockBackend({ needsSetup = false } = {}) {
       }
       if (sub === '/password') return json(route, 200, { ok: true, url: dbUrl(d.name, d.username, 'NewPrimary123') })
       if (sub === '/backups') {
-        db.backups.unshift({ id: id(), app_id: d.app_id, app_name: null, app_slug: null, database_id: d.id, kind: 'db', target: d.name, file: `20261013-030000-db-${d.name}.sql.gz`, size_bytes: 4096, status: 'success', error: null, trigger_by: 'manual', created_at: now(), finished_at: now() })
+        db.backups.unshift({
+          id: id(),
+          app_id: d.app_id,
+          app_name: null,
+          app_slug: null,
+          database_id: d.id,
+          kind: 'db',
+          target: d.name,
+          file: `20261013-030000-db-${d.name}.sql.gz`,
+          size_bytes: 4096,
+          status: 'success',
+          error: null,
+          trigger_by: 'manual',
+          created_at: now(),
+          finished_at: now(),
+        })
         return json(route, 202, { backup_ids: [] })
       }
       if (sub === '/users' && method === 'POST') {
-        if (!/^[a-z][a-z0-9_]{1,31}$/.test(body.username || '')) return json(route, 400, { error: 'bad_request', message: '사용자 이름은 소문자로 시작하는 소문자·숫자·_ 2~32자여야 합니다' })
+        if (!/^[a-z][a-z0-9_]{1,31}$/.test(body.username || ''))
+          return json(route, 400, { error: 'bad_request', message: '사용자 이름은 소문자로 시작하는 소문자·숫자·_ 2~32자여야 합니다' })
         if ([...db.dbs.map((x) => x.username), ...db.dbUsers.map((u) => u.username)].includes(body.username))
           return json(route, 409, { error: 'conflict', message: `사용자 이름 ${body.username} 은(는) 이미 있습니다` })
         const u = { id: id(), database_id: d.id, username: body.username, privileges: body.privileges || 'all', password: body.password || pw(), created_at: now() }
@@ -356,7 +537,16 @@ export function createMockBackend({ needsSetup = false } = {}) {
     if (path === '/redis-users' && method === 'POST') {
       if (!/^[a-z][a-z0-9_-]{2,31}$/.test(body.username || '') || body.username === 'default')
         return json(route, 400, { error: 'bad_request', message: 'Redis 계정 이름은 소문자로 시작하는 소문자·숫자·_- 3~32자여야 합니다' })
-      const u = { id: id(), username: body.username, password: body.password || pw(), key_pattern: body.key_pattern || `${body.username}:*`, readonly: !!body.readonly, db_index: body.db_index ?? 0, note: body.note || null, created_at: now() }
+      const u = {
+        id: id(),
+        username: body.username,
+        password: body.password || pw(),
+        key_pattern: body.key_pattern || `${body.username}:*`,
+        readonly: !!body.readonly,
+        db_index: body.db_index ?? 0,
+        note: body.note || null,
+        created_at: now(),
+      }
       db.redisUsers.push(u)
       return json(route, 201, { id: u.id, username: u.username, password: u.password, url: redisUrl(u) })
     }
@@ -379,7 +569,8 @@ export function createMockBackend({ needsSetup = false } = {}) {
     const pad = (n) => String(n).padStart(2, '0')
     const jobView = (j) => ({
       ...j,
-      target_name: j.target === 'app' ? db.apps.find((a) => a.id === j.app_id)?.name : j.target === 'database' ? db.dbs.find((d) => d.id === j.database_id)?.name : '모든 앱·데이터베이스',
+      target_name:
+        j.target === 'app' ? db.apps.find((a) => a.id === j.app_id)?.name : j.target === 'database' ? db.dbs.find((d) => d.id === j.database_id)?.name : '모든 앱·데이터베이스',
       next_run_at: j.enabled ? `2026-10-17T${pad(j.hour)}:${pad(j.minute)}:00Z` : null,
       last_status: db.backups.find((b) => b.job_id === j.id)?.status ?? null,
       backup_count: db.backups.filter((b) => b.job_id === j.id).length,
@@ -407,7 +598,23 @@ export function createMockBackend({ needsSetup = false } = {}) {
       if (m[2]) {
         const apps = j.target === 'app' ? db.apps.filter((a) => a.id === j.app_id) : db.apps
         for (const a of apps)
-          db.backups.unshift({ id: id(), app_id: a.id, app_name: a.name, app_slug: a.slug, job_id: j.id, job_name: j.name, kind: 'data', target: 'data', file: '20261013-040000-data.tar.gz', size_bytes: 2048, status: 'success', error: null, trigger_by: 'manual', created_at: now(), finished_at: now() })
+          db.backups.unshift({
+            id: id(),
+            app_id: a.id,
+            app_name: a.name,
+            app_slug: a.slug,
+            job_id: j.id,
+            job_name: j.name,
+            kind: 'data',
+            target: 'data',
+            file: '20261013-040000-data.tar.gz',
+            size_bytes: 2048,
+            status: 'success',
+            error: null,
+            trigger_by: 'manual',
+            created_at: now(),
+            finished_at: now(),
+          })
         j.last_run_at = now()
         return json(route, 202, { started: apps.length })
       }

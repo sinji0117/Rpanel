@@ -95,7 +95,7 @@ pub fn user_from_domain(domain: &str) -> String {
         .to_string()
 }
 
-fn system_users() -> Vec<String> {
+pub fn system_users() -> Vec<String> {
     std::fs::read_to_string("/etc/passwd")
         .unwrap_or_default()
         .lines()
@@ -103,15 +103,16 @@ fn system_users() -> Vec<String> {
         .collect()
 }
 
-async fn pick_site_user(
+pub async fn pick_site_user(
     state: &AppState,
     wanted: Option<String>,
     domain: &str,
 ) -> AppResult<String> {
-    let taken_db: Vec<String> =
-        sqlx::query_scalar("SELECT site_user FROM apps WHERE site_user IS NOT NULL")
-            .fetch_all(&state.db)
-            .await?;
+    let taken_db: Vec<String> = sqlx::query_scalar(
+        "SELECT site_user FROM apps WHERE site_user IS NOT NULL UNION SELECT username FROM site_accounts",
+    )
+    .fetch_all(&state.db)
+    .await?;
     let sys = system_users();
     let taken = |u: &str| taken_db.iter().any(|t| t == u) || sys.iter().any(|t| t == u);
     if let Some(u) = wanted {
@@ -320,6 +321,11 @@ pub async fn create(
                 sqlx::query("DELETE FROM apps WHERE id = ?").bind(id).execute(&state.db).await?;
                 return Err(AppError::BadRequest(format!("{e:#}")));
             }
+            sqlx::query("INSERT INTO site_accounts (app_id, username, is_primary) VALUES (?, ?, 1)")
+                .bind(id)
+                .bind(u)
+                .execute(&state.db)
+                .await?;
         }
         // 비밀번호 (없으면 생성해서 한 번만 보여줌)
         let mut shown = None;

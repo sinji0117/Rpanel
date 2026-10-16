@@ -215,6 +215,16 @@ if [[ "$DB_NAME" =~ ^[a-zA-Z0-9_]+$ ]]; then
 fi
 
 say "사이트 계정·파일 삭제"
+if [[ -f /etc/rpanel/site-accounts ]]; then
+  while read -r _slug extra; do
+    [[ "$extra" =~ ^[a-z][a-z0-9-]{2,31}$ ]] || continue
+    id -nG "$extra" 2>/dev/null | tr ' ' '\n' | grep -qx rpanel-sites || continue
+    pkill -u "$extra" 2>/dev/null || true
+    userdel --remove "$extra" >/dev/null 2>&1 || userdel "$extra" >/dev/null 2>&1 || true
+    rm -rf --one-file-system "/home/$extra"
+    info "추가 계정 $extra 삭제"
+  done < /etc/rpanel/site-accounts
+fi
 for user in "${SITE_USERS[@]}"; do
   [[ "$user" =~ ^[a-z][a-z0-9-]{2,31}$ ]] || continue
   # rpanel 이 만든 계정(rpanel-sites 그룹)만 지움
@@ -239,6 +249,12 @@ rm -rf --one-file-system /var/lib/rpanel /etc/rpanel /opt/rpanel-src
 userdel rpanel >/dev/null 2>&1 || true
 userdel rpanel-app >/dev/null 2>&1 || true
 groupdel rpanel-sites >/dev/null 2>&1 || true
+groupdel rpanel-sftp >/dev/null 2>&1 || true
+groupdel rpanel-locked >/dev/null 2>&1 || true
+if [[ -f /etc/ssh/sshd_config.d/49-rpanel-access.conf ]]; then
+  rm -f /etc/ssh/sshd_config.d/49-rpanel-access.conf
+  systemctl reload ssh 2>/dev/null || systemctl reload sshd 2>/dev/null || true
+fi
 info "/var/lib/rpanel · /etc/rpanel · 패널 계정 삭제"
 
 cat <<EOF

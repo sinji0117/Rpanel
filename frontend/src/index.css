@@ -20,9 +20,44 @@
   --color-fail: #f87171;
 }
 
+/* 낮(라이트) 테마 — 같은 이름의 색을 밝은 값으로 바꿔서 모든 화면에 적용 */
+:root[data-theme="light"] {
+  --color-ink-950: #f4f6f9;
+  --color-ink-900: #ffffff;
+  --color-ink-850: #eef1f5;
+  --color-ink-800: #e3e7ed;
+  --color-ink-700: #d2d8e1;
+  --color-ink-600: #a6b0be;
+  --color-ink-400: #5a6474;
+  --color-ink-300: #3b4453;
+  --color-ink-100: #111827;
+
+  --color-signal: #059669;
+  --color-signal-dim: #05966924;
+  --color-warn: #b45309;
+  --color-fail: #dc2626;
+}
+:root[data-theme="light"] .text-red-200,
+:root[data-theme="light"] .text-red-300 {
+  color: #b91c1c;
+}
+:root[data-theme="light"] .text-amber-200 {
+  color: #92400e;
+}
+:root[data-theme="light"] .text-sky-200,
+:root[data-theme="light"] .text-sky-300 {
+  color: #0369a1;
+}
+:root[data-theme="light"] .text-emerald-200 {
+  color: #047857;
+}
+
 @layer base {
   html {
     color-scheme: dark;
+  }
+  html[data-theme="light"] {
+    color-scheme: light;
   }
   body {
     @apply bg-ink-950 text-ink-100 font-sans antialiased;
@@ -53,7 +88,7 @@
 }
 
 @utility btn-primary {
-  @apply btn bg-signal text-ink-950 hover:bg-emerald-300;
+  @apply btn bg-signal text-ink-950 hover:brightness-110;
 }
 
 @utility btn-ghost {

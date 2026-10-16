@@ -190,6 +190,10 @@ pub async fn login(
         ));
     }
     session::reset_rate_limit(&state, &acct_bucket).await?;
+    let _ = sqlx::query("UPDATE users SET last_login_at = CURRENT_TIMESTAMP(3) WHERE id = ?")
+        .bind(user.id)
+        .execute(&state.db)
+        .await;
     audit::log(&state, Some(user.id), "auth.login", &email, &ip).await;
     issue_tokens(&state, jar, user).await
 }

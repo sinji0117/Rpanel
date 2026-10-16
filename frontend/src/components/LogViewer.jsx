@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { t } from '../i18n'
 
 export function lineClass(text) {
   if (text.startsWith('▶')) return 'text-sky-300 font-semibold mt-2'
@@ -11,7 +12,7 @@ export function lineClass(text) {
 }
 
 /** lines: [{seq, text}] */
-export default function LogViewer({ lines, height = 'h-[60vh]', emptyText = '로그가 없습니다' }) {
+export default function LogViewer({ lines, height = 'h-[60vh]', emptyText = t('로그가 없습니다') }) {
   const ref = useRef(null)
   const [follow, setFollow] = useState(true)
 
@@ -48,7 +49,7 @@ export default function LogViewer({ lines, height = 'h-[60vh]', emptyText = '로
             if (ref.current) ref.current.scrollTop = ref.current.scrollHeight
           }}
         >
-          ↓ 최신으로
+          {t('↓ 최신으로')}
         </button>
       )}
     </div>

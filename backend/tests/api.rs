@@ -1003,6 +1003,118 @@ async fn full_flow() {
         )
         .await;
     assert_eq!(r.status, StatusCode::BAD_REQUEST);
+    // ── 사이트 계정 (SSH · SFTP) ──
+    let r = ctx.get(&format!("/api/apps/{html_id}/accounts"), &t).await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+    assert_eq!(r.body["accounts"].as_array().unwrap().len(), 1);
+    assert_eq!(r.body["accounts"][0]["username"], "static-site");
+    assert_eq!(r.body["accounts"][0]["is_primary"], true);
+    let primary_id = r.body["accounts"][0]["id"].as_u64().unwrap();
+    let r = ctx
+        .post(
+            &format!("/api/apps/{html_id}/accounts"),
+            &t,
+            json!({"username":"shop-dev","access":"ssh","note":"외주 개발자"}),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{:?}", r.body);
+    assert_eq!(r.body["password"].as_str().unwrap().len(), 20, "generated");
+    let dev_id = r.body["account"]["id"].as_u64().unwrap();
+    let key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGqci ci@build";
+    let r = ctx
+        .post(
+            &format!("/api/apps/{html_id}/accounts"),
+            &t,
+            json!({"username":"shop-ci","ssh_keys": key}),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{:?}", r.body);
+    assert!(r.body["password"].is_null(), "key only");
+    assert_eq!(r.body["account"]["access"], "sftp", "default sftp");
+    let ci_id = r.body["account"]["id"].as_u64().unwrap();
+    for (body, code) in [
+        (json!({"username":"static-site"}), StatusCode::CONFLICT),
+        (json!({"username":"shop-dev"}), StatusCode::CONFLICT),
+        (json!({"username":"root"}), StatusCode::BAD_REQUEST),
+        (
+            json!({"username":"x2-y","access":"ftp"}),
+            StatusCode::BAD_REQUEST,
+        ),
+        (
+            json!({"username":"x3-y","ssh_keys":"command=\"x\" ssh-ed25519 AAAA"}),
+            StatusCode::BAD_REQUEST,
+        ),
+        (
+            json!({"username":"x4-y","password":"has:colon-1234"}),
+            StatusCode::BAD_REQUEST,
+        ),
+    ] {
+        assert_eq!(
+            ctx.post(&format!("/api/apps/{html_id}/accounts"), &t, body.clone())
+                .await
+                .status,
+            code,
+            "{body}"
+        );
+    }
+    let r = ctx
+        .req(
+            Method::PUT,
+            &format!("/api/apps/{html_id}/accounts/{dev_id}"),
+            Some(&t),
+            None,
+            Some(json!({"enabled": false, "access": "sftp", "ssh_keys": key, "note": "잠시 중지"})),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+    assert_eq!(r.body["enabled"], false);
+    assert_eq!(r.body["access"], "sftp");
+    let r = ctx
+        .post(
+            &format!("/api/apps/{html_id}/accounts/{primary_id}/password"),
+            &t,
+            json!({"password":"Primary_pass_1"}),
+        )
+        .await;
+    assert_eq!(r.body["password"], "Primary_pass_1");
+    let r = ctx.get(&format!("/api/apps/{html_id}/accounts"), &t).await;
+    assert_eq!(r.body["accounts"].as_array().unwrap().len(), 3);
+    assert_eq!(r.body["accounts"][1]["key_count"], 1);
+    assert_eq!(
+        ctx.req(
+            Method::DELETE,
+            &format!("/api/apps/{html_id}/accounts/{primary_id}"),
+            Some(&t),
+            None,
+            None
+        )
+        .await
+        .status,
+        StatusCode::BAD_REQUEST,
+        "primary cannot be deleted"
+    );
+    for aid in [dev_id, ci_id] {
+        assert_eq!(
+            ctx.req(
+                Method::DELETE,
+                &format!("/api/apps/{html_id}/accounts/{aid}"),
+                Some(&t),
+                None,
+                None
+            )
+            .await
+            .status,
+            StatusCode::NO_CONTENT
+        );
+    }
+    assert_eq!(
+        ctx.get(&format!("/api/apps/{proxy_id}/accounts"), &t)
+            .await
+            .status,
+        StatusCode::BAD_REQUEST,
+        "proxy site has no accounts"
+    );
+
     // Python 사이트: 기본 시작 명령 python app.py, 포트 배정, 바로 적용
     let r = ctx
         .post(
@@ -1517,6 +1629,103 @@ async fn full_flow() {
         .await
         .status,
         StatusCode::NO_CONTENT
+    );
+
+    // ── 관리자 관리 ──
+    let r = ctx.get("/api/users", &t).await;
+    assert_eq!(r.body["users"].as_array().unwrap().len(), 1);
+    let me = r.body["me"].as_u64().unwrap();
+    assert!(r.body["users"][0]["last_login_at"].is_string());
+    assert!(r.body["users"][0].get("password_hash").is_none());
+    for (body, code) in [
+        (
+            json!({"email":"bad","password":"long-enough-1"}),
+            StatusCode::BAD_REQUEST,
+        ),
+        (
+            json!({"email":"ops@example.com","password":"short"}),
+            StatusCode::BAD_REQUEST,
+        ),
+        (
+            json!({"email":"Admin@Example.com","password":"long-enough-1"}),
+            StatusCode::CONFLICT,
+        ),
+    ] {
+        assert_eq!(
+            ctx.post("/api/users", &t, body.clone()).await.status,
+            code,
+            "{body}"
+        );
+    }
+    let r = ctx
+        .post(
+            "/api/users",
+            &t,
+            json!({"email":"Ops@Example.com","password":"ops-password-1"}),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{:?}", r.body);
+    assert_eq!(r.body["email"], "ops@example.com");
+    let ops = r.body["id"].as_u64().unwrap();
+    let r = ctx
+        .req(
+            Method::POST,
+            "/api/auth/login",
+            None,
+            None,
+            Some(json!({"email":"ops@example.com","password":"ops-password-1"})),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK);
+    let t_ops = r.body["access_token"].as_str().unwrap().to_string();
+    assert_eq!(ctx.get("/api/auth/me", &t_ops).await.status, StatusCode::OK);
+    // 비밀번호를 바꾸면 그 관리자의 세션이 끊김
+    let r = ctx
+        .req(
+            Method::PUT,
+            &format!("/api/users/{ops}"),
+            Some(&t),
+            None,
+            Some(json!({"email":"ops2@example.com","password":"ops-password-2"})),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+    assert_eq!(r.body["email"], "ops2@example.com");
+    assert_eq!(
+        ctx.get("/api/auth/me", &t_ops).await.status,
+        StatusCode::UNAUTHORIZED
+    );
+    assert_eq!(
+        ctx.req(
+            Method::DELETE,
+            &format!("/api/users/{me}"),
+            Some(&t),
+            None,
+            None
+        )
+        .await
+        .status,
+        StatusCode::BAD_REQUEST,
+        "cannot delete self"
+    );
+    assert_eq!(
+        ctx.req(
+            Method::DELETE,
+            &format!("/api/users/{ops}"),
+            Some(&t),
+            None,
+            None
+        )
+        .await
+        .status,
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(
+        ctx.get("/api/users", &t).await.body["users"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
     );
 
     // ── 독립 DB · 계정 정리 ──

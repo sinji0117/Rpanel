@@ -87,9 +87,27 @@ test('환경변수 .env 붙여넣기·저장 + Deploy key·Webhook', async ({ pa
   const backend = createMockBackend()
   backend.db.projects.push({ id: 1, name: 'P', description: '', created_at: '', updated_at: '' })
   backend.db.apps.push({
-    id: 2, project_id: 1, name: 'Front', slug: 'front', kind: 'static', git_url: 'https://github.com/a/b.git', git_branch: 'main',
-    root_dir: '', build_cmd: null, start_cmd: null, binary_name: null, output_dir: 'dist', port: null, api_proxy_port: 8100,
-    domains: 'beripick.com www.beripick.com', health_path: '/', status: 'idle', current_commit: null, current_release: null, source: 'git', ssl_mode: 'none',
+    id: 2,
+    project_id: 1,
+    name: 'Front',
+    slug: 'front',
+    kind: 'static',
+    git_url: 'https://github.com/a/b.git',
+    git_branch: 'main',
+    root_dir: '',
+    build_cmd: null,
+    start_cmd: null,
+    binary_name: null,
+    output_dir: 'dist',
+    port: null,
+    api_proxy_port: 8100,
+    domains: 'beripick.com www.beripick.com',
+    health_path: '/',
+    status: 'idle',
+    current_commit: null,
+    current_release: null,
+    source: 'git',
+    ssl_mode: 'none',
   })
   backend.db.env[2] = []
   backend.db.seq = 10
@@ -118,10 +136,30 @@ function seededBackend() {
   const backend = createMockBackend()
   backend.db.projects.push({ id: 1, name: 'Beripick', description: '', created_at: '', updated_at: '' })
   backend.db.apps.push({
-    id: 2, project_id: 1, name: 'Beripick API', slug: 'beripick-api', kind: 'rust', git_url: 'ssh://git@100.100.199.123:2222/b/api.git',
-    git_branch: 'main', root_dir: '', build_cmd: null, start_cmd: null, binary_name: 'beripick-api', output_dir: 'dist', port: 8100,
-    api_proxy_port: null, domains: 'api.beripick.com www.api.beripick.com', health_path: '/api/health', status: 'running',
-    current_commit: 'abc12345', current_release: 9, redis_db: null, backup_schedule: 'off', backup_keep: 7, source: 'git', ssl_mode: 'none',
+    id: 2,
+    project_id: 1,
+    name: 'Beripick API',
+    slug: 'beripick-api',
+    kind: 'rust',
+    git_url: 'ssh://git@100.100.199.123:2222/b/api.git',
+    git_branch: 'main',
+    root_dir: '',
+    build_cmd: null,
+    start_cmd: null,
+    binary_name: 'beripick-api',
+    output_dir: 'dist',
+    port: 8100,
+    api_proxy_port: null,
+    domains: 'api.beripick.com www.api.beripick.com',
+    health_path: '/api/health',
+    status: 'running',
+    current_commit: 'abc12345',
+    current_release: 9,
+    redis_db: null,
+    backup_schedule: 'off',
+    backup_keep: 7,
+    source: 'git',
+    ssl_mode: 'none',
   })
   backend.db.env[2] = [{ key: 'RUST_LOG', value: 'info' }]
   backend.db.seq = 20
@@ -148,7 +186,7 @@ test('데이터베이스·Redis 생성 → 환경변수에 자동 주입 표시 
   await expect(page.getByText('MariaDB · beripick_api')).toBeVisible()
   await expect(page.getByText('Redis · DB 4')).toBeVisible()
 
-  await page.getByRole('link', { name: '데이터베이스' }).click()
+  await page.getByRole('link', { name: 'MariaDB' }).click()
   await expect(page.getByRole('cell', { name: 'beripick_api' }).first()).toBeVisible()
 })
 
@@ -197,7 +235,6 @@ test('백업 → 목록, 크론 등록(잘못된 일정 거부), 사이트·Ngin
   await expect(page.getByRole('cell', { name: 'Beripick API' }).first()).toBeVisible()
 })
 
-
 test('Rust 사이트 만들기 → 접속 정보 → 실행 파일 업로드·편집 → SSL 인증서', async ({ page }) => {
   const backend = createMockBackend()
   backend.db.loggedIn = true
@@ -208,6 +245,8 @@ test('Rust 사이트 만들기 → 접속 정보 → 실행 파일 업로드·�
   await expect(dialog.getByRole('radio', { name: /Rust/ })).toHaveAttribute('aria-checked', 'true')
   await expect(dialog.getByRole('radio', { name: /PHP/ })).toHaveCount(0)
   await dialog.getByLabel('도메인').fill('Shop.example.com www.shop.example.com')
+  await expect(dialog.getByTestId('site-summary')).toContainText('shop')
+  await dialog.getByText('고급 설정 (선택)').click()
   await expect(dialog.getByLabel('사이트 유저')).toHaveValue('shop')
   await expect(dialog.getByLabel('시작 명령')).toHaveValue('./app')
   await expect(dialog.getByRole('radio', { name: /Node/ })).toHaveCount(0)
@@ -247,12 +286,33 @@ test('Rust 사이트 만들기 → 접속 정보 → 실행 파일 업로드·�
   await expect(page.getByText('직접 올린 인증서')).toBeVisible()
   await expect(page.getByText('Jan 14 00:00:00 2027 GMT')).toBeVisible()
 
-  // SSH · SFTP
-  await page.getByRole('tab', { name: 'SSH · SFTP' }).click()
-  await expect(page.getByText('sftp shop@')).toBeVisible()
-  await page.getByLabel('새 비밀번호 (10자 이상)').fill('new-site-password')
-  await page.getByRole('button', { name: '비밀번호 변경' }).click()
-  await expect(page.getByText('비밀번호를 바꿨습니다')).toBeVisible()
+  // 사이트 계정: 기본 계정 + 추가 계정 만들기 → 잠금 → 비밀번호 → 삭제
+  page.on('dialog', (d) => d.accept(d.type() === 'prompt' ? '' : undefined))
+  await page.getByRole('tab', { name: '사이트 계정' }).click()
+  const accounts = page.getByRole('table', { name: '사이트 계정 목록' })
+  await expect(accounts.getByText('shop', { exact: true })).toBeVisible()
+  await expect(accounts.getByRole('button', { name: 'shop 계정 삭제' })).toHaveCount(0)
+  await page.getByRole('button', { name: '+ 계정 추가' }).click()
+  const acc = page.getByRole('dialog', { name: '사이트 계정 추가' })
+  await acc.getByLabel('계정 이름').fill('shop-dev')
+  await acc.getByLabel('메모 (선택)').fill('외주 디자이너')
+  await acc.getByRole('button', { name: '계정 만들기' }).click()
+  await expect(page.getByTestId('account-password')).toHaveText('AutoGen3rated-pw-01')
+  await page.getByRole('button', { name: '확인' }).click()
+  const row = accounts.getByRole('row', { name: /shop-dev/ })
+  await expect(row.getByText('SFTP 전용')).toBeVisible()
+  await row.getByRole('button', { name: '잠금', exact: true }).click()
+  await expect(row.getByRole('button', { name: '잠금 해제' })).toBeVisible()
+  await row.getByRole('button', { name: '수정' }).click()
+  const ed = page.getByRole('dialog', { name: '계정 shop-dev 수정' })
+  await ed.getByRole('radio', { name: /SSH \+ SFTP/ }).click()
+  await ed.getByRole('button', { name: '저장' }).click()
+  await expect(row.getByText('SSH + SFTP')).toBeVisible()
+  await row.getByRole('button', { name: '비밀번호' }).click()
+  await expect(page.getByTestId('account-password')).toHaveText('AutoGen3rated-pw-02')
+  await page.getByRole('button', { name: '확인' }).click()
+  await accounts.getByRole('button', { name: 'shop-dev 계정 삭제' }).click()
+  await expect(accounts.getByText('shop-dev')).toHaveCount(0)
 
   // 설정: 시작 명령
   await page.getByRole('tab', { name: '설정' }).click()
@@ -263,7 +323,7 @@ test('DB·Redis 계정 추가·삭제, 백업 예약 추가·수정·실행·삭
   const backend = seededBackend()
   await backend.install(page)
   page.on('dialog', (d) => d.accept(d.type() === 'prompt' ? 'shop' : undefined))
-  await page.goto('/databases')
+  await page.goto('/mariadb')
 
   // 앱에 연결하지 않은 DB 만들기 → 접속 정보 창
   await page.getByRole('button', { name: '+ 데이터베이스' }).first().click()
@@ -306,7 +366,8 @@ test('DB·Redis 계정 추가·삭제, 백업 예약 추가·수정·실행·삭
   await card.getByRole('button', { name: 'shop_ro 계정 삭제' }).click()
   await expect(card.getByText('shop_ro')).toHaveCount(0)
 
-  // Redis 계정: 만들기 → 수정 → 삭제
+  // Redis 계정: 만들기 → 수정 → 삭제 (Redis 메뉴)
+  await page.getByRole('link', { name: 'Redis' }).click()
   await page.getByRole('button', { name: '+ Redis 계정' }).click()
   const rdlg = page.getByRole('dialog', { name: 'Redis 계정 만들기' })
   await rdlg.getByLabel('계정 이름').fill('sessions')
@@ -362,4 +423,65 @@ test('DB·Redis 계정 추가·삭제, 백업 예약 추가·수정·실행·삭
   await expect(page.getByText('백업 예약이 없습니다.', { exact: false })).toBeVisible()
   await page.reload()
   await expect(page.getByText('예약 · 주간 전체 백업')).toHaveCount(0)
+})
+
+test('관리자 추가·수정·삭제', async ({ page }) => {
+  const backend = createMockBackend()
+  backend.db.loggedIn = true
+  await backend.install(page)
+  page.on('dialog', (d) => d.accept())
+  await page.goto('/')
+  await page.getByRole('link', { name: '관리자' }).click()
+  const list = page.getByRole('table', { name: '관리자 목록' })
+  await expect(list.getByText('admin@example.com')).toBeVisible()
+  await expect(list.getByRole('button', { name: 'admin@example.com 삭제' })).toHaveCount(0)
+
+  await page.getByRole('button', { name: '+ 관리자 추가' }).click()
+  const dlg = page.getByRole('dialog', { name: '관리자 추가' })
+  await dlg.getByLabel('이메일 (로그인 아이디)').fill('ops@example.com')
+  await dlg.getByRole('button', { name: '생성' }).click()
+  await expect(dlg.getByLabel('비밀번호')).toHaveValue(/.{16}/)
+  await dlg.getByRole('button', { name: '추가' }).click()
+  await expect(page.getByText('관리자 ops@example.com 을(를) 추가했습니다')).toBeVisible()
+
+  await list
+    .getByRole('row', { name: /ops@example.com/ })
+    .getByRole('button', { name: '수정' })
+    .click()
+  const ed = page.getByRole('dialog', { name: '관리자 수정' })
+  await ed.getByLabel('이메일 (로그인 아이디)').fill('devops@example.com')
+  await ed.getByRole('button', { name: '저장' }).click()
+  await expect(list.getByText('devops@example.com')).toBeVisible()
+
+  await list.getByRole('button', { name: 'devops@example.com 삭제' }).click()
+  await expect(list.getByText('devops@example.com')).toHaveCount(0)
+
+  // 설정에는 시스템 정보가 없고 대시보드에 있음
+  await page.getByRole('link', { name: '설정' }).click()
+  await expect(page.getByRole('heading', { name: '내 비밀번호 변경' })).toBeVisible()
+  await page.getByRole('link', { name: '대시보드' }).click()
+  await expect(page.getByText('Intel Xeon E5-2690', { exact: false })).toBeVisible()
+})
+
+test('테마 낮·밤 전환과 영어 전환', async ({ page }) => {
+  const backend = createMockBackend()
+  backend.db.loggedIn = true
+  await backend.install(page)
+  await page.goto('/settings')
+  const html = page.locator('html')
+  await page.getByRole('radiogroup', { name: '테마' }).first().getByRole('radio', { name: '낮' }).click()
+  await expect(html).toHaveAttribute('data-theme', 'light')
+  await page.getByRole('radiogroup', { name: '테마' }).first().getByRole('radio', { name: '밤' }).click()
+  await expect(html).toHaveAttribute('data-theme', 'dark')
+
+  await page.getByRole('combobox', { name: '언어' }).selectOption('en')
+  await expect(page.getByRole('link', { name: 'Dashboard' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible()
+  await expect(html).toHaveAttribute('lang', 'en')
+  // 새로 고쳐도 유지
+  await page.reload()
+  await expect(page.getByRole('link', { name: 'Sites' })).toBeVisible()
+  await expect(html).toHaveAttribute('data-theme', 'dark')
+  await page.getByRole('combobox', { name: 'Language' }).selectOption('ko')
+  await expect(page.getByRole('link', { name: '사이트' })).toBeVisible()
 })

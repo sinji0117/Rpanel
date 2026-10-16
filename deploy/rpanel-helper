@@ -661,8 +661,142 @@ site_password() {
   echo "password updated for $user"
 }
 
+# ───────────────────────── 사이트 계정 (SSH · SFTP) ─────────────────────────
+# 기본 계정 = 사이트 유저. 추가 계정은 /etc/rpanel/site-accounts ("<slug> <user>") 에 등록되며
+#   - 주 그룹이 사이트 그룹이고, ACL 로 사이트 파일(htdocs·logs)에 읽기·쓰기 권한을 받습니다.
+#   - 홈은 /home/<계정> (0700), 안에 htdocs → 사이트 htdocs 링크.
+# 접속 방식: ssh (셸 /bin/bash) | sftp (셸 nologin + rpanel-sftp 그룹 → sshd ForceCommand internal-sftp)
+# 잠금: rpanel-locked 그룹 (sshd DenyGroups) — 비밀번호·키 모두 거부, 사이트 서비스는 그대로 동작
+ACCOUNTS_REG="${RPANEL_TEST_ACCOUNTS_REG:-/etc/rpanel/site-accounts}"
+
+extra_registered() { [[ -f $ACCOUNTS_REG ]] && grep -qx "$1 $2" "$ACCOUNTS_REG"; }
+
+# 이 사이트에 속한 계정인지 (기본 또는 추가) — 아니면 중단
+account_of_site() {
+  local slug="$1" user="$2"
+  valid_site_user "$user"
+  [[ "$(site_user_of "$slug")" == "$user" ]] || extra_registered "$slug" "$user" || die "이 사이트의 계정이 아닙니다: $user"
+}
+
+ensure_access_groups() {
+  getent group rpanel-sftp >/dev/null || groupadd --system rpanel-sftp
+  getent group rpanel-locked >/dev/null || groupadd --system rpanel-locked
+}
+
+account_mode() { # <user> <ssh|sftp> <on|off>
+  local user="$1" mode="$2" state="$3"
+  [[ "$mode" == ssh || "$mode" == sftp ]] || die "접속 방식은 ssh 또는 sftp"
+  [[ "$state" == on || "$state" == off ]] || die "상태는 on 또는 off"
+  ensure_access_groups
+  if [[ "$mode" == sftp ]]; then
+    usermod -s /usr/sbin/nologin "$user" >/dev/null 2>&1 || true; usermod -aG rpanel-sftp "$user"
+  else
+    usermod -s /bin/bash "$user" >/dev/null 2>&1 || true; gpasswd -d "$user" rpanel-sftp >/dev/null 2>&1 || true
+  fi
+  if [[ "$state" == off ]]; then
+    usermod -aG rpanel-locked "$user"
+    pkill -u "$user" -x sshd 2>/dev/null || true   # 접속 중인 세션 종료 (사이트 서비스는 sshd 가 아니므로 그대로)
+  else
+    gpasswd -d "$user" rpanel-locked >/dev/null 2>&1 || true
+  fi
+}
+
+site_account_create() {
+  local slug="$1" user="$2" mode="$3" suser sroot shome pw=""
+  valid_site_user "$user"
+  suser="$(site_user_of "$slug")"; [[ -n "$suser" ]] || die "사이트 유저가 없는 앱입니다: $slug"
+  id "$user" >/dev/null 2>&1 && die "시스템에 이미 있는 사용자입니다: $user"
+  [[ ! -e "/home/$user" ]] || die "/home/$user 이(가) 이미 있습니다"
+  IFS= read -r pw || true
+  if [[ -n "$pw" ]]; then
+    [[ ${#pw} -ge 10 && ${#pw} -le 128 && "$pw" != *:* ]] || die "비밀번호는 10~128자, ':' 없이"
+  fi
+  shome="/home/$suser"; sroot="$(site_root_of "$slug")"
+  command -v setfacl >/dev/null || die "acl 패키지가 필요합니다 (apt install acl)"
+  ensure_access_groups
+  useradd --create-home --home-dir "/home/$user" --shell /bin/bash --gid "$suser" --groups "$SITES_GROUP" "$user"
+  chmod 0700 "/home/$user"
+  install -d -o "$user" -g "$suser" -m 0700 "/home/$user/.ssh"
+  install -m 0600 -o "$user" -g "$suser" /dev/null "/home/$user/.ssh/authorized_keys"
+  ln -sfn "$shome/htdocs" "/home/$user/htdocs"
+  # 새로 만드는 파일을 그룹(사이트) 쓰기 가능으로 → 사이트 유저도 수정 가능
+  printf '\n# rpanel: 사이트 파일을 사이트 유저와 함께 쓰도록\numask 002\n' | tee -a "/home/$user/.profile" "/home/$user/.bashrc" >/dev/null
+  # 사이트 파일 읽기·쓰기 (기존 파일 + 앞으로 만들 파일). 새 파일은 사이트 유저도 계속 쓸 수 있게.
+  for d in "$shome/htdocs" "$shome/logs"; do
+    [[ -d "$d" ]] || continue
+    setfacl -R -m "u:$user:rwX" "$d"
+    find "$d" -type d -exec setfacl -m "d:u:$user:rwX,d:u:$suser:rwX" {} +
+  done
+  [[ -n "$pw" ]] && printf '%s:%s\n' "$user" "$pw" | chpasswd
+  account_mode "$user" "$mode" on
+  touch "$ACCOUNTS_REG"; chmod 0644 "$ACCOUNTS_REG"
+  echo "$slug $user" >> "$ACCOUNTS_REG"
+  echo "created site account $user ($mode) → $sroot"
+}
+
+site_account_update() { # <slug> <user> <ssh|sftp> <on|off>
+  account_of_site "$1" "$2"
+  account_mode "$2" "$3" "$4"
+  echo "updated $2 ($3, $4)"
+}
+
+site_account_password() {
+  local slug="$1" user="$2" pw
+  account_of_site "$slug" "$user"
+  IFS= read -r pw || true
+  [[ ${#pw} -ge 10 && ${#pw} -le 128 ]] || die "비밀번호는 10~128자여야 합니다"
+  [[ "$pw" != *:* ]] || die "비밀번호에 ':' 를 쓸 수 없습니다"
+  printf '%s:%s\n' "$user" "$pw" | chpasswd
+  echo "password updated for $user"
+}
+
+# SSH 공개키 목록 (stdin, 한 줄에 하나). 키 형식만 허용 — 옵션(command= 등)은 거부
+site_account_keys() {
+  local slug="$1" user="$2" line n=0 tmp
+  account_of_site "$slug" "$user"
+  tmp="$(mktemp)"
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line="${line%$'\r'}"
+    [[ -z "${line// }" || "$line" == \#* ]] && continue
+    [[ "$line" =~ ^(ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp(256|384|521)|sk-ssh-ed25519@openssh\.com|sk-ecdsa-sha2-nistp256@openssh\.com)\ [A-Za-z0-9+/]+={0,3}(\ [^[:cntrl:]]{0,200})?$ ]] \
+      || { rm -f "$tmp"; die "SSH 공개키 형식이 아닙니다: ${line:0:40}…"; }
+    echo "$line" >> "$tmp"; n=$((n + 1))
+    (( n <= 50 )) || { rm -f "$tmp"; die "키는 50개까지입니다"; }
+  done
+  install -d -o "$user" -m 0700 "/home/$user/.ssh"
+  install -m 0600 -o "$user" "$tmp" "/home/$user/.ssh/authorized_keys"
+  rm -f "$tmp"
+  echo "$n keys for $user"
+}
+
+site_account_delete() {
+  local slug="$1" user="$2" suser
+  valid_site_user "$user"
+  extra_registered "$slug" "$user" || die "추가 계정이 아닙니다 (기본 계정은 사이트를 지울 때 함께 지워집니다): $user"
+  suser="$(site_user_of "$slug")"
+  pkill -u "$user" 2>/dev/null || true
+  sleep 0.3
+  for d in "/home/$suser/htdocs" "/home/$suser/logs"; do
+    [[ -n "$suser" && -d "$d" ]] || continue
+    setfacl -R -x "u:$user" "$d" 2>/dev/null || true
+    find "$d" -type d -exec setfacl -x "d:u:$user" {} + 2>/dev/null || true
+  done
+  userdel --remove "$user" 2>/dev/null || userdel "$user"
+  rm -rf --one-file-system "/home/$user"
+  grep -vx "$slug $user" "$ACCOUNTS_REG" > "$ACCOUNTS_REG.tmp" || true
+  mv "$ACCOUNTS_REG.tmp" "$ACCOUNTS_REG"; chmod 0644 "$ACCOUNTS_REG"
+  echo "deleted site account $user"
+}
+
 site_delete() {
-  local slug="$1" user
+  local slug="$1" user extra
+  # 추가 계정 먼저
+  if [[ -f $ACCOUNTS_REG ]]; then
+    for extra in $(awk -v s="$slug" '$1==s {print $2}' "$ACCOUNTS_REG"); do
+      [[ "$extra" =~ ^[a-z][a-z0-9-]{2,31}$ ]] || continue
+      site_account_delete "$slug" "$extra" >/dev/null || true
+    done
+  fi
   user="$(site_user_of "$slug")"
   [[ -n "$user" ]] || return 0
   valid_site_user "$user"
@@ -826,6 +960,11 @@ case "$cmd" in
   nginx-log)   valid_slug "${1:-}"; nginx_log "$1" "${2:-}" "${3:-200}" ;;
   site-create)   valid_slug "${1:-}"; site_create "$1" "${2:-}" "${3:-}" "${4:-}" ;;
   site-password) valid_slug "${1:-}"; site_password "$1" ;;
+  site-account-create)   valid_slug "${1:-}"; site_account_create "$1" "${2:-}" "${3:-}" ;;
+  site-account-update)   valid_slug "${1:-}"; site_account_update "$1" "${2:-}" "${3:-}" "${4:-}" ;;
+  site-account-password) valid_slug "${1:-}"; site_account_password "$1" "${2:-}" ;;
+  site-account-keys)     valid_slug "${1:-}"; site_account_keys "$1" "${2:-}" ;;
+  site-account-delete)   valid_slug "${1:-}"; site_account_delete "$1" "${2:-}" ;;
   ssl-issue)   valid_slug "${1:-}"; slug="$1"; shift; ssl_issue "$slug" "$@" ;;
   ssl-custom)  valid_slug "${1:-}"; ssl_custom "$1" ;;
   ssl-info)    valid_slug "${1:-}"; ssl_info "$1" ;;
@@ -845,7 +984,7 @@ case "$cmd" in
     echo "purged $1"
     ;;
   *)
-    die "usage: rpanel-helper {prepare-app|install-unit|remove-unit|install-site|remove-site|purge-app} <slug> | svc {start|stop|restart} <slug> | status|journal <slug> | {install,remove,run}-cron|cron-status|cron-log <slug> <id> | db-{create,drop,password} <db> <user> | db-user-create <db> <user> <all|read> (pw stdin) | db-user-drop <db> <user> | db-user-password <db> <user> (pw stdin) | redis-user-set <user> <pattern> <rw|ro> (pw stdin) | redis-user-drop <user> | backup-db <slug> <db> <stamp> | backup-data <slug> <stamp> | restore-db <slug> <db> <file> | restore-data <slug> <file> | nginx-log <slug> access|error <lines> | site-create <slug> <user> <domain> <static|rust|python> | site-password <slug> (stdin) | ssl-issue <slug> <email> <domain>... | ssl-custom|ssl-info|ssl-remove <slug> | backup-files <slug> <stamp> | restore-files <slug> <file>"
+    die "usage: rpanel-helper {prepare-app|install-unit|remove-unit|install-site|remove-site|purge-app} <slug> | svc {start|stop|restart} <slug> | status|journal <slug> | {install,remove,run}-cron|cron-status|cron-log <slug> <id> | db-{create,drop,password} <db> <user> | db-user-create <db> <user> <all|read> (pw stdin) | db-user-drop <db> <user> | db-user-password <db> <user> (pw stdin) | redis-user-set <user> <pattern> <rw|ro> (pw stdin) | redis-user-drop <user> | backup-db <slug> <db> <stamp> | backup-data <slug> <stamp> | restore-db <slug> <db> <file> | restore-data <slug> <file> | nginx-log <slug> access|error <lines> | site-create <slug> <user> <domain> <static|rust|python> | site-password <slug> (stdin) | site-account-create <slug> <user> <ssh|sftp> (pw stdin) | site-account-update <slug> <user> <ssh|sftp> <on|off> | site-account-password <slug> <user> (stdin) | site-account-keys <slug> <user> (stdin) | site-account-delete <slug> <user> | ssl-issue <slug> <email> <domain>... | ssl-custom|ssl-info|ssl-remove <slug> | backup-files <slug> <stamp> | restore-files <slug> <file>"
     ;;
 esac
 }

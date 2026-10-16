@@ -5,9 +5,11 @@ pub mod databases;
 pub mod deployments;
 pub mod files;
 pub mod projects;
+pub mod site_accounts;
 pub mod site_admin;
 pub mod sites;
 pub mod system;
+pub mod users;
 pub mod ws;
 
 use axum::{
@@ -120,6 +122,21 @@ pub fn router(state: AppState) -> Router {
             "/apps/{id}/site-user/password",
             put(site_admin::set_password),
         )
+        .route(
+            "/apps/{id}/accounts",
+            get(site_accounts::list).post(site_accounts::create),
+        )
+        .route(
+            "/apps/{id}/accounts/{aid}",
+            put(site_accounts::update).delete(site_accounts::delete),
+        )
+        .route(
+            "/apps/{id}/accounts/{aid}/password",
+            post(site_accounts::password),
+        )
+        // 관리자 계정
+        .route("/users", get(users::list).post(users::create))
+        .route("/users/{id}", put(users::update).delete(users::delete))
         .route(
             "/apps/{id}/ssl",
             get(site_admin::ssl_get).delete(site_admin::ssl_delete),

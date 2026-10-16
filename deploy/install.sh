@@ -203,7 +203,7 @@ fi
 # ───────────────────────── 4. Node.js ─────────────────────────
 say "4/8 Node.js 22"
 node_ok() {
-  command -v node >/dev/null && node -e 'const [a,b]=process.versions.node.split(".").map(Number); process.exit((a>22||(a===22&&b>=12)||(a===20&&b>=19))?0:1)'
+  command -v node >/dev/null && command -v npm >/dev/null && node -e 'const [a,b]=process.versions.node.split(".").map(Number); process.exit((a>22||(a===22&&b>=12)||(a===20&&b>=19))?0:1)'
 }
 if ! node_ok; then
   curl -fsSL https://deb.nodesource.com/setup_22.x | bash - >/dev/null

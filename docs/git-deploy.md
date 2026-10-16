@@ -17,6 +17,36 @@
 
 빌드에 쓰는 Rust 툴체인 · Python · Node.js 버전은 [언어 버전 (런타임)](runtimes.md)에서 고릅니다.
 
+## 백엔드 + 프런트엔드가 한 저장소에 있을 때 (npm 빌드)
+
+Rust(또는 Python) 프로그램과 React·Vue 화면이 같은 저장소에 있다면, 앱 설정의 **프런트엔드 폴더**에 화면 폴더(예: `frontend`)를 넣으세요.
+
+```
+저장소/
+├─ Cargo.toml        ← Rust 프로그램
+├─ src/
+└─ frontend/         ← 프런트엔드 폴더
+   ├─ package.json
+   └─ dist/          ← npm run build 결과 (빌드 결과 폴더, 기본 dist)
+```
+
+배포할 때 이렇게 합니다.
+
+1. `frontend` 폴더에서 `npm ci`(package-lock.json 이 없으면 `npm install`) → `npm run build`
+2. Rust 는 `cargo build --release`, Python 은 가상환경·패키지 설치
+3. 빌드 결과(`frontend/dist`)를 프로그램 옆 같은 경로로 복사합니다. 프로그램은 작업 폴더 기준 `frontend/dist` 경로로 읽으면 됩니다.
+   ```rust
+   // axum 예: 화면 파일 + API 를 한 프로그램에서
+   let app = Router::new()
+       .nest("/api", api_routes())
+       .fallback_service(tower_http::services::ServeDir::new("frontend/dist")
+           .fallback(tower_http::services::ServeFile::new("frontend/dist/index.html")));
+   ```
+
+Node.js 버전은 [런타임](runtimes.md) 메뉴의 Node.js 기본 버전을 씁니다.
+
+> 화면을 따로 서비스하고 싶다면 같은 프로젝트에 종류 **Static** 앱을 하나 더 만들고, **/api/ 프록시 포트**에 Rust 앱의 포트를 넣는 방법도 있습니다.
+
 ## 비공개(Private) 저장소
 
 `https://github.com/계정/저장소` 주소는 **공개 저장소**에서만 됩니다. 비공개 저장소를 https 주소로 넣으면 배포할 때 이런 오류가 납니다.

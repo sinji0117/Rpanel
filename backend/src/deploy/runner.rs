@@ -490,6 +490,50 @@ async fn run(
     let release_id = deploy_id.to_string();
     let release_dir: PathBuf;
 
+    // Rust·Python 앱 안의 프런트엔드(React·Vue 등): 백엔드보다 먼저 npm 으로 빌드
+    let frontend = match (kind, app.frontend_dir.as_deref()) {
+        (AppKind::Rust | AppKind::Python, Some(d)) if !d.is_empty() => Some(d.to_string()),
+        _ => None,
+    };
+    if let Some(fdir) = &frontend {
+        log.step(&format!("프런트엔드 빌드 (npm · {fdir})")).await;
+        let node = crate::runtimes::resolve_lang(state, crate::runtimes::Lang::Node, None).await?;
+        log.line(format!("런타임: {}", node.describe())).await;
+        let fwork = work.join(fdir);
+        if !exec.is_dry_run() && !fwork.join("package.json").is_file() {
+            bail!("{fdir}/package.json 이 없습니다. 앱 설정의 '프런트엔드 폴더'를 확인하세요 (앱 폴더 기준 경로)");
+        }
+        let has_lock = exec.is_dry_run() || fwork.join("package-lock.json").is_file();
+        let node_env = node.build_env(&state.cfg.build_path);
+        let npm = |cmd: &str| {
+            let mut spec = with_env(CmdSpec::new("bash", &["-c", cmd]).cwd(&fwork), &vars);
+            for (k, v) in &node_env {
+                spec = spec.env(k, v.clone());
+            }
+            spec.timeout(1800)
+        };
+        run_ok(exec, npm("node --version && npm --version"), log)
+            .await
+            .map_err(|e| anyhow!("Node.js / npm 을 찾지 못했습니다 — 런타임 메뉴에서 Node.js 를 설치하세요 ({e})"))?;
+        run_ok(
+            exec,
+            npm(if has_lock {
+                "npm ci --no-audit --no-fund"
+            } else {
+                "npm install --no-audit --no-fund"
+            }),
+            log,
+        )
+        .await?;
+        run_ok(exec, npm("npm run build"), log).await?;
+        if !exec.is_dry_run() && !fwork.join(&app.output_dir).is_dir() {
+            bail!(
+                "{fdir}/{} 폴더가 만들어지지 않았습니다. 앱 설정의 '출력 폴더'(npm run build 결과, 기본 dist)를 확인하세요",
+                app.output_dir
+            );
+        }
+    }
+
     match kind {
         AppKind::Proxy => {
             bail!("Git 배포는 rust / python / static 만 지원합니다")
@@ -509,6 +553,8 @@ async fn run(
                         ".git",
                         "--exclude",
                         ".venv",
+                        "--exclude",
+                        "node_modules",
                         &format!("{work_s}/"),
                         &format!("{}/", release_dir.display()),
                     ],
@@ -657,6 +703,42 @@ async fn run(
                 .await?;
             }
         }
+    }
+
+    // 프런트엔드 빌드 결과를 릴리스 안 같은 위치(<프런트엔드 폴더>/<출력 폴더>)로 복사 — 서비스 작업 폴더 기준 경로가 그대로 맞음
+    if let Some(fdir) = &frontend {
+        let src = work.join(fdir).join(&app.output_dir);
+        let dst = release_dir.join(fdir).join(&app.output_dir);
+        exec.mkdirs(&dst, log).await?;
+        run_ok(
+            exec,
+            CmdSpec::new(
+                "rsync",
+                &[
+                    "-a",
+                    "--delete",
+                    &format!("{}/", src.display()),
+                    &format!("{}/", dst.display()),
+                ],
+            ),
+            log,
+        )
+        .await?;
+        run_ok(
+            exec,
+            CmdSpec::new(
+                "chmod",
+                &["-R", "a+rX", &release_dir.join(fdir).display().to_string()],
+            ),
+            log,
+        )
+        .await?;
+        log.line(format!(
+            "프런트엔드 → {} (프로그램에서는 \"{fdir}/{}\" 경로로 읽으면 됩니다)",
+            dst.display(),
+            app.output_dir
+        ))
+        .await;
     }
 
     // 4) 활성화 — 이 지점부터 실패/취소 시 이전 릴리스·env 로 되돌립니다

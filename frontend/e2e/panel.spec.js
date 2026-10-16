@@ -68,12 +68,17 @@ test('프로젝트 → Rust 앱 생성 → 배포 실시간 로그 → 롤백 �
   await expect(dialog.getByLabel('Slug')).toHaveValue('beripick-api')
   await dialog.getByLabel('Git 저장소').fill('ssh://git@100.100.199.123:2222/beri/backend.git')
   await dialog.getByLabel('바이너리 이름').fill('hello-api')
+  // 같은 저장소의 React 프런트엔드 → npm 빌드
+  await expect(dialog.getByLabel('빌드 결과 폴더')).toHaveCount(0)
+  await dialog.getByLabel('프런트엔드 폴더').fill('frontend')
+  await expect(dialog.getByText('프로그램에서 frontend/dist 경로로 읽으면 됩니다')).toBeVisible()
   await dialog.getByLabel('도메인').fill('api.beripick.com')
   await dialog.getByLabel('헬스체크 경로').fill('/api/health')
   await dialog.getByRole('button', { name: '앱 만들기' }).click()
 
   await expect(page.getByRole('heading', { name: /Beripick API/ })).toBeVisible()
   await expect(page.getByText('127.0.0.1:8100')).toBeVisible()
+  expect(backend.db.apps.find((a) => a.name === 'Beripick API')).toMatchObject({ frontend_dir: 'frontend', output_dir: 'dist' })
   await expect(page.getByText('아직 배포가 없습니다')).toBeVisible()
 
   await page.getByRole('button', { name: '배포', exact: true }).click()

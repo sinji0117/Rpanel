@@ -96,6 +96,11 @@
 - SFTP 클라이언트가 원래 파일 권한(0644 등)을 그대로 보내면 다른 계정이 그 파일을 고칠 수 없습니다. 이럴 땐 패널 파일 관리자로 고치거나 클라이언트에서 권한 유지를 끄세요.
 - 설치 스크립트가 `acl` 패키지와 두 그룹, sshd 설정을 준비합니다 (`sshd -t` 검사 후 reload).
 
+## Rust·Python 앱의 프런트엔드 (npm)
+
+- `apps.frontend_dir`(앱 폴더 기준, `..`·절대경로 불가)가 있으면 빌드 단계 전에 그 폴더에서 `npm ci|install` → `npm run build`(Node.js 기본 런타임, `node_modules` 는 빌드 폴더에 남겨 재사용).
+- 결과 `<frontend_dir>/<output_dir>` 를 릴리스의 같은 경로로 rsync → 서비스 `WorkingDirectory`(current) 기준 상대 경로가 그대로 맞습니다. Python 릴리스 복사는 `node_modules` 를 제외합니다.
+
 ## 언어 런타임 버전
 
 - 테이블 `runtimes(lang, version, status, is_default, is_system, detail, log)`, 앱별 선택은 `apps.runtime_version` (NULL = 기본 버전).

@@ -875,4 +875,12 @@ export default {
   'GitLab: Settings → Webhooks → URL 과 Secret token 입력, {push} 체크.': 'GitLab: Settings → Webhooks → enter URL and Secret token, check {push}.',
   '브랜치 {branch} 에 push 할 때만 배포합니다.': 'Deploys only on pushes to branch {branch}.',
   '토큰을 바꾸면 GitHub·GitLab 웹훅 설정도 바꿔야 합니다. 계속할까요?': 'After changing the token you must update the GitHub/GitLab webhook too. Continue?',
+  '프런트엔드 (npm 빌드, 선택)': 'Front end (npm build, optional)',
+  '같은 저장소에 React·Vue 같은 화면이 있으면 폴더를 넣으세요. 배포할 때 그 폴더에서 npm ci → npm run build 를 먼저 하고, 결과물을 프로그램 옆 같은 경로로 복사합니다.':
+    'If the same repository has a React or Vue front end, enter its folder. Each deploy runs npm ci → npm run build there first and copies the output next to the program at the same path.',
+  '프런트엔드 폴더': 'Front-end folder',
+  '앱 폴더 기준 (예: frontend). 비우면 npm 빌드를 하지 않습니다': 'Relative to the app folder (e.g. frontend). Leave empty to skip the npm build',
+  '빌드 결과 폴더': 'Build output folder',
+  '프로그램에서 {path} 경로로 읽으면 됩니다': 'Your program can read it at {path}',
+  'Node.js / npm 을 찾지 못했습니다 — 런타임 메뉴에서 Node.js 를 설치하세요': 'Node.js / npm not found — install Node.js from the Runtimes menu',
 }

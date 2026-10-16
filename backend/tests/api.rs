@@ -1610,6 +1610,63 @@ async fn full_flow() {
         0
     );
 
+    // ── Rust 앱 + 프런트엔드(npm) 한 저장소 ──
+    let r = ctx
+        .post(
+            &format!("/api/projects/{pid}/apps"),
+            &t,
+            json!({"name":"Full Stack","kind":"rust","git_url":"git@github.com:sinji0117/bandiuri.git","binary_name":"bandiuri",
+                   "frontend_dir":"../web","domains":"full.example.com"}),
+        )
+        .await;
+    assert_eq!(
+        r.status,
+        StatusCode::BAD_REQUEST,
+        "frontend_dir must stay inside the repo"
+    );
+    let r = ctx
+        .post(
+            &format!("/api/projects/{pid}/apps"),
+            &t,
+            json!({"name":"Full Stack","kind":"rust","git_url":"git@github.com:sinji0117/bandiuri.git","binary_name":"bandiuri",
+                   "frontend_dir":"/frontend/","output_dir":"dist","domains":"full.example.com"}),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{:?}", r.body);
+    assert_eq!(r.body["frontend_dir"], "frontend");
+    let full_id = r.body["id"].as_u64().unwrap();
+    let r = ctx
+        .post(&format!("/api/apps/{full_id}/deploy"), &t, json!({}))
+        .await;
+    let d = wait_deploy(&ctx, &t, r.body["deployment_id"].as_u64().unwrap()).await;
+    assert_eq!(d["status"], "success", "{}", d["log"]);
+    let log = d["log"].as_str().unwrap();
+    let pos = |needle: &str| {
+        log.find(needle)
+            .unwrap_or_else(|| panic!("{needle} not in log:\n{log}"))
+    };
+    assert!(
+        pos("프런트엔드 빌드 (npm · frontend)") < pos("cargo build --release"),
+        "frontend first"
+    );
+    pos("npm ci --no-audit --no-fund");
+    pos("npm run build");
+    pos("/frontend/dist/");
+    // static 앱에는 frontend_dir 를 저장하지 않음
+    let r = ctx
+        .req(Method::PUT, &format!("/api/apps/{front_id}"), Some(&t), None, Some(json!({"name":"Beripick Front","git_url":"https://github.com/a/front.git","domains":"beripick.com www.beripick.com","api_proxy_port":8100,"frontend_dir":"web"})))
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+    assert!(r.body["frontend_dir"].is_null());
+    ctx.req(
+        Method::DELETE,
+        &format!("/api/apps/{full_id}"),
+        Some(&t),
+        None,
+        None,
+    )
+    .await;
+
     // 버전 확인 (테스트 설정은 GitHub 확인 끔)
     let r = ctx.get("/api/system/version", &t).await;
     assert_eq!(r.status, StatusCode::OK);

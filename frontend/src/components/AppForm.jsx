@@ -36,6 +36,7 @@ export function emptyApp() {
     start_cmd: '',
     binary_name: '',
     output_dir: 'dist',
+    frontend_dir: '',
     domains: '',
     api_proxy_port: '',
     health_path: '/',
@@ -46,7 +47,7 @@ export function emptyApp() {
 export function toPayload(v) {
   const out = { ...v }
   out.api_proxy_port = v.api_proxy_port === '' || v.api_proxy_port == null ? null : Number(v.api_proxy_port)
-  for (const k of ['slug', 'root_dir', 'build_cmd', 'start_cmd', 'binary_name']) {
+  for (const k of ['slug', 'root_dir', 'build_cmd', 'start_cmd', 'binary_name', 'frontend_dir']) {
     if (typeof out[k] === 'string' && !out[k].trim()) out[k] = null
   }
   return out
@@ -166,6 +167,30 @@ export default function AppForm({ initial, mode = 'create', onSubmit, submitting
         <Field label={t('시작 명령')} htmlFor="app-start" hint={t('가상환경(.venv)이 켜진 상태로 실행 · PORT 환경변수의 포트로 127.0.0.1 에서 열어야 합니다')}>
           <input id="app-start" className="input font-mono" value={v.start_cmd ?? ''} onChange={set('start_cmd')} placeholder="gunicorn -b 127.0.0.1:$PORT app:app" />
         </Field>
+      )}
+      {(v.kind === 'rust' || v.kind === 'python') && (
+        <div className="rounded-lg border border-ink-700 p-4">
+          <p className="text-sm font-medium">{t('프런트엔드 (npm 빌드, 선택)')}</p>
+          <p className="mt-1 text-xs text-ink-400">
+            {t(
+              '같은 저장소에 React·Vue 같은 화면이 있으면 폴더를 넣으세요. 배포할 때 그 폴더에서 npm ci → npm run build 를 먼저 하고, 결과물을 프로그램 옆 같은 경로로 복사합니다.',
+            )}
+          </p>
+          <div className="mt-3 grid gap-4 sm:grid-cols-2">
+            <Field label={t('프런트엔드 폴더')} htmlFor="app-front" hint={t('앱 폴더 기준 (예: frontend). 비우면 npm 빌드를 하지 않습니다')}>
+              <input id="app-front" className="input font-mono" value={v.frontend_dir ?? ''} onChange={set('frontend_dir')} placeholder="frontend" />
+            </Field>
+            {v.frontend_dir?.trim() && (
+              <Field
+                label={t('빌드 결과 폴더')}
+                htmlFor="app-front-out"
+                hint={t('프로그램에서 {path} 경로로 읽으면 됩니다', { path: `${v.frontend_dir.trim().replace(/^\/+|\/+$/g, '')}/${v.output_dir || 'dist'}` })}
+              >
+                <input id="app-front-out" className="input font-mono" value={v.output_dir} onChange={set('output_dir')} placeholder="dist" />
+              </Field>
+            )}
+          </div>
+        </div>
       )}
       {v.kind === 'static' && (
         <div className="grid gap-4 sm:grid-cols-2">

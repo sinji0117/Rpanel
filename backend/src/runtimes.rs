@@ -280,8 +280,19 @@ pub async fn resolve(state: &AppState, app: &App) -> anyhow::Result<Option<Resol
     let Some(lang) = lang_for(app) else {
         return Ok(None);
     };
+    resolve_lang(state, lang, app.runtime_version.as_deref())
+        .await
+        .map(Some)
+}
+
+/// 언어의 런타임 — `chosen` 이 없으면 기본 버전
+pub async fn resolve_lang(
+    state: &AppState,
+    lang: Lang,
+    chosen: Option<&str>,
+) -> anyhow::Result<Resolved> {
     ensure_seeded(state).await?;
-    let row: Option<Runtime> = match app.runtime_version.as_deref() {
+    let row: Option<Runtime> = match chosen {
         Some(v) => {
             sqlx::query_as(&format!(
                 "SELECT {RUNTIME_COLUMNS} FROM runtimes WHERE lang = ? AND version = ?"
@@ -300,31 +311,30 @@ pub async fn resolve(state: &AppState, app: &App) -> anyhow::Result<Option<Resol
             .await?
         }
     };
-    let version = app
-        .runtime_version
-        .clone()
+    let version = chosen
+        .map(str::to_string)
         .unwrap_or_else(|| lang.builtin().to_string());
     match row {
-        Some(r) if r.status == "ready" => Ok(Some(Resolved {
+        Some(r) if r.status == "ready" => Ok(Resolved {
             lang,
             version: r.version,
             detail: r.detail,
-        })),
+        }),
         Some(r) => bail!(
             "{} {} 이(가) 아직 준비되지 않았습니다 (상태: {}) — 런타임 메뉴에서 확인하세요",
             lang.label(),
             r.version,
             r.status
         ),
-        None if app.runtime_version.is_some() => bail!(
+        None if chosen.is_some() => bail!(
             "{} {version} 이(가) 설치되어 있지 않습니다 — 런타임 메뉴에서 설치하세요",
             lang.label()
         ),
-        None => Ok(Some(Resolved {
+        None => Ok(Resolved {
             lang,
             version,
             detail: String::new(),
-        })),
+        }),
     }
 }
 

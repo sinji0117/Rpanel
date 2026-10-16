@@ -32,6 +32,8 @@ pub struct AppInput {
     #[serde(default)]
     pub git_url: Option<String>,
     #[serde(default)]
+    pub frontend_dir: Option<String>,
+    #[serde(default)]
     pub git_branch: Option<String>,
     #[serde(default)]
     pub root_dir: Option<String>,
@@ -69,6 +71,7 @@ struct Clean {
     start_cmd: Option<String>,
     binary_name: Option<String>,
     output_dir: String,
+    frontend_dir: Option<String>,
     domains: String,
     api_proxy_port: Option<u32>,
     health_path: String,
@@ -109,6 +112,15 @@ fn clean(input: &AppInput, kind: AppKind) -> AppResult<Clean> {
         .trim_matches('/')
         .to_string();
     validate::rel_path(&output_dir).map_err(bad)?;
+    let frontend_dir = match kind {
+        AppKind::Rust | AppKind::Python => opt(&input.frontend_dir)
+            .map(|d| d.trim_matches('/').to_string())
+            .filter(|d| !d.is_empty()),
+        _ => None,
+    };
+    if let Some(d) = &frontend_dir {
+        validate::rel_path(d).map_err(bad)?;
+    }
     let domains = validate::domains(input.domains.as_deref().unwrap_or("")).map_err(bad)?;
     let api_proxy_port = match (kind, input.api_proxy_port) {
         (AppKind::Static, Some(p)) if (1..=65535).contains(&p) => Some(p),
@@ -137,6 +149,7 @@ fn clean(input: &AppInput, kind: AppKind) -> AppResult<Clean> {
             None
         },
         output_dir,
+        frontend_dir,
         domains,
         api_proxy_port,
         health_path,
@@ -280,8 +293,8 @@ pub async fn create(
         let port = if kind.is_service() { Some(allocate_port(&state).await?) } else { None };
         let res = sqlx::query(
             "INSERT INTO apps (project_id, name, slug, kind, git_url, git_branch, root_dir, build_cmd, start_cmd, binary_name, \
-             output_dir, port, api_proxy_port, domains, health_path, webhook_token) \
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+             output_dir, port, api_proxy_port, domains, health_path, webhook_token, frontend_dir) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(project_id)
         .bind(&c.name)
@@ -299,6 +312,7 @@ pub async fn create(
         .bind(&c.domains)
         .bind(&c.health_path)
         .bind(random_token(24))
+        .bind(&c.frontend_dir)
         .execute(&state.db)
         .await
         .map_err(|e| {
@@ -338,7 +352,7 @@ pub async fn update(
     check_domain_conflicts(&state, &c.domains, Some(id)).await?;
     sqlx::query(
         "UPDATE apps SET name = ?, git_url = ?, git_branch = ?, root_dir = ?, build_cmd = ?, start_cmd = ?, binary_name = ?, \
-         output_dir = ?, api_proxy_port = ?, domains = ?, health_path = ? WHERE id = ?",
+         output_dir = ?, api_proxy_port = ?, domains = ?, health_path = ?, frontend_dir = ? WHERE id = ?",
     )
     .bind(&c.name)
     .bind(&c.git_url)
@@ -351,6 +365,7 @@ pub async fn update(
     .bind(c.api_proxy_port)
     .bind(&c.domains)
     .bind(&c.health_path)
+    .bind(&c.frontend_dir)
     .bind(id)
     .execute(&state.db)
     .await?;
@@ -774,6 +789,7 @@ mod tests {
             web_root: None,
             proxy_target: None,
             client_max_body_mb: None,
+            frontend_dir: None,
         }
     }
 

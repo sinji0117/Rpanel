@@ -50,6 +50,7 @@ fn app(kind: &str) -> App {
         force_https: false,
         client_max_body_mb: 64,
         runtime_version: None,
+        frontend_dir: None,
         created_at: Utc::now(),
         updated_at: Utc::now(),
     }

@@ -6,6 +6,7 @@ pub mod audit;
 pub mod auth;
 pub mod backup;
 pub mod config;
+pub mod dbengines;
 pub mod deploy;
 pub mod error;
 pub mod files;

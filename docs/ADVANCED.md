@@ -141,6 +141,16 @@
 
 - 설정 → **패널 도메인**: helper `panel-domain-set <domain> <email>` 이 `/etc/nginx/sites-available/rpanel-panel-domain.conf` 를 직접 만들고(80: ACME → 발급 → 443 + 패널 프록시), Let's Encrypt `--cert-name rpanel-panel-domain`. 앱 도메인과 겹치면 거부. 해제는 `panel-domain-remove`. 기존 `:8443` 접속은 그대로입니다.
 
+## DB 서버 버전
+
+- `GET /api/db-engines`: MariaDB(`SELECT VERSION()`) · Redis(`INFO server`) · MongoDB(`buildInfo`) 의 지금 버전과 고를 수 있는 계열. 같은 계열 목록 안에서 **더 높은 것만** 허용 (`dbengines::check_target`).
+- `POST /api/db-engines/{engine}` → 백그라운드로 helper `db-engine-upgrade <engine> <version>`: 전체 백업(`_engines`, mariadb-dump / mongodump / redis SAVE+dump.rdb 복사) → 공식 저장소 추가(MariaDB `dlm.mariadb.com`, MongoDB `repo.mongodb.org`, Redis `packages.redis.io`) → `apt-get install --force-confold` → 재시작 (MariaDB 는 `mariadb-upgrade`, MongoDB 는 패널이 `setFeatureCompatibilityVersion`). 진행 로그는 패널 메모리, 결과는 `panel_settings.db_engine_<engine>`, 알림 `db_engine`.
+
+## 패널 접속 IP
+
+- `GET/PUT /api/system/panel-access` → helper `panel-access <any|CIDR,…>` 가 `/etc/nginx/rpanel-panel-allow.conf`(allow … / deny all)를 쓰고 Nginx reload. 패널 설정(`rpanel-panel.conf`, 패널 도메인)은 이 파일을 `include` 하고, `/api/hooks/` 는 `allow all`. ufw 가 켜져 있으면 패널 포트를 그 대역에 엽니다.
+- 지금 요청한 IP 가 목록에 없으면 거부 (잠김 방지). 잠겼을 때: `sudo /usr/local/lib/rpanel/rpanel-helper panel-access any`.
+
 ## 알림
 
 - 테이블 `notifications`(제목은 한국어 템플릿 + `params` JSON → 화면에서 번역), 설정은 `panel_settings`(k=`notifications`, JSON).
@@ -271,6 +281,8 @@ npx playwright install chromium && npm run e2e # E2E (가짜 API, 백엔드 불�
 | GET/POST | `/api/dbweb/admin/{id}`, `/query`, `/table/{t}`, `/table/{t}/{insert,update,delete}` | DB 웹 관리 (관리자) |
 | POST/GET | `/api/dbweb/login`, `/logout`, `/me`, `/api/dbweb/s/{db}/…` (`X-DB-Token`) | DB 웹 관리 (DB 계정) |
 | GET/PUT/DELETE | `/api/system/panel-domain` | 패널 도메인 |
+| GET/PUT | `/api/system/panel-access` | 패널 접속 허용 IP |
+| GET/POST | `/api/db-engines`, `/api/db-engines/{engine}` | DB 서버 버전 |
 | GET/DELETE/POST/PUT | `/api/notifications`, `/read`, `/settings`, `/test` | 알림 |
 | WS | `/api/ws/metrics?ticket=`, `/api/ws/deployments/{id}?ticket=` | 실시간 |
 

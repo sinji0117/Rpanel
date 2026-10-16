@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { Fragment, useEffect, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router'
 import { LEVEL, notificationsChanged, notificationTitle } from '../components/NotificationBell'
 import { ErrorBox, Field, PageHeader, Section, Spinner, Tabs } from '../components/ui'
@@ -9,10 +9,44 @@ import { dateTime } from '../lib/format'
 import { useFetch } from '../lib/useFetch'
 import { confirmDialog } from '../components/Dialog'
 
+// 알림 분류 (kind 기준)
+export const CATEGORIES = [
+  { id: 'all', label: '전체' },
+  { id: 'deploy', label: '배포', kinds: ['deploy_failed', 'deploy_success'] },
+  { id: 'backup', label: '백업', kinds: ['backup_failed', 'backup_success'] },
+  { id: 'server', label: '사이트·서버', kinds: ['site_down', 'disk_high', 'mem_high'] },
+  { id: 'system', label: '시스템', kinds: ['update_available', 'runtime_install', 'db_engine', 'admin_login', 'test'] },
+]
+const LEVELS = [
+  { id: 'all', label: '모든 수준' },
+  { id: 'error', label: '오류' },
+  { id: 'warning', label: '경고' },
+  { id: 'success', label: '성공' },
+  { id: 'info', label: '정보' },
+]
+
+export function categoryOf(n) {
+  return CATEGORIES.find((c) => c.kinds?.includes(n.kind))?.id ?? 'system'
+}
+
+/** 오늘 · 어제 · 날짜 */
+function dayLabel(iso) {
+  const d = new Date(iso)
+  const today = new Date()
+  const y = new Date()
+  y.setDate(today.getDate() - 1)
+  const same = (a, b) => a.toDateString() === b.toDateString()
+  if (same(d, today)) return t('오늘')
+  if (same(d, y)) return t('어제')
+  return d.toLocaleDateString()
+}
+
 function NotificationList() {
   const toast = useToast()
   const nav = useNavigate()
   const [unreadOnly, setUnreadOnly] = useState(false)
+  const [cat, setCat] = useState('all')
+  const [level, setLevel] = useState('all')
   const list = useFetch(() => get(`/notifications?limit=300${unreadOnly ? '&unread=true' : ''}`), [unreadOnly])
   const run = async (fn, msg) => {
     try {
@@ -24,6 +58,7 @@ function NotificationList() {
       toast.push(e.message, 'error')
     }
   }
+  const shown = (list.data?.items ?? []).filter((n) => (cat === 'all' || categoryOf(n) === cat) && (level === 'all' || n.level === level))
   return (
     <section className="card">
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-ink-700/70 px-5 py-3">
@@ -45,36 +80,71 @@ function NotificationList() {
       </div>
       <ErrorBox error={list.error} />
       {list.loading && <Spinner className="m-5 text-ink-400" />}
+      <div className="flex flex-wrap items-center gap-2 border-b border-ink-700/70 px-5 py-2.5">
+        <div className="flex flex-wrap gap-1" role="tablist" aria-label={t('알림 분류')}>
+          {CATEGORIES.map((c) => {
+            const n = (list.data?.items ?? []).filter((x) => c.id === 'all' || categoryOf(x) === c.id)
+            const unread = n.filter((x) => !x.read_at).length
+            return (
+              <button
+                key={c.id}
+                role="tab"
+                aria-selected={cat === c.id}
+                onClick={() => setCat(c.id)}
+                className={`rounded-full px-3 py-1 text-xs transition ${cat === c.id ? 'bg-ink-800 font-medium text-ink-100 ring-1 ring-ink-600' : 'text-ink-400 hover:bg-ink-850 hover:text-ink-100'}`}
+              >
+                {t(c.label)} <span className="text-ink-500">{n.length}</span>
+                {unread > 0 && <span className="ml-1 rounded-full bg-signal/20 px-1.5 text-[10px] text-signal">{unread}</span>}
+              </button>
+            )
+          })}
+        </div>
+        <select className="input ml-auto w-auto py-1 text-xs" aria-label={t('알림 수준')} value={level} onChange={(e) => setLevel(e.target.value)}>
+          {LEVELS.map((l) => (
+            <option key={l.id} value={l.id}>
+              {t(l.label)}
+            </option>
+          ))}
+        </select>
+      </div>
       <ul className="divide-y divide-ink-800" aria-label={t('알림 목록')}>
-        {list.data?.items.map((n) => (
-          <li key={n.id} className={`flex gap-3 px-5 py-3 ${n.read_at ? 'opacity-60' : ''}`}>
-            <span className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${LEVEL[n.level]?.dot ?? 'bg-ink-400'}`} />
-            <div className="min-w-0 flex-1">
-              <p className="text-sm">{notificationTitle(n)}</p>
-              {n.body && <pre className="mt-1 font-sans text-xs whitespace-pre-wrap text-ink-400">{n.body}</pre>}
-              <p className="mt-1 text-[11px] text-ink-600">{dateTime(n.created_at)}</p>
-            </div>
-            <div className="flex shrink-0 items-start gap-1.5">
-              {n.link && (
-                <button
-                  className="btn-ghost px-2.5 py-1 text-xs"
-                  onClick={() => {
-                    if (!n.read_at) post('/notifications/read', { ids: [n.id] }).catch(() => {})
-                    nav(n.link)
-                  }}
-                >
-                  {t('보기')}
-                </button>
-              )}
-              {!n.read_at && (
-                <button className="btn-ghost px-2.5 py-1 text-xs" onClick={() => run(() => post('/notifications/read', { ids: [n.id] }))}>
-                  {t('읽음')}
-                </button>
-              )}
-            </div>
-          </li>
+        {shown.map((n, i) => (
+          <Fragment key={n.id}>
+            {(i === 0 || dayLabel(shown[i - 1].created_at) !== dayLabel(n.created_at)) && (
+              <li className="bg-ink-900/60 px-5 py-1.5 text-[11px] font-medium text-ink-400">{dayLabel(n.created_at)}</li>
+            )}
+            <li key={n.id} className={`flex gap-3 px-5 py-3 ${n.read_at ? 'opacity-60' : ''}`}>
+              <span className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${LEVEL[n.level]?.dot ?? 'bg-ink-400'}`} />
+              <div className="min-w-0 flex-1">
+                <p className="text-sm">
+                  <span className="mr-2 rounded bg-ink-800 px-1.5 py-0.5 text-[10px] text-ink-400">{t(CATEGORIES.find((c) => c.id === categoryOf(n))?.label)}</span>
+                  {notificationTitle(n)}
+                </p>
+                {n.body && <pre className="mt-1 font-sans text-xs whitespace-pre-wrap text-ink-400">{n.body}</pre>}
+                <p className="mt-1 text-[11px] text-ink-600">{dateTime(n.created_at)}</p>
+              </div>
+              <div className="flex shrink-0 items-start gap-1.5">
+                {n.link && (
+                  <button
+                    className="btn-ghost px-2.5 py-1 text-xs"
+                    onClick={() => {
+                      if (!n.read_at) post('/notifications/read', { ids: [n.id] }).catch(() => {})
+                      nav(n.link)
+                    }}
+                  >
+                    {t('보기')}
+                  </button>
+                )}
+                {!n.read_at && (
+                  <button className="btn-ghost px-2.5 py-1 text-xs" onClick={() => run(() => post('/notifications/read', { ids: [n.id] }))}>
+                    {t('읽음')}
+                  </button>
+                )}
+              </div>
+            </li>
+          </Fragment>
         ))}
-        {list.data && !list.data.items.length && <li className="px-5 py-10 text-center text-sm text-ink-400">{t('알림이 없습니다')}</li>}
+        {list.data && !shown.length && <li className="px-5 py-10 text-center text-sm text-ink-400">{t('알림이 없습니다')}</li>}
       </ul>
     </section>
   )

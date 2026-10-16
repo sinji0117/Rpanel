@@ -2683,6 +2683,84 @@ async fn full_flow() {
         StatusCode::UNAUTHORIZED
     );
 
+    // ── DB 서버 버전 · 패널 접속 IP ──
+    {
+        let r = ctx
+            .req(
+                Method::POST,
+                "/api/auth/login",
+                None,
+                None,
+                Some(json!({"email":"admin@example.com","password":"new-password-22"})),
+            )
+            .await;
+        let t = r.body["access_token"].as_str().unwrap().to_string();
+        let r = ctx.get("/api/db-engines", &t).await;
+        assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+        let engines = r.body["engines"].as_array().unwrap();
+        assert_eq!(engines.len(), 3);
+        let maria = engines.iter().find(|e| e["engine"] == "mariadb").unwrap();
+        assert_eq!(maria["installed"], true, "{maria}");
+        assert!(maria["series"].as_str().is_some());
+        assert!(
+            engines.iter().find(|e| e["engine"] == "redis").unwrap()["version"]
+                .as_str()
+                .is_some()
+        );
+        for (eng, v, code) in [
+            ("mariadb", "9.9", StatusCode::BAD_REQUEST),
+            ("mariadb", "11.4;id", StatusCode::BAD_REQUEST),
+            ("oracle", "1", StatusCode::NOT_FOUND),
+        ] {
+            let r = ctx
+                .post(&format!("/api/db-engines/{eng}"), &t, json!({"version": v}))
+                .await;
+            assert_eq!(r.status, code, "{eng} {v} {:?}", r.body);
+        }
+        // 이미 그 버전이면 거부
+        let cur = maria["series"].as_str().unwrap().to_string();
+        if maria["versions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|v| v["version"] == cur.as_str())
+        {
+            let r = ctx
+                .post("/api/db-engines/mariadb", &t, json!({"version": cur}))
+                .await;
+            assert_eq!(r.status, StatusCode::BAD_REQUEST, "{:?}", r.body);
+        }
+
+        let pa = "/api/system/panel-access";
+        assert_eq!(ctx.get(pa, &t).await.body["restricted"], false);
+        let r = ctx
+            .req(
+                Method::PUT,
+                pa,
+                Some(&t),
+                None,
+                Some(json!({"allow":["10.0.0.0/24","not-an-ip"]})),
+            )
+            .await;
+        assert_eq!(r.status, StatusCode::BAD_REQUEST);
+        let r = ctx
+            .req(
+                Method::PUT,
+                pa,
+                Some(&t),
+                None,
+                Some(json!({"allow":[" 10.0.0.0/24 ","203.0.113.5/32","10.0.0.0/24",""]})),
+            )
+            .await;
+        assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+        assert_eq!(r.body["allow"], json!(["10.0.0.0/24", "203.0.113.5"]));
+        assert_eq!(ctx.get(pa, &t).await.body["restricted"], true);
+        let r = ctx
+            .req(Method::PUT, pa, Some(&t), None, Some(json!({"allow":[]})))
+            .await;
+        assert_eq!(r.body["restricted"], false);
+    }
+
     // ── DB 웹 관리 (테스트 DB 계정으로 직접 접속) ──
     {
         let r = ctx

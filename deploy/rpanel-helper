@@ -957,6 +957,18 @@ panel_domain_conf() {
 
     client_max_body_size 2m;
 
+    include /etc/nginx/rpanel-panel-allow.con[f];
+
+    location ^~ /api/hooks/ {
+        allow all;
+        proxy_pass http://__UPSTREAM__;
+        proxy_http_version 1.1;
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+    }
+
     location ~ ^/api/apps/[0-9]+/files/upload$ {
         client_max_body_size 2048m;
         proxy_request_buffering off;
@@ -1049,6 +1061,171 @@ panel_domain_remove() {
   fi
   if nginx -t >/dev/null 2>&1; then systemctl reload nginx; fi
   echo "panel domain removed"
+}
+
+# ───────────────────────── DB 서버 버전 (MariaDB · MongoDB · Redis) ─────────────────────────
+# 더 높은 버전으로만 바꿉니다 (패널이 확인). 바꾸기 전에 전체 백업을 _engines 에 남깁니다.
+
+valid_engine_version() {
+  case "${1:-}:${2:-}" in
+    mariadb:10.11|mariadb:11.4|mariadb:11.8|mongodb:8.0|mongodb:8.2|redis:7.0|redis:8) ;;
+    *) die "db-engine: 고를 수 없는 버전입니다: ${1:-} ${2:-}" ;;
+  esac
+}
+
+os_codename() {
+  local c; c="$(. /etc/os-release 2>/dev/null; echo "${VERSION_CODENAME:-}")"
+  [[ "$c" =~ ^[a-z]+$ ]] || die "OS 코드 이름을 알 수 없습니다"
+  echo "$c"
+}
+
+env_value() { grep -E "^$1=" "$MONGO_ENV" 2>/dev/null | tail -n1 | cut -d= -f2-; }
+
+apt_install_quiet() {
+  DEBIAN_FRONTEND=noninteractive apt-get install -y -q -o Dpkg::Options::=--force-confold -o Dpkg::Options::=--force-confdef "$@"
+}
+
+engine_backup() {
+  local engine="$1" dir stamp out cfg pw
+  dir="$DATA/backups/_engines"; install -d -m 0750 -o root -g root "$dir"
+  stamp="$(date +%Y%m%d-%H%M%S)"
+  case "$engine" in
+    mariadb)
+      out="$dir/$stamp-mariadb-all.sql.gz"
+      echo "▶ 전체 백업: $out" >&2
+      mariadb-dump --all-databases --single-transaction --routines --events --triggers | gzip > "$out.part" \
+        || { rm -f "$out.part"; die "MariaDB 백업 실패 — 버전을 바꾸지 않았습니다"; }
+      ;;
+    mongodb)
+      out="$dir/$stamp-mongodb-all.archive.gz"
+      echo "▶ 전체 백업: $out" >&2
+      command -v mongodump >/dev/null || die "mongodump 가 없습니다"
+      cfg="$(mongo_cfg)"
+      mongodump --config "$cfg" --archive="$out.part" --gzip --quiet || { rm -f "$cfg" "$out.part"; die "MongoDB 백업 실패 — 버전을 바꾸지 않았습니다"; }
+      rm -f "$cfg"
+      ;;
+    redis)
+      out="$dir/$stamp-redis-dump.rdb"
+      echo "▶ 전체 백업: $out" >&2
+      pw="$(env_value REDIS_URL | sed -nE 's#^redis://[^:]*:([^@]*)@.*#\1#p')"
+      REDISCLI_AUTH="$pw" redis-cli SAVE >/dev/null 2>&1 || echo "(SAVE 실패 — 마지막 저장본을 복사합니다)" >&2
+      [[ -f /var/lib/redis/dump.rdb ]] || : > /var/lib/redis/dump.rdb
+      cp /var/lib/redis/dump.rdb "$out.part" || die "Redis 백업 실패 — 버전을 바꾸지 않았습니다"
+      ;;
+  esac
+  mv "$out.part" "$out"; chmod 0600 "$out"
+  # 오래된 엔진 백업은 최근 5개만
+  ls -1t "$dir"/*-"$engine"-* 2>/dev/null | tail -n +6 | xargs -r rm -f
+}
+
+db_engine_upgrade() {
+  local engine="$1" v="$2" code
+  valid_engine_version "$engine" "$v"
+  code="$(os_codename)"
+  command -v apt-get >/dev/null || die "apt-get 이 없습니다 (Ubuntu·Debian 만 지원)"
+  engine_backup "$engine"
+  install -d -m 0755 /etc/apt/keyrings
+  case "$engine" in
+    mariadb)
+      if [[ "$v" != 10.11 ]]; then
+        echo "▶ MariaDB $v 저장소 추가" >&2
+        curl -fsSL --proto '=https' --max-time 60 https://mariadb.org/mariadb_release_signing_key.pgp -o /etc/apt/keyrings/mariadb-keyring.pgp \
+          || die "MariaDB 저장소 키를 받지 못했습니다 (인터넷 연결 확인)"
+        printf 'X-Repolib-Name: MariaDB\nTypes: deb\nURIs: https://dlm.mariadb.com/repo/mariadb-server/%s/repo/ubuntu\nSuites: %s\nComponents: main\nSigned-By: /etc/apt/keyrings/mariadb-keyring.pgp\n' "$v" "$code" \
+          > /etc/apt/sources.list.d/mariadb.sources
+      fi
+      apt-get update -q >&2 || die "apt-get update 실패"
+      echo "▶ MariaDB $v 설치 (데이터는 그대로)" >&2
+      apt_install_quiet mariadb-server mariadb-client >&2 || die "MariaDB $v 설치 실패 — 백업: $DATA/backups/_engines"
+      systemctl restart mariadb
+      for _ in $(seq 1 60); do mariadb -e 'SELECT 1' >/dev/null 2>&1 && break; sleep 1; done
+      echo "▶ mariadb-upgrade" >&2
+      mariadb-upgrade >&2 2>&1 || true
+      echo "OK $(mariadb -N -e 'SELECT VERSION()')"
+      ;;
+    mongodb)
+      echo "▶ MongoDB $v 저장소 추가" >&2
+      curl -fsSL --proto '=https' --max-time 60 "https://www.mongodb.org/static/pgp/server-$v.asc" | gpg --dearmor --yes -o "/usr/share/keyrings/mongodb-server-$v.gpg" \
+        || die "MongoDB 저장소 키를 받지 못했습니다"
+      echo "deb [ arch=amd64,arm64 signed-by=/usr/share/keyrings/mongodb-server-$v.gpg ] https://repo.mongodb.org/apt/ubuntu $code/mongodb-org/$v multiverse" \
+        > "/etc/apt/sources.list.d/mongodb-org-$v.list"
+      apt-get update -q >&2 || die "apt-get update 실패"
+      echo "▶ MongoDB $v 설치 (데이터는 그대로)" >&2
+      apt_install_quiet mongodb-org >&2 || die "MongoDB $v 설치 실패 — 백업: $DATA/backups/_engines"
+      systemctl restart mongod
+      for _ in $(seq 1 60); do (echo > /dev/tcp/127.0.0.1/27017) 2>/dev/null && break; sleep 1; done
+      echo "OK $(mongod --version | awk 'NR==1{print $3}')"
+      ;;
+    redis)
+      if [[ "$v" == 8 ]]; then
+        echo "▶ Redis 저장소(packages.redis.io) 추가" >&2
+        curl -fsSL --proto '=https' --max-time 60 https://packages.redis.io/gpg | gpg --dearmor --yes -o /usr/share/keyrings/redis-archive-keyring.gpg \
+          || die "Redis 저장소 키를 받지 못했습니다"
+        echo "deb [signed-by=/usr/share/keyrings/redis-archive-keyring.gpg] https://packages.redis.io/deb $code main" > /etc/apt/sources.list.d/redis.list
+      fi
+      apt-get update -q >&2 || die "apt-get update 실패"
+      echo "▶ Redis $v 설치 (데이터·설정은 그대로)" >&2
+      apt_install_quiet redis-server redis-tools >&2 || die "Redis $v 설치 실패 — 백업: $DATA/backups/_engines"
+      systemctl restart redis-server
+      for _ in $(seq 1 30); do (echo > /dev/tcp/127.0.0.1/6379) 2>/dev/null && break; sleep 1; done
+      echo "OK $(redis-server --version | sed -nE 's/.*v=([0-9.]+).*/\1/p')"
+      ;;
+  esac
+}
+
+# ───────────────────────── 패널 접속 허용 IP ─────────────────────────
+# Nginx 의 allow/deny 로 막습니다 (Git 웹훅 /api/hooks/ 는 예외). ufw 는 이 대역을 열어 줍니다.
+
+PANEL_ALLOW_CONF="${RPANEL_TEST_PANEL_ALLOW:-/etc/nginx/rpanel-panel-allow.conf}"
+
+valid_cidr() {
+  local c="$1" ip bits
+  ip="${c%/*}"; bits=""; [[ "$c" == */* ]] && bits="${c#*/}"
+  if [[ "$ip" =~ ^([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})$ ]]; then
+    local o; for o in "${BASH_REMATCH[@]:1}"; do (( o <= 255 )) || die "잘못된 IP: $c"; done
+    [[ -z "$bits" ]] || { [[ "$bits" =~ ^[0-9]{1,2}$ ]] && (( bits <= 32 )); } || die "잘못된 대역: $c"
+  elif [[ "$ip" =~ ^[0-9a-fA-F:]+$ && "$ip" == *:* && ${#ip} -le 39 ]]; then
+    [[ -z "$bits" ]] || { [[ "$bits" =~ ^[0-9]{1,3}$ ]] && (( bits <= 128 )); } || die "잘못된 대역: $c"
+  else
+    die "잘못된 IP: $c"
+  fi
+}
+
+panel_port() {
+  local p; p="$(sed -nE 's/^\s*listen ([0-9]+) ssl.*/\1/p' "$AVAIL/rpanel-panel.conf" 2>/dev/null | head -n1)"
+  echo "${p:-8443}"
+}
+
+# panel-access any | CIDR[,CIDR…]
+panel_access() {
+  local list="${1:-}" tmp c port
+  [[ -n "$list" ]] || die "panel-access: any 또는 IP 목록이 필요합니다"
+  tmp="$(mktemp)"
+  echo "$MARK — 패널 접속 허용 IP (설정 화면에서 바꿉니다)" > "$tmp"
+  if [[ "$list" != any ]]; then
+    (( ${#list} <= 2000 )) || die "목록이 너무 깁니다"
+    [[ "$list" =~ ^[0-9a-fA-F.:/,]+$ ]] || die "잘못된 IP 목록: $list"
+    for c in ${list//,/ }; do valid_cidr "$c"; echo "allow $c;" >> "$tmp"; done
+    echo "allow 127.0.0.1;" >> "$tmp"
+    echo "deny all;" >> "$tmp"
+  fi
+  install -m 0644 "$tmp" "$PANEL_ALLOW_CONF"; rm -f "$tmp"
+  [[ -n "${RPANEL_TEST_PANEL_ALLOW:-}" ]] && return 0
+  if ! nginx -t >/dev/null 2>&1; then
+    : > "$PANEL_ALLOW_CONF"; nginx -t >/dev/null 2>&1 && systemctl reload nginx
+    die "nginx -t 실패 — 접속 제한을 풀었습니다"
+  fi
+  systemctl reload nginx
+  # ufw 가 켜져 있으면 패널 포트를 그 대역에 열어 줌 (실제 제한은 Nginx 가 함)
+  if command -v ufw >/dev/null && ufw status 2>/dev/null | grep -q '^Status: active'; then
+    port="$(panel_port)"
+    if [[ "$list" == any ]]; then
+      ufw allow "$port/tcp" >/dev/null || true
+    else
+      for c in ${list//,/ }; do ufw allow from "$c" to any port "$port" proto tcp >/dev/null || true; done
+    fi
+  fi
+  echo "panel access: $list"
 }
 
 # ───────────────────────── 파일 사이트 백업 ─────────────────────────
@@ -1284,6 +1461,8 @@ case "$cmd" in
   runtime-install) runtime_install "${1:-}" "${2:-}" ;;
   panel-domain-set)    panel_domain_set "${1:-}" "${2:-}" ;;
   panel-domain-remove) panel_domain_remove ;;
+  db-engine-upgrade)   db_engine_upgrade "${1:-}" "${2:-}" ;;
+  panel-access)        panel_access "${1:-}" ;;
   runtime-remove)  runtime_remove "${1:-}" "${2:-}" ;;
   purge-app)
     valid_slug "${1:-}"
@@ -1298,7 +1477,7 @@ case "$cmd" in
     echo "purged $1"
     ;;
   *)
-    die "usage: rpanel-helper {prepare-app|install-unit|remove-unit|install-site|remove-site|purge-app} <slug> | svc {start|stop|restart} <slug> | status|journal <slug> | {install,remove,run}-cron|cron-status|cron-log <slug> <id> | db-{create,drop,password} <db> <user> | db-user-create <db> <user> <all|read> (pw stdin) | db-user-drop <db> <user> | db-user-password <db> <user> (pw stdin) | redis-user-set <user> <pattern> <rw|ro> (pw stdin) | redis-user-drop <user> | backup-db <slug> <db> <stamp> | backup-data <slug> <stamp> | restore-db <slug> <db> <file> | restore-data <slug> <file> | nginx-log <slug> access|error <lines> | site-create <slug> <user> <domain> <static|rust|python> | site-password <slug> (stdin) | site-account-create <slug> <user> <ssh|sftp> (pw stdin) | site-account-update <slug> <user> <ssh|sftp> <on|off> | site-account-password <slug> <user> (stdin) | site-account-keys <slug> <user> (stdin) | site-account-delete <slug> <user> | ssl-issue <slug> <email> <domain>... | ssl-custom|ssl-info|ssl-remove <slug> | backup-files <slug> <stamp> | restore-files <slug> <file> | backup-mongo <slug> <db> <stamp> | restore-mongo <slug> <db> <file> | runtime-install|runtime-remove <python|node> <version> | system-log <panel|nginx|ssh|mariadb|redis> <lines> | panel-domain-set <domain> <email> | panel-domain-remove"
+    die "usage: rpanel-helper {prepare-app|install-unit|remove-unit|install-site|remove-site|purge-app} <slug> | svc {start|stop|restart} <slug> | status|journal <slug> | {install,remove,run}-cron|cron-status|cron-log <slug> <id> | db-{create,drop,password} <db> <user> | db-user-create <db> <user> <all|read> (pw stdin) | db-user-drop <db> <user> | db-user-password <db> <user> (pw stdin) | redis-user-set <user> <pattern> <rw|ro> (pw stdin) | redis-user-drop <user> | backup-db <slug> <db> <stamp> | backup-data <slug> <stamp> | restore-db <slug> <db> <file> | restore-data <slug> <file> | nginx-log <slug> access|error <lines> | site-create <slug> <user> <domain> <static|rust|python> | site-password <slug> (stdin) | site-account-create <slug> <user> <ssh|sftp> (pw stdin) | site-account-update <slug> <user> <ssh|sftp> <on|off> | site-account-password <slug> <user> (stdin) | site-account-keys <slug> <user> (stdin) | site-account-delete <slug> <user> | ssl-issue <slug> <email> <domain>... | ssl-custom|ssl-info|ssl-remove <slug> | backup-files <slug> <stamp> | restore-files <slug> <file> | backup-mongo <slug> <db> <stamp> | restore-mongo <slug> <db> <file> | runtime-install|runtime-remove <python|node> <version> | system-log <panel|nginx|ssh|mariadb|redis> <lines> | panel-domain-set <domain> <email> | panel-domain-remove | db-engine-upgrade <mariadb|mongodb|redis> <version> | panel-access <any|CIDR,...>"
     ;;
 esac
 }

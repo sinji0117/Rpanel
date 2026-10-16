@@ -815,3 +815,58 @@ fn helper_panel_domain() {
     );
     let _ = std::fs::remove_dir_all(&tmp);
 }
+
+#[test]
+fn helper_db_engine_and_panel_access() {
+    let run = |args: &[&str], env: Option<&std::path::Path>| {
+        let mut c = Command::new("bash");
+        c.arg(helper()).args(args);
+        if let Some(p) = env {
+            c.env("RPANEL_TEST_PANEL_ALLOW", p);
+        }
+        c.output().unwrap()
+    };
+    for (e, v) in [
+        ("mariadb", "10.6"),
+        ("mariadb", "11.4;id"),
+        ("mysql", "8.0"),
+        ("mongodb", "7.0"),
+        ("redis", "6"),
+        ("", ""),
+    ] {
+        let out = run(&["db-engine-upgrade", e, v], None);
+        assert!(!out.status.success(), "{e} {v} accepted");
+        assert!(
+            String::from_utf8_lossy(&out.stderr).contains("고를 수 없는 버전"),
+            "{e} {v}: validation must run first"
+        );
+    }
+    let f = std::env::temp_dir().join(format!("rpanel-allow-{}.conf", std::process::id()));
+    for bad in [
+        "",
+        "1.2.3.4;deny all",
+        "300.1.1.1",
+        "10.0.0.0/33",
+        "abc",
+        "1.2.3.4 5.6.7.8",
+        "::1/129",
+    ] {
+        assert!(
+            !run(&["panel-access", bad], Some(&f)).status.success(),
+            "{bad} accepted"
+        );
+    }
+    assert!(run(
+        &["panel-access", "203.0.113.5,10.0.0.0/24,2001:db8::/32"],
+        Some(&f)
+    )
+    .status
+    .success());
+    let s = std::fs::read_to_string(&f).unwrap();
+    assert!(s.starts_with("# managed by rpanel"), "{s}");
+    assert!(s.contains("allow 203.0.113.5;\nallow 10.0.0.0/24;\nallow 2001:db8::/32;\nallow 127.0.0.1;\ndeny all;"), "{s}");
+    assert!(run(&["panel-access", "any"], Some(&f)).status.success());
+    let s = std::fs::read_to_string(&f).unwrap();
+    assert!(!s.contains("deny"), "{s}");
+    let _ = std::fs::remove_file(&f);
+}

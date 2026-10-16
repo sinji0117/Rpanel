@@ -23,6 +23,7 @@ pub const EVENTS: &[(&str, &str, bool)] = &[
     ("mem_high", "메모리 사용량 높음", true),
     ("update_available", "새 버전 알림", true),
     ("runtime_install", "런타임 설치 결과", true),
+    ("db_engine", "데이터베이스 버전 변경 결과", true),
     ("admin_login", "관리자 로그인", false),
 ];
 

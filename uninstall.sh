@@ -112,7 +112,7 @@ n=0
 for f in /etc/nginx/sites-enabled/rpanel-* /etc/nginx/sites-available/rpanel-*; do
   [[ -e "$f" || -L "$f" ]] && { rm -f "$f"; n=$((n + 1)); }
 done
-rm -f /etc/nginx/conf.d/rpanel.conf /etc/letsencrypt/renewal-hooks/deploy/rpanel-nginx-reload
+rm -f /etc/nginx/conf.d/rpanel.conf /etc/nginx/rpanel-panel-allow.conf /etc/letsencrypt/renewal-hooks/deploy/rpanel-nginx-reload
 # 설치할 때 꺼 둔 Nginx 기본 페이지를 되살림
 if [[ -f /etc/nginx/sites-available/default && ! -e /etc/nginx/sites-enabled/default ]] \
    && ! ls /etc/nginx/sites-enabled/ 2>/dev/null | grep -q .; then

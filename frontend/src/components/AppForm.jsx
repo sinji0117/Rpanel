@@ -2,6 +2,18 @@ import { useState } from 'react'
 import { Field } from './ui'
 import { t } from '../i18n'
 
+/** 새 앱: 먼저 역할(백엔드·프런트·관리자 화면)을 고르고, 백엔드는 언어를 고름 */
+export const ROLES = [
+  { id: 'back', label: '백엔드 (API 서버)', desc: 'Rust·Python 으로 만든 API·웹 서버. 포트를 받아 서비스로 실행합니다', icon: '⚙' },
+  { id: 'front', label: '프런트엔드 (웹 화면)', desc: 'React·Vue 등을 npm run build 로 빌드해 정적 파일로 서비스합니다', icon: '▣' },
+  { id: 'admin', label: '관리자 화면', desc: '관리자용 프런트. admin.example.com 처럼 다른 도메인을 붙입니다', icon: '⚑' },
+]
+
+export function roleOfApp(a) {
+  if (!a?.kind || a.kind === 'rust' || a.kind === 'python') return 'back'
+  return /admin|관리/i.test(`${a.name ?? ''} ${a.slug ?? ''} ${a.domains ?? ''}`) ? 'admin' : 'front'
+}
+
 export const KINDS = [
   { id: 'rust', label: 'Rust', desc: 'cargo build → systemd 서비스 (Axum 등)' },
   { id: 'python', label: 'Python', desc: 'venv + requirements.txt → systemd 서비스' },
@@ -46,6 +58,7 @@ export function emptyApp() {
 /** 서버로 보낼 payload (빈 값 정리) */
 export function toPayload(v) {
   const out = { ...v }
+  delete out.role
   out.api_proxy_port = v.api_proxy_port === '' || v.api_proxy_port == null ? null : Number(v.api_proxy_port)
   for (const k of ['slug', 'root_dir', 'build_cmd', 'start_cmd', 'binary_name', 'frontend_dir']) {
     if (typeof out[k] === 'string' && !out[k].trim()) out[k] = null
@@ -59,8 +72,9 @@ const BUILD_PLACEHOLDER = {
   static: 'npm run build',
 }
 
-export default function AppForm({ initial, mode = 'create', onSubmit, submitting }) {
+export default function AppForm({ initial, mode = 'create', onSubmit, submitting, backends = [] }) {
   const [v, setV] = useState(() => ({ ...emptyApp(), ...normalize(initial) }))
+  const [role, setRole] = useState(() => (initial?.role ? initial.role : roleOfApp(initial)))
   const [slugTouched, setSlugTouched] = useState(mode === 'edit')
   const set = (k) => (e) => {
     const val = e.target.value
@@ -81,23 +95,62 @@ export default function AppForm({ initial, mode = 'create', onSubmit, submitting
       }}
     >
       {mode === 'create' && (
-        <div>
-          <span className="label">{t('종류')}</span>
-          <div className="grid grid-cols-3 gap-2" role="radiogroup" aria-label={t('앱 종류')}>
-            {KINDS.map((k) => (
-              <button
-                type="button"
-                key={k.id}
-                role="radio"
-                aria-checked={v.kind === k.id}
-                onClick={() => setV((s) => ({ ...s, kind: k.id }))}
-                className={`rounded-lg border px-3 py-2.5 text-left transition ${v.kind === k.id ? 'border-signal/60 bg-signal/5' : 'border-ink-700 hover:border-ink-600'}`}
-              >
-                <span className="block text-sm font-medium">{k.label}</span>
-                <span className="mt-0.5 block text-[11px] leading-snug text-ink-400">{t(k.desc)}</span>
-              </button>
-            ))}
+        <div className="space-y-3">
+          <div>
+            <span className="label">{t('무엇을 만드나요?')}</span>
+            <div className="grid gap-2 sm:grid-cols-3" role="radiogroup" aria-label={t('앱 역할')}>
+              {ROLES.map((r) => (
+                <button
+                  type="button"
+                  key={r.id}
+                  role="radio"
+                  aria-checked={role === r.id}
+                  data-testid={`role-${r.id}`}
+                  onClick={() => {
+                    setRole(r.id)
+                    setV((s) => ({
+                      ...s,
+                      kind: r.id === 'back' ? (s.kind === 'static' ? 'rust' : s.kind) : 'static',
+                      api_proxy_port: r.id !== 'back' && !s.api_proxy_port && backends.length === 1 ? String(backends[0].port ?? '') : s.api_proxy_port,
+                    }))
+                  }}
+                  className={`rounded-lg border px-3 py-3 text-left transition ${role === r.id ? 'border-signal/60 bg-signal/5' : 'border-ink-700 hover:border-ink-600'}`}
+                >
+                  <span className="flex items-center gap-2 text-sm font-medium">
+                    <span aria-hidden="true" className="text-ink-400">
+                      {r.icon}
+                    </span>
+                    {t(r.label)}
+                  </span>
+                  <span className="mt-1 block text-[11px] leading-snug text-ink-400">{t(r.desc)}</span>
+                </button>
+              ))}
+            </div>
           </div>
+          {role === 'back' ? (
+            <div>
+              <span className="label">{t('언어')}</span>
+              <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label={t('앱 종류')}>
+                {KINDS.filter((k) => k.id !== 'static').map((k) => (
+                  <button
+                    type="button"
+                    key={k.id}
+                    role="radio"
+                    aria-checked={v.kind === k.id}
+                    onClick={() => setV((s) => ({ ...s, kind: k.id }))}
+                    className={`rounded-lg border px-3 py-2.5 text-left transition ${v.kind === k.id ? 'border-signal/60 bg-signal/5' : 'border-ink-700 hover:border-ink-600'}`}
+                  >
+                    <span className="block text-sm font-medium">{k.label}</span>
+                    <span className="mt-0.5 block text-[11px] leading-snug text-ink-400">{t(k.desc)}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <p className="rounded-lg border border-ink-700 bg-ink-900/40 px-3 py-2 text-xs text-ink-400">
+              {t('Static 앱으로 만듭니다: npm ci → npm run build → 결과 폴더를 Nginx 로 서비스. 아래 “API 연결”에서 백엔드를 고르면 같은 도메인의 /api/ 가 백엔드로 갑니다.')}
+            </p>
+          )}
         </div>
       )}
 
@@ -197,15 +250,43 @@ export default function AppForm({ initial, mode = 'create', onSubmit, submitting
           <Field label={t('출력 디렉토리')} htmlFor="app-out">
             <input id="app-out" className="input font-mono" value={v.output_dir} onChange={set('output_dir')} />
           </Field>
-          <Field label={t('/api/ 프록시 포트')} htmlFor="app-api" hint={t('같은 도메인의 /api/ 를 이 로컬 포트로 (선택)')}>
-            <input id="app-api" type="number" min="1" max="65535" className="input font-mono" value={v.api_proxy_port ?? ''} onChange={set('api_proxy_port')} placeholder="8100" />
-          </Field>
+          {backends.length > 0 ? (
+            <Field label={t('API 연결 (백엔드)')} htmlFor="app-api" hint={t('같은 도메인의 /api/ 요청을 이 백엔드로 보냅니다')}>
+              <select id="app-api" className="input" value={v.api_proxy_port ?? ''} onChange={set('api_proxy_port')}>
+                <option value="">{t('연결 안 함')}</option>
+                {backends.map((b) => (
+                  <option key={b.id} value={b.port ?? ''} disabled={!b.port}>
+                    {b.name} (:{b.port})
+                  </option>
+                ))}
+              </select>
+            </Field>
+          ) : (
+            <Field label={t('/api/ 프록시 포트')} htmlFor="app-api" hint={t('같은 도메인의 /api/ 를 이 로컬 포트로 (선택)')}>
+              <input
+                id="app-api"
+                type="number"
+                min="1"
+                max="65535"
+                className="input font-mono"
+                value={v.api_proxy_port ?? ''}
+                onChange={set('api_proxy_port')}
+                placeholder="8100"
+              />
+            </Field>
+          )}
         </div>
       )}
 
       <div className={`grid gap-4 ${isService ? 'sm:grid-cols-[1fr_180px]' : ''}`}>
         <Field label={t('도메인')} htmlFor="app-domains" hint={t('공백/쉼표로 구분 — 네이키드와 www 둘 다 넣으세요. DNS 가 이 서버(또는 앞단 프록시)를 가리켜야 합니다')}>
-          <input id="app-domains" className="input font-mono" value={v.domains} onChange={set('domains')} placeholder="beripick.com www.beripick.com" />
+          <input
+            id="app-domains"
+            className="input font-mono"
+            value={v.domains}
+            onChange={set('domains')}
+            placeholder={role === 'admin' ? 'admin.beripick.com' : role === 'back' ? t('(비워도 됩니다 — 프런트의 /api/ 로 연결)') : 'beripick.com www.beripick.com'}
+          />
         </Field>
         {isService && (
           <Field label={t('헬스체크 경로')} htmlFor="app-health">

@@ -24,7 +24,11 @@ describe('AppForm', () => {
     expect(screen.getByLabelText('Slug')).toHaveValue('beripick-front')
     expect(screen.getByLabelText(/바이너리 이름/)).toBeInTheDocument()
 
-    await user.click(screen.getByRole('radio', { name: /Static/ }))
+    // 백엔드: 언어(Rust·Python)만, 프런트엔드: Static
+    expect(screen.getByRole('radio', { name: /^Python/ })).toBeInTheDocument()
+    expect(screen.queryByRole('radio', { name: /^Static/ })).not.toBeInTheDocument()
+    await user.click(screen.getByRole('radio', { name: /프런트엔드/ }))
+    expect(screen.queryByRole('radio', { name: /^Python/ })).not.toBeInTheDocument()
     expect(screen.queryByLabelText(/바이너리 이름/)).not.toBeInTheDocument()
     expect(screen.queryByLabelText('헬스체크 경로')).not.toBeInTheDocument()
     await user.type(screen.getByLabelText('/api/ 프록시 포트'), '8100')
@@ -41,6 +45,18 @@ describe('AppForm', () => {
       output_dir: 'dist',
       domains: 'beripick.com www.beripick.com',
     })
+  })
+
+  it('front end with backends picks the API from a list', async () => {
+    const user = userEvent.setup()
+    const onSubmit = vi.fn()
+    render(<AppForm onSubmit={onSubmit} initial={{ role: 'admin', kind: 'static', name: 'Shop Admin' }} backends={[{ id: 1, name: 'Shop API', port: 8100 }]} />)
+    expect(screen.getByRole('radio', { name: /관리자 화면/ })).toHaveAttribute('aria-checked', 'true')
+    await user.selectOptions(screen.getByLabelText('API 연결 (백엔드)'), '8100')
+    await user.type(screen.getByLabelText('Git 저장소'), 'https://github.com/a/admin.git')
+    await user.click(screen.getByRole('button', { name: '앱 만들기' }))
+    expect(onSubmit.mock.calls[0][0]).toMatchObject({ kind: 'static', api_proxy_port: 8100, name: 'Shop Admin' })
+    expect(onSubmit.mock.calls[0][0].role).toBeUndefined()
   })
 
   it('edit mode locks slug and hides kind picker', () => {

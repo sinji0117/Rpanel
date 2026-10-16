@@ -2,11 +2,13 @@ pub mod apps;
 pub mod backups;
 pub mod cron;
 pub mod databases;
+pub mod dbengines;
 pub mod dbweb;
 pub mod deployments;
 pub mod files;
 pub mod mongo;
 pub mod notifications;
+pub mod panel_access;
 pub mod panel_domain;
 pub mod projects;
 pub mod runtimes;
@@ -123,6 +125,12 @@ pub fn router(state: AppState) -> Router {
                 .put(panel_domain::set)
                 .delete(panel_domain::remove),
         )
+        .route(
+            "/system/panel-access",
+            get(panel_access::get).put(panel_access::set),
+        )
+        .route("/db-engines", get(dbengines::list))
+        .route("/db-engines/{engine}", post(dbengines::upgrade))
         // DB 웹 관리 (MariaDB)
         .route("/dbweb/admin/{id}", get(dbweb::admin_tables))
         .route("/dbweb/admin/{id}/query", post(dbweb::admin_query))

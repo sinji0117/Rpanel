@@ -113,6 +113,85 @@ function PanelDomain() {
   )
 }
 
+/** 패널 접속 허용 IP */
+function PanelAccess() {
+  const { user } = useAuth()
+  const toast = useToast()
+  const d = useFetch(() => (user?.role === 'admin' ? get('/system/panel-access') : Promise.resolve(null)), [user?.role])
+  const [text, setText] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState(null)
+  if (user?.role !== 'admin' || !d.data) return null
+  const cur = d.data
+  const value = text ?? cur.allow.join('\n')
+  const list = value
+    .split(/[\s,]+/)
+    .map((x) => x.trim())
+    .filter(Boolean)
+  const save = async (allow) => {
+    setBusy(true)
+    setError(null)
+    try {
+      const r = await put('/system/panel-access', { allow })
+      d.setData(r)
+      setText(null)
+      toast.push(r.restricted ? t('허용한 IP 에서만 패널에 접속할 수 있습니다') : t('접속 제한을 풀었습니다'), 'success')
+    } catch (err) {
+      setError(err)
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <Section
+      title={t('패널 접속 IP')}
+      desc={t(
+        '여기에 넣은 IP·대역에서만 패널을 열 수 있습니다 (비우면 어디서나). Git 웹훅 주소는 제한하지 않습니다. 잠겼다면 서버에서 sudo /usr/local/lib/rpanel/rpanel-helper panel-access any 로 풉니다.',
+      )}
+    >
+      <div className="space-y-3">
+        <p className="flex flex-wrap items-center gap-2 text-sm">
+          <span className={cur.restricted ? 'text-warn' : 'text-ink-400'} data-testid="panel-access-state">
+            {cur.restricted ? t('제한 중 · {n}개', { n: cur.allow.length }) : t('어디서나 접속 가능')}
+          </span>
+          <span className="ml-auto text-xs text-ink-400">
+            {t('지금 내 IP')} <code className="font-mono">{cur.my_ip}</code>
+          </span>
+          {!list.includes(cur.my_ip) && /^[0-9a-f.:]+$/i.test(cur.my_ip) && (
+            <button type="button" className="btn-ghost px-2 py-0.5 text-xs" onClick={() => setText([...list, cur.my_ip].join('\n'))}>
+              {t('+ 내 IP 추가')}
+            </button>
+          )}
+        </p>
+        <Field label={t('허용 IP · 대역 (한 줄에 하나)')} htmlFor="panel-allow">
+          <textarea
+            id="panel-allow"
+            className="input min-h-24 font-mono text-xs"
+            placeholder={'203.0.113.5\n10.0.0.0/24'}
+            value={value}
+            onChange={(e) => setText(e.target.value)}
+          />
+        </Field>
+        <ErrorBox error={error} />
+        <div className="flex gap-2">
+          <button className="btn-primary" disabled={busy} onClick={() => save(list)}>
+            {t('적용')}
+          </button>
+          {cur.restricted && (
+            <button
+              className="btn-ghost"
+              disabled={busy}
+              onClick={async () => (await confirmDialog(t('접속 IP 제한을 풀까요? 어디서나 패널 로그인 화면을 열 수 있게 됩니다.'))) && save([])}
+            >
+              {t('제한 풀기')}
+            </button>
+          )}
+        </div>
+      </div>
+    </Section>
+  )
+}
+
 export default function Settings() {
   const { user, logout } = useAuth()
   const toast = useToast()
@@ -161,6 +240,7 @@ export default function Settings() {
         </Section>
 
         <PanelDomain />
+        <PanelAccess />
 
         <Section title={t('내 비밀번호 변경')} desc={t('변경하면 모든 기기의 세션이 로그아웃됩니다. 다른 관리자는 관리자 메뉴에서 관리합니다.')}>
           <form

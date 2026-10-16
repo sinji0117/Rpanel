@@ -28,6 +28,46 @@ export function createMockBackend({ needsSetup = false } = {}) {
     admins: [],
     mongos: [],
     panelDomain: null,
+    panelAllow: [],
+    engines: [
+      {
+        engine: 'mariadb',
+        label: 'MariaDB',
+        installed: true,
+        version: '10.11.13-MariaDB',
+        series: '10.11',
+        list: [
+          ['10.11', 'LTS · Ubuntu 24.04 기본'],
+          ['11.4', 'LTS'],
+          ['11.8', 'LTS'],
+        ],
+        job: null,
+      },
+      {
+        engine: 'mongodb',
+        label: 'MongoDB',
+        installed: true,
+        version: '8.0.4',
+        series: '8.0',
+        list: [
+          ['8.0', '기본'],
+          ['8.2', ''],
+        ],
+        job: null,
+      },
+      {
+        engine: 'redis',
+        label: 'Redis',
+        installed: true,
+        version: '7.0.15',
+        series: '7.0',
+        list: [
+          ['7.0', 'Ubuntu 24.04 기본'],
+          ['8', 'packages.redis.io 최신 8.x'],
+        ],
+        job: null,
+      },
+    ],
     dbweb: {
       columns: ['id', 'name', 'price'],
       rows: [
@@ -810,6 +850,57 @@ export function createMockBackend({ needsSetup = false } = {}) {
       if (body?.delete_files) db.backups = db.backups.filter((b) => b.job_id !== j.id)
       db.jobs = db.jobs.filter((x) => x !== j)
       return json(route, 204)
+    }
+    // ── DB 서버 버전 ──
+    if (path === '/db-engines')
+      return json(route, 200, {
+        engines: db.engines.map((e) => {
+          const cur = e.list.findIndex((x) => x[0] === e.series)
+          return {
+            engine: e.engine,
+            label: e.label,
+            installed: e.installed,
+            version: e.version,
+            series: e.series,
+            job: e.job,
+            last: null,
+            versions: e.list.map(([v, note], i) => ({
+              version: v,
+              note,
+              current: i === cur,
+              available: i > cur,
+              reason: i < cur ? '낮은 버전으로 되돌릴 수 없습니다' : i === cur ? '이미 이 버전입니다' : null,
+            })),
+          }
+        }),
+      })
+    m = path.match(/^\/db-engines\/(\w+)$/)
+    if (m) {
+      const e = db.engines.find((x) => x.engine === m[1])
+      if (!e) return json(route, 404, { message: '찾을 수 없습니다' })
+      const ti = e.list.findIndex((x) => x[0] === body.version)
+      if (ti <= e.list.findIndex((x) => x[0] === e.series)) return json(route, 400, { error: 'bad_request', message: '낮은 버전으로 되돌릴 수 없습니다' })
+      e.job = {
+        engine: e.engine,
+        target: body.version,
+        status: 'done',
+        log: `▶ 전체 백업\n▶ ${e.label} ${body.version} 설치\nOK ${body.version}.1`,
+        started_at: now(),
+        finished_at: now(),
+      }
+      e.series = body.version
+      e.version = body.version + '.1'
+      return json(route, 202, { engine: e.engine, target: body.version, status: 'running' })
+    }
+    // ── 패널 접속 IP ──
+    if (path === '/system/panel-access') {
+      if (method === 'PUT') {
+        const allow = (body.allow || []).map((x) => x.trim()).filter(Boolean)
+        if (allow.some((x) => !/^[0-9a-f.:/]+$/i.test(x))) return json(route, 400, { error: 'bad_request', message: 'IP 형식이 올바르지 않습니다' })
+        if (allow.length && !allow.includes('203.0.113.9')) return json(route, 400, { error: 'bad_request', message: '지금 접속한 IP 203.0.113.9 가 목록에 없습니다' })
+        db.panelAllow = allow
+      }
+      return json(route, 200, { allow: db.panelAllow, my_ip: '203.0.113.9', restricted: db.panelAllow.length > 0 })
     }
     // ── MongoDB ──
     const mongoUrl = (d) => `mongodb://${d.username}:pw@127.0.0.1:27017/${d.name}?authSource=${d.name}`

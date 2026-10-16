@@ -1,6 +1,9 @@
 import { expect, test } from '@playwright/test'
 import { createMockBackend, PKG_VERSION } from './mockApi'
 
+/** 왼쪽 주 메뉴 (화면 위 같은 묶음 메뉴와 구분) */
+const menu = (page) => page.getByRole('navigation', { name: /주 메뉴|Main menu/ }).first()
+
 /** 패널의 확인·입력 팝업에 자동으로 "확인" (이름 입력이 필요한 삭제는 그 이름을 넣음) */
 async function acceptPopups(page, promptValue = '') {
   await page.addLocatorHandler(
@@ -80,7 +83,7 @@ test('프로젝트 → Rust 앱 생성 → 배포 실시간 로그 → 롤백 �
 
   await page.getByRole('button', { name: '+ 새 앱' }).click()
   const dialog = page.getByRole('dialog', { name: '새 앱' })
-  await expect(dialog.getByRole('radio', { name: /Rust/ })).toHaveAttribute('aria-checked', 'true')
+  await expect(dialog.getByRole('radio', { name: /^Rust/ })).toHaveAttribute('aria-checked', 'true')
   await dialog.getByLabel('이름', { exact: true }).fill('Beripick API')
   await expect(dialog.getByLabel('Slug')).toHaveValue('beripick-api')
   await dialog.getByLabel('Git 저장소').fill('ssh://git@100.100.199.123:2222/beri/backend.git')
@@ -230,7 +233,7 @@ test('데이터베이스·Redis 생성 → 환경변수에 자동 주입 표시 
   await expect(page.getByText('MariaDB · beripick_api')).toBeVisible()
   await expect(page.getByText('Redis · DB 4')).toBeVisible()
 
-  await page.getByRole('link', { name: 'MariaDB' }).click()
+  await menu(page).getByRole('link', { name: 'MariaDB' }).click()
   await expect(page.getByRole('cell', { name: 'beripick_api' }).first()).toBeVisible()
 })
 
@@ -270,11 +273,11 @@ test('백업 → 목록, 크론 등록(잘못된 일정 거부), 사이트·Ngin
   await expect(page.getByTestId('stat-2xx')).toHaveText('3')
   await expect(page.getByTestId('stat-5xx')).toHaveText('1')
 
-  await page.getByRole('link', { name: '사이트' }).click()
+  await menu(page).getByRole('link', { name: '사이트' }).click()
   await expect(page.getByText('응답 이상 1개')).toBeVisible()
   await expect(page.getByRole('cell', { name: /^200/ })).toBeVisible()
 
-  await page.getByRole('link', { name: '백업' }).click()
+  await menu(page).getByRole('link', { name: '백업' }).click()
   await expect(page.getByRole('heading', { name: '백업', exact: true })).toBeVisible()
   await expect(page.getByRole('cell', { name: 'Beripick API' }).first()).toBeVisible()
 })
@@ -286,7 +289,7 @@ test('Rust 사이트 만들기 → 접속 정보 → 실행 파일 업로드·�
   await page.goto('/sites')
   await page.getByRole('button', { name: '첫 사이트 만들기' }).click()
   const dialog = page.getByRole('dialog', { name: '사이트 추가' })
-  await expect(dialog.getByRole('radio', { name: /Rust/ })).toHaveAttribute('aria-checked', 'true')
+  await expect(dialog.getByRole('radio', { name: /^Rust/ })).toHaveAttribute('aria-checked', 'true')
   await expect(dialog.getByRole('radio', { name: /PHP/ })).toHaveCount(0)
   await dialog.getByLabel('도메인').fill('Shop.example.com www.shop.example.com')
   await expect(dialog.getByTestId('site-summary')).toContainText('shop')
@@ -411,7 +414,7 @@ test('DB·Redis 계정 추가·삭제, 백업 예약 추가·수정·실행·삭
   await expect(card.getByText('shop_ro')).toHaveCount(0)
 
   // Redis 계정: 만들기 → 수정 → 삭제 (Redis 메뉴)
-  await page.getByRole('link', { name: 'Redis' }).click()
+  await menu(page).getByRole('link', { name: 'Redis' }).click()
   await page.getByRole('button', { name: '+ Redis 계정' }).click()
   const rdlg = page.getByRole('dialog', { name: 'Redis 계정 만들기' })
   await rdlg.getByLabel('계정 이름').fill('sessions')
@@ -433,7 +436,7 @@ test('DB·Redis 계정 추가·삭제, 백업 예약 추가·수정·실행·삭
   await expect(page.getByText('만든 Redis 계정이 없습니다.')).toBeVisible()
 
   // 백업 예약: 전체 · 매주 일요일 04:30 → 수정 → 지금 실행 → 끄기 → 삭제(파일 포함)
-  await page.getByRole('link', { name: '백업' }).click()
+  await menu(page).getByRole('link', { name: '백업' }).click()
   await page.getByRole('button', { name: '+ 예약 추가' }).click()
   const jd = page.getByRole('dialog', { name: '백업 예약 추가' })
   await expect(jd.getByLabel('백업할 대상')).toHaveValue('all')
@@ -475,7 +478,7 @@ test('관리자 추가·수정·삭제', async ({ page }) => {
   await backend.install(page)
   await acceptPopups(page)
   await page.goto('/')
-  await page.getByRole('link', { name: '관리자' }).click()
+  await menu(page).getByRole('link', { name: '관리자' }).click()
   const list = page.getByRole('table', { name: '관리자 목록' })
   await expect(list.getByText('admin@example.com')).toBeVisible()
   await expect(list.getByRole('button', { name: 'admin@example.com 삭제' })).toHaveCount(0)
@@ -501,9 +504,9 @@ test('관리자 추가·수정·삭제', async ({ page }) => {
   await expect(list.getByText('devops@example.com')).toHaveCount(0)
 
   // 설정에는 시스템 정보가 없고 대시보드에 있음
-  await page.getByRole('link', { name: '설정' }).click()
+  await menu(page).getByRole('link', { name: '설정' }).click()
   await expect(page.getByRole('heading', { name: '내 비밀번호 변경' })).toBeVisible()
-  await page.getByRole('link', { name: '대시보드' }).click()
+  await menu(page).getByRole('link', { name: '대시보드' }).click()
   await expect(page.getByText('Intel Xeon E5-2690', { exact: false })).toBeVisible()
 })
 
@@ -519,15 +522,15 @@ test('테마 낮·밤 전환과 영어 전환', async ({ page }) => {
   await expect(html).toHaveAttribute('data-theme', 'dark')
 
   await page.getByRole('combobox', { name: '언어' }).selectOption('en')
-  await expect(page.getByRole('link', { name: 'Dashboard' })).toBeVisible()
+  await expect(menu(page).getByRole('link', { name: 'Dashboard' })).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible()
   await expect(html).toHaveAttribute('lang', 'en')
   // 새로 고쳐도 유지
   await page.reload()
-  await expect(page.getByRole('link', { name: 'Sites' })).toBeVisible()
+  await expect(menu(page).getByRole('link', { name: 'Sites' })).toBeVisible()
   await expect(html).toHaveAttribute('data-theme', 'dark')
   await page.getByRole('combobox', { name: 'Language' }).selectOption('ko')
-  await expect(page.getByRole('link', { name: '사이트' })).toBeVisible()
+  await expect(menu(page).getByRole('link', { name: '사이트' })).toBeVisible()
 })
 
 test('버전 표시 (지금 · GitHub) 와 런타임 버전 설치·기본 변경·앱별 선택', async ({ page }) => {
@@ -540,7 +543,7 @@ test('버전 표시 (지금 · GitHub) 와 런타임 버전 설치·기본 변�
   await expect(page.getByTestId('version-latest')).toHaveText('v9.9.9')
   await expect(page.getByText('sudo rpanel-update')).toBeVisible()
 
-  await page.getByRole('link', { name: '런타임' }).click()
+  await menu(page).getByRole('link', { name: '런타임' }).click()
   await expect(page.getByRole('heading', { name: '런타임' })).toBeVisible()
   // Python: 3.13 고르기 → 설치하고 기본으로 변경 → 설치 끝나면 기본
   const py = page.getByRole('group', { name: 'Python 버전 고르기' })
@@ -601,7 +604,7 @@ test('? 도움말 · 로그 메뉴 (종류별)', async ({ page }) => {
   await page.keyboard.press('Escape')
   await expect(page.getByRole('tooltip')).toHaveCount(0)
 
-  await page.getByRole('link', { name: '로그' }).click()
+  await menu(page).getByRole('link', { name: '로그' }).click()
   await expect(page.getByRole('heading', { name: '로그' })).toBeVisible()
   await expect(page.getByRole('tab', { name: '활동 기록' })).toHaveAttribute('aria-selected', 'true')
   await page.getByRole('tab', { name: '배포 기록' }).click()
@@ -650,7 +653,22 @@ test('알림: 종 아이콘 · 목록 · 설정 · 시험 알림, 메뉴 순서,
   await page.goto('/')
 
   // 메뉴 순서: … 로그 · 런타임 · 설정 · 관리자
-  await expect(page.locator('aside nav a')).toHaveText(['대시보드', '사이트', '프로젝트', 'MariaDB', 'MongoDB', 'Redis', '백업', '로그', '런타임', '설정', '관리자'])
+  await expect(page.locator('[data-testid^=nav-group-]')).toHaveText([/웹사이트/, /데이터베이스/, /운영/, /시스템/])
+  await expect(page.locator('aside nav a')).toHaveText([
+    '대시보드',
+    '사이트',
+    '프로젝트',
+    'MariaDB',
+    'MongoDB',
+    'Redis',
+    'DB 버전',
+    '백업',
+    '로그',
+    '알림',
+    '런타임',
+    '설정',
+    '관리자',
+  ])
 
   // 종 아이콘: 안 읽은 2개 → 펼치면 번역된 제목 → 누르면 링크로 이동하고 읽음
   await expect(page.getByTestId('notification-count').first()).toHaveText('2')
@@ -867,4 +885,94 @@ test('패널 도메인 설정과 사이트 계정 표시', async ({ page }) => {
 
   await page.goto('/sites')
   await expect(page.getByRole('link', { name: 'Git 배포' }).first()).toBeVisible()
+})
+
+test('2차 메뉴: 묶음 접기·펼치기와 화면 위 위치 표시', async ({ page }) => {
+  const backend = seededBackend()
+  await backend.install(page)
+  await page.goto('/apps/2')
+  // 앱 화면은 웹사이트 › 프로젝트
+  const bar = page.getByTestId('section-bar')
+  await expect(bar).toContainText('웹사이트')
+  await expect(bar.getByRole('link', { name: '프로젝트' })).toHaveClass(/ring-1/)
+  await bar.getByRole('link', { name: '사이트' }).click()
+  await expect(page).toHaveURL(/\/sites$/)
+  // 접은 묶음은 새로 고침해도 접힌 채로 (지금 화면이 속한 묶음은 항상 펼침)
+  await page.getByTestId('nav-group-ops').click()
+  await expect(page.locator('aside nav').getByRole('link', { name: '백업' })).toHaveCount(0)
+  await page.reload()
+  await expect(page.locator('aside nav').getByRole('link', { name: '백업' })).toHaveCount(0)
+  await page.getByTestId('nav-group-ops').click()
+  await page.locator('aside nav').getByRole('link', { name: '백업' }).click()
+  await expect(page.getByTestId('section-bar')).toContainText('운영')
+})
+
+test('알림 목록: 분류·수준으로 나눠 보기', async ({ page }) => {
+  const backend = seededBackend()
+  const n = (id, kind, level, title, params = {}) => ({ id, kind, level, title, params, body: null, link: null, read_at: null, created_at: new Date().toISOString() })
+  backend.db.notifications.push(
+    n(1, 'deploy_failed', 'error', '배포 실패: {app} #{id}', { app: 'Beripick API', id: 9 }),
+    n(2, 'backup_success', 'success', '백업 완료: {target}', { target: 'beripick_api' }),
+    n(3, 'disk_high', 'warning', '디스크 사용량 {pct}% ({mount})', { pct: 93, mount: '/' }),
+  )
+  await backend.install(page)
+  await page.goto('/notifications')
+  const list = page.getByRole('list', { name: '알림 목록' })
+  await expect(list.locator('li p.text-sm')).toHaveCount(3)
+  await expect(list.getByText('오늘')).toBeVisible()
+  await page.getByRole('tab', { name: /^배포/ }).click()
+  await expect(list.locator('li p.text-sm')).toHaveCount(1)
+  await expect(list).toContainText('배포 실패: Beripick API #9')
+  await page.getByRole('tab', { name: /^전체/ }).click()
+  await page.getByLabel('알림 수준').selectOption('warning')
+  await expect(list.locator('li p.text-sm')).toHaveCount(1)
+  await expect(list).toContainText('디스크 사용량 93% (/)')
+})
+
+test('DB 버전: 지금 버전 · 더 높은 버전으로만 바꾸기', async ({ page }) => {
+  const backend = seededBackend()
+  await backend.install(page)
+  await acceptPopups(page)
+  await page.goto('/db-versions')
+  await expect(page.getByTestId('engine-version-mariadb')).toHaveText('10.11.13-MariaDB')
+  const maria = page.getByTestId('engine-mariadb')
+  await expect(maria.getByText('사용 중')).toBeVisible()
+  await maria.getByRole('button', { name: '이 버전으로' }).first().click()
+  await expect(page.getByText('MariaDB 11.4 로 바꾸는 중입니다')).toBeVisible()
+  await expect(page.getByTestId('engine-version-mariadb')).toHaveText('11.4.1')
+  await expect(page.getByText('11.4 로 바꿨습니다')).toBeVisible()
+  // 이제 10.11 은 낮은 버전 → 바꿀 수 없음
+  await expect(maria.getByRole('button', { name: '바꿀 수 없음' })).toBeDisabled()
+})
+
+test('새 앱: 백엔드 · 프런트 · 관리자 화면을 먼저 고름', async ({ page }) => {
+  const backend = seededBackend()
+  await backend.install(page)
+  await page.goto('/projects/1')
+  await page.getByRole('button', { name: '+ 새 앱' }).click()
+  const dlg = page.getByRole('dialog', { name: '새 앱' })
+  await expect(dlg.getByRole('radio', { name: /백엔드/ })).toHaveAttribute('aria-checked', 'true')
+  await dlg.getByRole('radio', { name: /관리자 화면/ }).click()
+  await expect(dlg.getByRole('radio', { name: /^Rust/ })).toHaveCount(0)
+  await dlg.getByLabel('이름').fill('Beripick Admin')
+  await dlg.getByLabel('Git 저장소').fill('https://github.com/a/admin.git')
+  await dlg.getByLabel('API 연결 (백엔드)').selectOption('8100')
+  await dlg.getByLabel('도메인').fill('admin.beripick.com')
+  await dlg.getByRole('button', { name: '앱 만들기' }).click()
+  await expect(page).toHaveURL(/\/apps\/\d+$/)
+  expect(backend.db.apps.at(-1)).toMatchObject({ kind: 'static', api_proxy_port: 8100, domains: 'admin.beripick.com' })
+})
+
+test('패널 접속 IP: 내 IP 없이는 저장 안 됨', async ({ page }) => {
+  const backend = seededBackend()
+  await backend.install(page)
+  await page.goto('/settings')
+  await expect(page.getByTestId('panel-access-state')).toHaveText('어디서나 접속 가능')
+  await page.getByLabel('허용 IP · 대역 (한 줄에 하나)').fill('10.0.0.0/24')
+  await page.getByRole('button', { name: '적용' }).click()
+  await expect(page.getByRole('alert')).toContainText('203.0.113.9')
+  await page.getByRole('button', { name: '+ 내 IP 추가' }).click()
+  await page.getByRole('button', { name: '적용' }).click()
+  await expect(page.getByTestId('panel-access-state')).toHaveText('제한 중 · 2개')
+  expect(backend.db.panelAllow).toEqual(['10.0.0.0/24', '203.0.113.9'])
 })

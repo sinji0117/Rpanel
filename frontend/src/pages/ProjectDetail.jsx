@@ -124,9 +124,9 @@ function ProjectOverview({ apps, reload, onAdd, projectName = '' }) {
   const admins = apps.filter(isAdminFront)
   const others = apps.filter((a) => !isBackend(a) && a.kind !== 'static')
   const groups = [
-    { id: 'front', title: t('프런트'), list: fronts, add: { kind: 'static', name: '', api_proxy_port: backends[0]?.port ?? '' } },
-    { id: 'back', title: t('백엔드 (API)'), list: backends, add: { kind: 'rust' } },
-    { id: 'admin', title: t('관리자 프런트'), list: admins, add: { kind: 'static', name: `${projectName} Admin`.trim(), api_proxy_port: backends[0]?.port ?? '' } },
+    { id: 'front', title: t('프런트'), list: fronts, add: { role: 'front', kind: 'static', name: '', api_proxy_port: backends[0]?.port ?? '' } },
+    { id: 'back', title: t('백엔드 (API)'), list: backends, add: { role: 'back', kind: 'rust' } },
+    { id: 'admin', title: t('관리자 프런트'), list: admins, add: { role: 'admin', kind: 'static', name: `${projectName} Admin`.trim(), api_proxy_port: backends[0]?.port ?? '' } },
   ]
   return (
     <div className="space-y-5">
@@ -271,6 +271,7 @@ export default function ProjectDetail() {
           <AppForm
             key={String(creating)}
             initial={typeof creating === 'object' ? creating : undefined}
+            backends={(apps.data || []).filter(isBackend)}
             submitting={busy}
             onSubmit={async (payload) => {
               setBusy(true)

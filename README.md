@@ -5,7 +5,7 @@
 [![frontend](https://img.shields.io/badge/frontend-React%2019-61dafb?logo=react&logoColor=black)](frontend)
 [![os](https://img.shields.io/badge/OS-Ubuntu%2024.04-e95420?logo=ubuntu&logoColor=white)](#준비물)
 [![CI](https://github.com/sinji0117/Rpanel/actions/workflows/ci.yml/badge.svg)](https://github.com/sinji0117/Rpanel/actions/workflows/ci.yml)
-[![release](https://img.shields.io/github/v/release/sinji0117/Rpanel?label=release&color=brightgreen)](https://github.com/sinji0117/Rpanel/releases)
+[![version](https://img.shields.io/badge/dynamic/toml?url=https%3A%2F%2Fraw.githubusercontent.com%2Fsinji0117%2FRpanel%2Fmain%2Fbackend%2FCargo.toml&query=%24.package.version&label=version&color=brightgreen&prefix=v)](backend/Cargo.toml)
 [![stars](https://img.shields.io/github/stars/sinji0117/Rpanel?label=stars&color=yellow)](https://github.com/sinji0117/Rpanel/stargazers)
 [![Buy Me a Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-%ED%9B%84%EC%9B%90%ED%95%98%EA%B8%B0-ffdd00?logo=buymeacoffee&logoColor=black)](https://buymeacoffee.com/bandiuri)
 

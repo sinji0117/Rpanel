@@ -15,7 +15,7 @@ const isAdminFront = (a) => a.kind === 'static' && roleOfApp(a) === 'admin'
 
 function roleOf(a) {
   if (isBackend(a)) return t('백엔드 (API)')
-  if (a.kind === 'static') return isAdminFront(a) ? t('관리자 프런트') : t('프런트')
+  if (a.kind === 'static') return isAdminFront(a) ? t('관리자 화면') : t('사용자 화면')
   return t('사이트')
 }
 
@@ -79,7 +79,11 @@ function AppCard({ a, backends, reload }) {
     <div className="card flex flex-col gap-3 p-4" data-testid={`project-app-${a.slug}`}>
       <div className="flex items-start gap-2">
         <div className="min-w-0 flex-1">
-          <p className="text-xs text-ink-400">{roleOf(a)}</p>
+          <span
+            className={`inline-block rounded px-1.5 py-0.5 text-[11px] ${isAdminFront(a) ? 'bg-violet-500/15 text-violet-400' : a.kind === 'static' ? 'bg-signal/10 text-signal' : 'bg-warn/15 text-warn'}`}
+          >
+            {roleOf(a)}
+          </span>
           <Link to={`/apps/${a.id}`} className="flex items-center gap-2 font-medium hover:text-signal">
             {a.name} <KindBadge kind={a.kind} />
           </Link>
@@ -89,7 +93,7 @@ function AppCard({ a, backends, reload }) {
       <div className="space-y-1 text-xs text-ink-300">
         <Domains value={a.domains} />
         <p className="font-mono text-ink-400">
-          {a.port ? `:${a.port}` : ''} {a.current_commit ? `· ${shortSha(a.current_commit)}` : `· ${t('배포 전')}`}
+          {[a.port ? `:${a.port}` : null, a.current_commit ? shortSha(a.current_commit) : t('배포 전')].filter(Boolean).join(' · ')}
         </p>
       </div>
       {a.kind === 'static' && a.source === 'git' && <ApiLink app={a} backends={backends} reload={reload} />}
@@ -120,20 +124,37 @@ function ProjectOverview({ apps, reload, onAdd, projectName = '' }) {
   const toast = useToast()
   const [busy, setBusy] = useState(false)
   const backends = apps.filter(isBackend)
-  const fronts = apps.filter((a) => a.kind === 'static' && !isAdminFront(a))
-  const admins = apps.filter(isAdminFront)
+  // 사용자 화면 먼저, 그다음 관리자 화면
+  const fronts = [...apps.filter((a) => a.kind === 'static' && !isAdminFront(a)), ...apps.filter(isAdminFront)]
   const others = apps.filter((a) => !isBackend(a) && a.kind !== 'static')
+  const apiPort = backends[0]?.port ?? ''
   const groups = [
-    { id: 'front', title: t('프런트'), list: fronts, add: { role: 'front', kind: 'static', name: '', api_proxy_port: backends[0]?.port ?? '' } },
-    { id: 'back', title: t('백엔드 (API)'), list: backends, add: { role: 'back', kind: 'rust' } },
-    { id: 'admin', title: t('관리자 프런트'), list: admins, add: { role: 'admin', kind: 'static', name: `${projectName} Admin`.trim(), api_proxy_port: backends[0]?.port ?? '' } },
+    {
+      id: 'front',
+      title: t('프런트엔드'),
+      desc: t('사용자 화면 · 관리자 화면 (npm 빌드 → Nginx)'),
+      accent: 'border-l-signal',
+      list: fronts,
+      adds: [
+        { label: t('+ 사용자 화면'), preset: { role: 'front', kind: 'static', name: '', api_proxy_port: apiPort } },
+        { label: t('+ 관리자 화면'), preset: { role: 'admin', kind: 'static', name: `${projectName} Admin`.trim(), api_proxy_port: apiPort } },
+      ],
+    },
+    {
+      id: 'back',
+      title: t('백엔드 (API)'),
+      desc: t('Rust · Python 서비스 — 프런트엔드의 /api/ 가 여기로 연결됩니다'),
+      accent: 'border-l-warn',
+      list: backends,
+      adds: [{ label: t('+ 백엔드'), preset: { role: 'back', kind: 'rust' } }],
+    },
   ]
   return (
     <div className="space-y-5">
       <div className="card flex flex-wrap items-center gap-3 p-4 text-sm">
         <p className="flex-1 text-ink-300">
           {t(
-            '프런트·백엔드·관리자 화면을 한 곳에서 관리합니다. 프런트의 “/api/ 연결”에서 백엔드를 고르면 같은 도메인의 /api/ 요청이 백엔드로 갑니다. 관리자 화면은 별도 Static 앱으로 만들어 admin.example.com 같은 다른 도메인을 붙이세요.',
+            '프런트엔드(사용자 화면 · 관리자 화면)와 백엔드를 한 곳에서 관리합니다. 프런트엔드 카드의 “/api/ 연결”에서 백엔드를 고르면 같은 도메인의 /api/ 요청이 그 백엔드로 갑니다. 관리자 화면은 admin.example.com 같은 다른 도메인을 붙이세요.',
           )}
         </p>
         <button
@@ -161,12 +182,18 @@ function ProjectOverview({ apps, reload, onAdd, projectName = '' }) {
         </button>
       </div>
       {groups.map((g) => (
-        <section key={g.id}>
-          <div className="mb-2 flex items-center gap-2">
-            <h2 className="text-sm font-medium text-ink-300">{g.title}</h2>
-            <button className="btn-ghost px-2 py-0.5 text-xs" onClick={() => onAdd(g.add)}>
-              + {t('추가')}
-            </button>
+        <section key={g.id} className={`card border-l-4 ${g.accent} p-4`} data-testid={`project-group-${g.id}`}>
+          <div className="mb-3 flex flex-wrap items-center gap-2">
+            <h2 className="font-medium">{g.title}</h2>
+            <span className="rounded-full bg-ink-800 px-2 text-xs text-ink-400">{g.list.length}</span>
+            <span className="text-xs text-ink-400">{g.desc}</span>
+            <span className="ml-auto flex gap-1.5">
+              {g.adds.map((x) => (
+                <button key={x.label} className="btn-ghost px-2.5 py-1 text-xs" onClick={() => onAdd(x.preset)}>
+                  {x.label}
+                </button>
+              ))}
+            </span>
           </div>
           {g.list.length ? (
             <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">

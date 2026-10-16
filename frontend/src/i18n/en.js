@@ -1055,4 +1055,11 @@ export default {
   "사용자 화면": "Public site",
   "운영자용 화면, 보통 다른 도메인 (예: admin.example.com)": "Screens for operators, usually on another domain (e.g. admin.example.com)",
   "화면 용도": "Screen purpose",
+  "+ 관리자 화면": "+ Admin screen",
+  "+ 백엔드": "+ Backend",
+  "+ 사용자 화면": "+ Public site",
+  "Rust · Python 서비스 — 프런트엔드의 /api/ 가 여기로 연결됩니다": "Rust · Python services — the front ends' /api/ connects here",
+  "사용자 화면 · 관리자 화면 (npm 빌드 → Nginx)": "Public site · admin screen (npm build → Nginx)",
+  "프런트엔드": "Front end",
+  "프런트엔드(사용자 화면 · 관리자 화면)와 백엔드를 한 곳에서 관리합니다. 프런트엔드 카드의 “/api/ 연결”에서 백엔드를 고르면 같은 도메인의 /api/ 요청이 그 백엔드로 갑니다. 관리자 화면은 admin.example.com 같은 다른 도메인을 붙이세요.": "Manage front ends (public site · admin screen) and backends in one place. Pick a backend in a front-end card's “/api/ link” to send /api/ requests on the same domain to it. Give the admin screen its own domain such as admin.example.com.",
 }

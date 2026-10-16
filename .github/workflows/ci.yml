@@ -45,7 +45,15 @@ jobs:
           workspaces: backend
       - run: cargo fmt --check
       - run: cargo clippy --all-targets -- -D warnings
-      - run: cargo test
+      - name: cargo test
+        shell: bash
+        # 실패하면 panic 메시지를 annotation 으로도 남김 (로그를 못 볼 때 원인 확인용)
+        run: |
+          set -o pipefail
+          if ! cargo test 2>&1 | tee test.log; then
+            grep -E -A6 "panicked at|^error" test.log | head -40 | sed 's/%/%25/g' | while IFS= read -r l; do echo "::error::$l"; done
+            exit 1
+          fi
         env:
           RPANEL_TEST_DATABASE_URL: mysql://rpanel:rpanelpw@127.0.0.1:3306/rpanel_test
           RPANEL_TEST_REDIS_URL: redis://127.0.0.1:6379/15

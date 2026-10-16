@@ -1889,12 +1889,12 @@ async fn full_flow() {
         // DB 웹 관리: 컬렉션 만들기 → 문서 추가·찾기·수정·삭제 (그 DB 계정으로)
         let w = format!("/api/dbweb/mongo/{mid}");
         let r = ctx
-            .post(&format!("{w}/collections"), &t, json!({"name":"orders"}))
+            .post(&format!("{w}/collections"), &t, json!({"name":"webdocs"}))
             .await;
         assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
         let r = ctx
             .post(
-                &format!("{w}/c/orders/insert"),
+                &format!("{w}/c/webdocs/insert"),
                 &t,
                 json!({"doc":{"item":"사과","qty":3}}),
             )
@@ -1903,32 +1903,32 @@ async fn full_flow() {
         let oid = r.body["inserted_id"].clone();
         assert!(oid["$oid"].is_string(), "{oid}");
         ctx.post(
-            &format!("{w}/c/orders/insert"),
+            &format!("{w}/c/webdocs/insert"),
             &t,
             json!({"doc":{"item":"배","qty":1}}),
         )
         .await;
         let r = ctx.get(&w, &t).await;
-        assert_eq!(r.body["collections"][0]["name"], "orders", "{:?}", r.body);
+        assert_eq!(r.body["collections"][0]["name"], "webdocs", "{:?}", r.body);
         let r = ctx
-            .get(&format!("{w}/c/orders?filter=%7B%22qty%22%3A3%7D"), &t)
+            .get(&format!("{w}/c/webdocs?filter=%7B%22qty%22%3A3%7D"), &t)
             .await;
         assert_eq!(r.body["total"], 1, "{:?}", r.body);
         assert_eq!(r.body["docs"][0]["item"], "사과");
         let r = ctx
             .post(
-                &format!("{w}/c/orders/update"),
+                &format!("{w}/c/webdocs/update"),
                 &t,
                 json!({"id": oid, "doc":{"item":"청사과","qty":5}}),
             )
             .await;
         assert_eq!(r.body["modified"], 1, "{:?}", r.body);
         let r = ctx
-            .post(&format!("{w}/c/orders/delete"), &t, json!({"id": oid}))
+            .post(&format!("{w}/c/webdocs/delete"), &t, json!({"id": oid}))
             .await;
         assert_eq!(r.body["deleted"], 1, "{:?}", r.body);
         assert_eq!(
-            ctx.get(&format!("{w}/c/orders?filter=nope"), &t)
+            ctx.get(&format!("{w}/c/webdocs?filter=nope"), &t)
                 .await
                 .status,
             StatusCode::BAD_REQUEST
@@ -1937,7 +1937,10 @@ async fn full_flow() {
             ctx.get(&format!("{w}/c/system.users"), &t).await.status,
             StatusCode::BAD_REQUEST
         );
-        assert_eq!(ctx.get(&format!("{w}/c/orders"), &t).await.body["total"], 1);
+        assert_eq!(
+            ctx.get(&format!("{w}/c/webdocs"), &t).await.body["total"],
+            1
+        );
 
         // 실제로 그 계정으로 쓰기·읽기 (TEST 서버 주소로 바꿔서)
         let host = std::env::var("RPANEL_TEST_MONGODB_URL").unwrap();

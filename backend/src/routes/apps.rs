@@ -33,6 +33,9 @@ pub struct AppInput {
     pub git_url: Option<String>,
     #[serde(default)]
     pub frontend_dir: Option<String>,
+    /// Static 앱 용도: front | admin
+    #[serde(default)]
+    pub app_role: Option<String>,
     #[serde(default)]
     pub git_branch: Option<String>,
     #[serde(default)]
@@ -72,6 +75,7 @@ struct Clean {
     binary_name: Option<String>,
     output_dir: String,
     frontend_dir: Option<String>,
+    app_role: Option<String>,
     domains: String,
     api_proxy_port: Option<u32>,
     health_path: String,
@@ -121,6 +125,16 @@ fn clean(input: &AppInput, kind: AppKind) -> AppResult<Clean> {
     if let Some(d) = &frontend_dir {
         validate::rel_path(d).map_err(bad)?;
     }
+    let app_role = match (kind, opt(&input.app_role).as_deref()) {
+        (AppKind::Static, None | Some("front")) => Some("front".to_string()),
+        (AppKind::Static, Some("admin")) => Some("admin".to_string()),
+        (AppKind::Static, Some(_)) => {
+            return Err(AppError::bad(
+                "화면 용도는 front(사용자) 또는 admin(관리자) 입니다",
+            ))
+        }
+        _ => None,
+    };
     let domains = validate::domains(input.domains.as_deref().unwrap_or("")).map_err(bad)?;
     let api_proxy_port = match (kind, input.api_proxy_port) {
         (AppKind::Static, Some(p)) if (1..=65535).contains(&p) => Some(p),
@@ -150,6 +164,7 @@ fn clean(input: &AppInput, kind: AppKind) -> AppResult<Clean> {
         },
         output_dir,
         frontend_dir,
+        app_role,
         domains,
         api_proxy_port,
         health_path,
@@ -303,8 +318,8 @@ pub async fn create(
         let port = if kind.is_service() { Some(allocate_port(&state).await?) } else { None };
         let res = sqlx::query(
             "INSERT INTO apps (project_id, name, slug, kind, git_url, git_branch, root_dir, build_cmd, start_cmd, binary_name, \
-             output_dir, port, api_proxy_port, domains, health_path, webhook_token, frontend_dir) \
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+             output_dir, port, api_proxy_port, domains, health_path, webhook_token, frontend_dir, app_role) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(project_id)
         .bind(&c.name)
@@ -323,6 +338,7 @@ pub async fn create(
         .bind(&c.health_path)
         .bind(random_token(24))
         .bind(&c.frontend_dir)
+        .bind(&c.app_role)
         .execute(&state.db)
         .await
         .map_err(|e| {
@@ -362,7 +378,7 @@ pub async fn update(
     check_domain_conflicts(&state, &c.domains, Some(id)).await?;
     sqlx::query(
         "UPDATE apps SET name = ?, git_url = ?, git_branch = ?, root_dir = ?, build_cmd = ?, start_cmd = ?, binary_name = ?, \
-         output_dir = ?, api_proxy_port = ?, domains = ?, health_path = ?, frontend_dir = ? WHERE id = ?",
+         output_dir = ?, api_proxy_port = ?, domains = ?, health_path = ?, frontend_dir = ?, app_role = ? WHERE id = ?",
     )
     .bind(&c.name)
     .bind(&c.git_url)
@@ -376,6 +392,7 @@ pub async fn update(
     .bind(&c.domains)
     .bind(&c.health_path)
     .bind(&c.frontend_dir)
+    .bind(&c.app_role)
     .bind(id)
     .execute(&state.db)
     .await?;
@@ -801,7 +818,26 @@ mod tests {
             proxy_target: None,
             client_max_body_mb: None,
             frontend_dir: None,
+            app_role: None,
         }
+    }
+
+    #[test]
+    fn app_role_only_for_static() {
+        let mut i = input();
+        i.app_role = Some("admin".into());
+        assert_eq!(clean(&i, AppKind::Rust).unwrap().app_role, None);
+        assert_eq!(
+            clean(&i, AppKind::Static).unwrap().app_role.as_deref(),
+            Some("admin")
+        );
+        i.app_role = None;
+        assert_eq!(
+            clean(&i, AppKind::Static).unwrap().app_role.as_deref(),
+            Some("front")
+        );
+        i.app_role = Some("root".into());
+        assert!(clean(&i, AppKind::Static).is_err());
     }
 
     #[test]

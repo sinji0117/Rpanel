@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router'
-import AppForm from '../components/AppForm'
+import AppForm, { roleOfApp } from '../components/AppForm'
 import { Empty, ErrorBox, KindBadge, Modal, PageHeader, Spinner, StatusBadge } from '../components/ui'
 import { useToast } from '../context/ToastContext'
 import { del, get, post, put } from '../lib/api'
@@ -11,7 +11,7 @@ import { t, tx } from '../i18n'
 import { confirmDialog } from '../components/Dialog'
 
 const isBackend = (a) => a.kind === 'rust' || a.kind === 'python'
-const isAdminFront = (a) => a.kind === 'static' && /admin|관리/i.test(`${a.name} ${a.slug} ${a.domains}`)
+const isAdminFront = (a) => a.kind === 'static' && roleOfApp(a) === 'admin'
 
 function roleOf(a) {
   if (isBackend(a)) return t('백엔드 (API)')

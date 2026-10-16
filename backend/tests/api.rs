@@ -404,6 +404,34 @@ async fn full_flow() {
     assert_eq!(r.status, StatusCode::CREATED, "{:?}", r.body);
     let front_id = r.body["id"].as_u64().unwrap();
     assert!(r.body["port"].is_null());
+    assert_eq!(r.body["app_role"], "front", "static default role");
+    let r = ctx
+        .post(
+            &format!("/api/projects/{pid}/apps"),
+            &t,
+            json!({"name":"Back Office","kind":"static","app_role":"admin","git_url":"https://github.com/a/admin.git","api_proxy_port":8100}),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{:?}", r.body);
+    assert_eq!(r.body["app_role"], "admin");
+    let admin_id = r.body["id"].as_u64().unwrap();
+    let r = ctx
+        .req(Method::PUT, &format!("/api/apps/{admin_id}"), Some(&t), None, Some(json!({"name":"Back Office","git_url":"https://github.com/a/admin.git","app_role":"front"})))
+        .await;
+    assert_eq!(r.body["app_role"], "front", "{:?}", r.body);
+    assert_eq!(
+        ctx.req(
+            Method::DELETE,
+            &format!("/api/apps/{admin_id}"),
+            Some(&t),
+            None,
+            None
+        )
+        .await
+        .status
+        .is_success(),
+        true
+    );
 
     let r = ctx
         .post(

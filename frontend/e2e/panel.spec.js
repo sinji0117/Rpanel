@@ -952,6 +952,8 @@ test('새 앱: 백엔드 · 프런트 · 관리자 화면을 먼저 고름', asy
   await page.getByRole('button', { name: '+ 새 앱' }).click()
   const dlg = page.getByRole('dialog', { name: '새 앱' })
   await expect(dlg.getByRole('radio', { name: /백엔드/ })).toHaveAttribute('aria-checked', 'true')
+  await expect(dlg.getByRole('radio', { name: /관리자 화면/ })).toHaveCount(0)
+  await dlg.getByRole('radio', { name: /프런트엔드/ }).click()
   await dlg.getByRole('radio', { name: /관리자 화면/ }).click()
   await expect(dlg.getByRole('radio', { name: /^Rust/ })).toHaveCount(0)
   await dlg.getByLabel('이름').fill('Beripick Admin')
@@ -960,7 +962,7 @@ test('새 앱: 백엔드 · 프런트 · 관리자 화면을 먼저 고름', asy
   await dlg.getByLabel('도메인').fill('admin.beripick.com')
   await dlg.getByRole('button', { name: '앱 만들기' }).click()
   await expect(page).toHaveURL(/\/apps\/\d+$/)
-  expect(backend.db.apps.at(-1)).toMatchObject({ kind: 'static', api_proxy_port: 8100, domains: 'admin.beripick.com' })
+  expect(backend.db.apps.at(-1)).toMatchObject({ kind: 'static', app_role: 'admin', api_proxy_port: 8100, domains: 'admin.beripick.com' })
 })
 
 test('패널 접속 IP: 내 IP 없이는 저장 안 됨', async ({ page }) => {

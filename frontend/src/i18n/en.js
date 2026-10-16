@@ -1050,4 +1050,9 @@ export default {
   "LTS · Ubuntu 24.04 기본": "LTS · Ubuntu 24.04 default",
   "Ubuntu 24.04 기본": "Ubuntu 24.04 default",
   "packages.redis.io 최신 8.x": "latest 8.x from packages.redis.io",
+  "두 용도 모두 npm ci → npm run build 로 빌드해 Nginx 로 서비스합니다. 용도는 프로젝트 화면에서 묶는 곳만 정하며, 나중에 설정에서 바꿀 수 있습니다.": "Both are built with npm ci → npm run build and served by Nginx. The purpose only decides where the app is grouped on the project page, and can be changed later in settings.",
+  "방문자가 보는 사이트 (예: example.com)": "The site visitors see (e.g. example.com)",
+  "사용자 화면": "Public site",
+  "운영자용 화면, 보통 다른 도메인 (예: admin.example.com)": "Screens for operators, usually on another domain (e.g. admin.example.com)",
+  "화면 용도": "Screen purpose",
 }

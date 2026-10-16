@@ -587,6 +587,7 @@ mod tests {
             client_max_body_mb: 64,
             runtime_version: None,
             frontend_dir: None,
+            app_role: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
         }

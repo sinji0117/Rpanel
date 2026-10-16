@@ -2,15 +2,22 @@ import { useState } from 'react'
 import { Field } from './ui'
 import { t } from '../i18n'
 
-/** 새 앱: 먼저 역할(백엔드·프런트·관리자 화면)을 고르고, 백엔드는 언어를 고름 */
+/** 새 앱: 먼저 백엔드·프런트엔드를 고르고, 백엔드는 언어 · 프런트엔드는 화면 용도를 고름 */
 export const ROLES = [
   { id: 'back', label: '백엔드 (API 서버)', desc: 'Rust·Python 으로 만든 API·웹 서버. 포트를 받아 서비스로 실행합니다', icon: '⚙' },
   { id: 'front', label: '프런트엔드 (웹 화면)', desc: 'React·Vue 등을 npm run build 로 빌드해 정적 파일로 서비스합니다', icon: '▣' },
-  { id: 'admin', label: '관리자 화면', desc: '관리자용 프런트. admin.example.com 처럼 다른 도메인을 붙입니다', icon: '⚑' },
 ]
 
+/** 프런트엔드(Static) 앱의 화면 용도 — 빌드 방식은 같고, 프로젝트 화면에서 묶는 곳과 도메인만 다름 */
+export const SCREENS = [
+  { id: 'front', label: '사용자 화면', desc: '방문자가 보는 사이트 (예: example.com)' },
+  { id: 'admin', label: '관리자 화면', desc: '운영자용 화면, 보통 다른 도메인 (예: admin.example.com)' },
+]
+
+/** 'back' | 'front' | 'admin' — app_role 이 없던 옛 앱은 이름·도메인으로 추정 */
 export function roleOfApp(a) {
   if (!a?.kind || a.kind === 'rust' || a.kind === 'python') return 'back'
+  if (a.app_role === 'admin' || a.app_role === 'front') return a.app_role
   return /admin|관리/i.test(`${a.name ?? ''} ${a.slug ?? ''} ${a.domains ?? ''}`) ? 'admin' : 'front'
 }
 
@@ -73,8 +80,15 @@ const BUILD_PLACEHOLDER = {
 }
 
 export default function AppForm({ initial, mode = 'create', onSubmit, submitting, backends = [] }) {
-  const [v, setV] = useState(() => ({ ...emptyApp(), ...normalize(initial) }))
-  const [role, setRole] = useState(() => (initial?.role ? initial.role : roleOfApp(initial)))
+  const [v, setV] = useState(() => {
+    const init = { ...emptyApp(), ...normalize(initial) }
+    // 프로젝트 화면의 '+ 추가' 는 role 로 넘어옴 (admin → 프런트엔드 + 관리자 화면)
+    const r = initial?.role ?? roleOfApp(initial)
+    if (init.kind === 'static' || r !== 'back') init.app_role = r === 'admin' ? 'admin' : init.app_role || 'front'
+    return init
+  })
+  const role = v.kind === 'static' ? 'front' : 'back'
+  const setRole = (r) => setV((s) => ({ ...s, kind: r === 'back' ? (s.kind === 'static' ? 'rust' : s.kind) : 'static', app_role: r === 'back' ? '' : s.app_role || 'front' }))
   const [slugTouched, setSlugTouched] = useState(mode === 'edit')
   const set = (k) => (e) => {
     const val = e.target.value
@@ -98,7 +112,7 @@ export default function AppForm({ initial, mode = 'create', onSubmit, submitting
         <div className="space-y-3">
           <div>
             <span className="label">{t('무엇을 만드나요?')}</span>
-            <div className="grid gap-2 sm:grid-cols-3" role="radiogroup" aria-label={t('앱 역할')}>
+            <div className="grid gap-2 sm:grid-cols-2" role="radiogroup" aria-label={t('앱 역할')}>
               {ROLES.map((r) => (
                 <button
                   type="button"
@@ -108,11 +122,7 @@ export default function AppForm({ initial, mode = 'create', onSubmit, submitting
                   data-testid={`role-${r.id}`}
                   onClick={() => {
                     setRole(r.id)
-                    setV((s) => ({
-                      ...s,
-                      kind: r.id === 'back' ? (s.kind === 'static' ? 'rust' : s.kind) : 'static',
-                      api_proxy_port: r.id !== 'back' && !s.api_proxy_port && backends.length === 1 ? String(backends[0].port ?? '') : s.api_proxy_port,
-                    }))
+                    if (r.id === 'front' && !v.api_proxy_port && backends.length === 1) setV((s) => ({ ...s, api_proxy_port: String(backends[0].port ?? '') }))
                   }}
                   className={`rounded-lg border px-3 py-3 text-left transition ${role === r.id ? 'border-signal/60 bg-signal/5' : 'border-ink-700 hover:border-ink-600'}`}
                 >
@@ -146,11 +156,31 @@ export default function AppForm({ initial, mode = 'create', onSubmit, submitting
                 ))}
               </div>
             </div>
-          ) : (
-            <p className="rounded-lg border border-ink-700 bg-ink-900/40 px-3 py-2 text-xs text-ink-400">
-              {t('Static 앱으로 만듭니다: npm ci → npm run build → 결과 폴더를 Nginx 로 서비스. 아래 “API 연결”에서 백엔드를 고르면 같은 도메인의 /api/ 가 백엔드로 갑니다.')}
-            </p>
-          )}
+          ) : null}
+        </div>
+      )}
+
+      {v.kind === 'static' && (
+        <div>
+          <span className="label">{t('화면 용도')}</span>
+          <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label={t('화면 용도')}>
+            {SCREENS.map((sc) => (
+              <button
+                type="button"
+                key={sc.id}
+                role="radio"
+                aria-checked={(v.app_role || 'front') === sc.id}
+                onClick={() => setV((s) => ({ ...s, app_role: sc.id }))}
+                className={`rounded-lg border px-3 py-2.5 text-left transition ${(v.app_role || 'front') === sc.id ? 'border-signal/60 bg-signal/5' : 'border-ink-700 hover:border-ink-600'}`}
+              >
+                <span className="block text-sm font-medium">{t(sc.label)}</span>
+                <span className="mt-0.5 block text-[11px] leading-snug text-ink-400">{t(sc.desc)}</span>
+              </button>
+            ))}
+          </div>
+          <p className="mt-1.5 text-xs text-ink-400">
+            {t('두 용도 모두 npm ci → npm run build 로 빌드해 Nginx 로 서비스합니다. 용도는 프로젝트 화면에서 묶는 곳만 정하며, 나중에 설정에서 바꿀 수 있습니다.')}
+          </p>
         </div>
       )}
 
@@ -285,7 +315,13 @@ export default function AppForm({ initial, mode = 'create', onSubmit, submitting
             className="input font-mono"
             value={v.domains}
             onChange={set('domains')}
-            placeholder={role === 'admin' ? 'admin.beripick.com' : role === 'back' ? t('(비워도 됩니다 — 프런트의 /api/ 로 연결)') : 'beripick.com www.beripick.com'}
+            placeholder={
+              v.kind === 'static' && v.app_role === 'admin'
+                ? 'admin.beripick.com'
+                : role === 'back'
+                  ? t('(비워도 됩니다 — 프런트의 /api/ 로 연결)')
+                  : 'beripick.com www.beripick.com'
+            }
           />
         </Field>
         {isService && (

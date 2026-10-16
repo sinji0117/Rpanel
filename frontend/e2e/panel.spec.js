@@ -23,7 +23,13 @@ test('최초 설정 → 대시보드 실시간 지표', async ({ page }) => {
   await expect(page.getByText('DRY-RUN 모드')).toBeVisible()
   await expect(page.getByTestId('cpu-value')).toHaveText('23.5%')
   await expect(page.getByText('실시간')).toBeVisible()
-  await expect(page.getByRole('meter', { name: '/' })).toHaveAttribute('aria-valuenow', '21')
+  // 모니터링 그래프 4개 + 가동 시간 (부팅 시각으로 계산)
+  for (const name of ['CPU 사용률', '메모리 사용률', '디스크 사용률', 'Load Average']) await expect(page.getByRole('img', { name })).toBeVisible()
+  await expect(page.getByText('/ (371 GB)')).toBeVisible()
+  await expect(page.getByText('6 CPU').first()).toBeVisible()
+  await expect(page.getByTestId('uptime-value')).toHaveText('3일 4시간 5분')
+  await page.getByLabel('기간').selectOption('24h')
+  await expect(page.getByRole('img', { name: 'CPU 사용률' }).locator('circle')).toHaveCount(0) // 점이 많으면 선만
 })
 
 test('로그인 실패 → 성공', async ({ page }) => {
@@ -534,4 +540,43 @@ test('버전 표시 (지금 · GitHub) 와 런타임 버전 설치·기본 변�
   await page.getByRole('button', { name: '저장' }).first().click()
   await expect(page.getByText('버전을 저장했습니다. 다음 배포·적용부터 쓰입니다')).toBeVisible()
   expect(backend.db.apps.find((a) => a.id === 2).runtime_version).toBe('stable')
+})
+
+test('? 도움말 · 로그 메뉴 (종류별)', async ({ page }) => {
+  const backend = seededBackend()
+  backend.db.deployments.push({
+    id: 77,
+    app_id: 2,
+    status: 'success',
+    commit_sha: 'abc12345',
+    triggered_by: 'manual',
+    created_at: new Date().toISOString(),
+    finished_at: new Date().toISOString(),
+  })
+  await backend.install(page)
+  await page.goto('/projects')
+  // 설명글은 ? 를 눌러야 보임
+  const helpText = '서비스 단위로 앱(백엔드·프런트)을 묶어 관리합니다'
+  await expect(page.getByText(helpText)).toHaveCount(0)
+  await page.getByRole('button', { name: '프로젝트 도움말' }).click()
+  await expect(page.getByRole('tooltip')).toHaveText(helpText)
+  await page.keyboard.press('Escape')
+  await expect(page.getByRole('tooltip')).toHaveCount(0)
+
+  await page.getByRole('link', { name: '로그' }).click()
+  await expect(page.getByRole('heading', { name: '로그' })).toBeVisible()
+  await expect(page.getByRole('tab', { name: '활동 기록' })).toHaveAttribute('aria-selected', 'true')
+  await page.getByRole('tab', { name: '배포 기록' }).click()
+  await expect(page.getByRole('list', { name: '배포 기록' }).getByText('Beripick API')).toBeVisible()
+  await page.getByRole('tab', { name: '서버 로그' }).click()
+  await expect(page.getByText('starting rpanel 0.4.0')).toBeVisible()
+  await page.getByRole('button', { name: 'SSH 접속' }).click()
+  await expect(page.getByText('Failed password for root')).toBeVisible()
+  await page.getByLabel('로그 검색').fill('accepted')
+  await expect(page.getByText('Failed password for root')).toHaveCount(0)
+  await expect(page.getByText('Accepted publickey for shop')).toBeVisible()
+  await expect(page).toHaveURL(/tab=system/)
+  await page.getByRole('tab', { name: '사이트 접속 로그' }).click()
+  await expect(page.getByLabel('사이트 선택')).toHaveValue('2')
+  await expect(page.getByTestId('stat-2xx')).toHaveText('3')
 })

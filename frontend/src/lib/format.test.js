@@ -17,7 +17,7 @@ describe('format', () => {
   })
 
   it('uptime / duration / ago', () => {
-    expect(uptime(93784)).toBe('1일 2시간')
+    expect(uptime(93784)).toBe('1일 2시간 3분')
     expect(uptime(3700)).toBe('1시간 1분')
     expect(duration('2026-01-01T00:00:00Z', '2026-01-01T00:01:05Z')).toBe('1분 5초')
     expect(duration(null, null)).toBe('–')

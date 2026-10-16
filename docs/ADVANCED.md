@@ -111,6 +111,12 @@
 - `GET /api/system/version` → 지금 버전(`CARGO_PKG_VERSION`)과 GitHub 최신 버전. 최신 릴리스 태그를 먼저 보고, 없으면 `main` 브랜치 `backend/Cargo.toml` 의 `version` 을 읽습니다 (curl, 8초 제한, Redis 6시간 캐시, `?refresh=true` 로 즉시 확인).
 - 저장소는 `RPANEL_UPDATE_REPO`(기본 `sinji0117/Rpanel`), 빈 값이면 확인하지 않습니다.
 
+## 모니터링 기록 · 로그
+
+- 패널이 1분마다 지표(CPU·메모리·디스크·load)를 Redis 리스트(`<prefix>:metrics:history`, 최대 7일 = 10080개)에 쌓습니다. `GET /api/system/metrics?range=30m|1h|6h|24h|7d` 는 기간 안의 값을 최대 120개로 평균 내어 돌려줍니다.
+- 가동 시간은 `GET /api/system/info` 의 `boot_time`(부팅 시각)으로 화면에서 계산합니다 (실시간 연결이 끊겨도 표시).
+- `GET /api/logs/system?kind=panel|nginx|ssh|mariadb|redis&lines=` 는 helper `system-log` 로 정해진 로그만 읽습니다. `GET /api/logs/deployments` 는 전체 배포 기록.
+
 ## 관리자 · 화면 설정
 
 - 관리자는 모두 같은 권한입니다. 자기 자신과 마지막 관리자는 지울 수 없고, 비밀번호 변경·삭제 시 그 관리자의 세션을 모두 끊습니다. 로그인 시각은 `users.last_login_at`.
@@ -228,6 +234,7 @@ npx playwright install chromium && npm run e2e # E2E (가짜 API, 백엔드 불�
 | GET/POST/PUT/DELETE | `/api/backup-jobs`, `/api/backup-jobs/{id}`, `/run` | 백업 예약 |
 | GET/POST/PUT/DELETE | `/api/apps/{id}/cron`, `/api/cron/{id}`, `/run`, `/log`, `/api/cron/preview` | 크론 |
 | GET | `/api/apps/{id}/nginx-logs`, `/api/system/info`, `/overview`, `/edge`, `/version`, `/api/audit` | 로그·시스템·버전 |
+| GET | `/api/system/metrics?range=`, `/api/logs/system?kind=&lines=`, `/api/logs/deployments` | 모니터링 기록·로그 |
 | GET/POST/PUT/DELETE | `/api/runtimes`, `/api/runtimes/{id}`, `/default`, PUT `/api/apps/{id}/runtime` | 언어 런타임 버전 |
 | WS | `/api/ws/metrics?ticket=`, `/api/ws/deployments/{id}?ticket=` | 실시간 |
 

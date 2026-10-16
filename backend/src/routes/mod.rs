@@ -41,6 +41,9 @@ pub fn router(state: AppState) -> Router {
         .route("/system/info", get(system::info))
         .route("/system/overview", get(system::overview))
         .route("/system/version", get(system::version))
+        .route("/system/metrics", get(system::metrics_history))
+        .route("/logs/system", get(system::system_log))
+        .route("/logs/deployments", get(system::deployment_log))
         // 언어 런타임 버전
         .route("/runtimes", get(runtimes::list).post(runtimes::install))
         .route("/runtimes/{id}", delete(runtimes::delete))

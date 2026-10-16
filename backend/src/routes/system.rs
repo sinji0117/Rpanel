@@ -29,8 +29,101 @@ pub async fn info(State(state): State<AppState>, _u: AuthUser) -> Json<serde_jso
         "version": env!("CARGO_PKG_VERSION"),
         "exec_mode": if state.cfg.exec_mode == ExecMode::DryRun { "dry-run" } else { "real" },
         "host": host,
+        "boot_time": metrics::boot_time(),
+        "panel_started_at": *PANEL_STARTED,
         "app_port_range": [state.cfg.app_port_min, state.cfg.app_port_max],
     }))
+}
+
+/// 패널 프로세스가 시작된 시각 (초)
+pub static PANEL_STARTED: once_cell::sync::Lazy<i64> =
+    once_cell::sync::Lazy::new(|| chrono::Utc::now().timestamp());
+
+fn history_key(state: &AppState) -> String {
+    state.key(&["metrics", "history"])
+}
+
+/// 1분마다 지표를 Redis 에 쌓음 (최근 7일)
+pub fn spawn_sampler(state: AppState) {
+    once_cell::sync::Lazy::force(&PANEL_STARTED);
+    tokio::spawn(async move {
+        let mut collector = metrics::Collector::new();
+        let mut tick = tokio::time::interval(std::time::Duration::from_secs(metrics::SAMPLE_SECS));
+        tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+        loop {
+            tick.tick().await;
+            let Ok((c, snap)) = tokio::task::spawn_blocking(move || {
+                let s = collector.snapshot();
+                (collector, s)
+            })
+            .await
+            else {
+                break;
+            };
+            collector = c;
+            if let Err(e) = push_sample(&state, &metrics::Sample::from(&snap)).await {
+                tracing::debug!(error = %e, "metrics sample not stored");
+            }
+        }
+    });
+}
+
+pub async fn push_sample(state: &AppState, sample: &metrics::Sample) -> anyhow::Result<()> {
+    let key = history_key(state);
+    let mut r = state.redis.clone();
+    redis::pipe()
+        .cmd("LPUSH")
+        .arg(&key)
+        .arg(serde_json::to_string(sample)?)
+        .ignore()
+        .cmd("LTRIM")
+        .arg(&key)
+        .arg(0)
+        .arg(metrics::HISTORY_MAX - 1)
+        .ignore()
+        .query_async::<()>(&mut r)
+        .await?;
+    Ok(())
+}
+
+#[derive(Deserialize)]
+pub struct HistoryQuery {
+    pub range: Option<String>,
+}
+
+/// GET /api/system/metrics?range=30m|1h|6h|24h|7d — 그래프용 지표 기록
+pub async fn metrics_history(
+    State(state): State<AppState>,
+    _u: AuthUser,
+    Query(q): Query<HistoryQuery>,
+) -> AppResult<Json<serde_json::Value>> {
+    let range = q.range.unwrap_or_else(|| "30m".into());
+    let secs = metrics::range_secs(&range).ok_or_else(|| {
+        crate::error::AppError::bad("range 는 30m · 1h · 6h · 24h · 7d 중 하나입니다")
+    })?;
+    let count = secs / metrics::SAMPLE_SECS as i64 + 5;
+    let mut r = state.redis.clone();
+    let raw: Vec<String> = redis::cmd("LRANGE")
+        .arg(history_key(&state))
+        .arg(0)
+        .arg(count - 1)
+        .query_async(&mut r)
+        .await?;
+    let samples: Vec<metrics::Sample> = raw
+        .iter()
+        .filter_map(|s| serde_json::from_str(s).ok())
+        .collect();
+    let now = chrono::Utc::now().timestamp();
+    let points = metrics::downsample(samples, now - secs, 120);
+    Ok(Json(json!({
+        "range": range,
+        "from": now - secs,
+        "to": now,
+        "interval": metrics::SAMPLE_SECS,
+        "cpu_count": tokio::task::spawn_blocking(|| metrics::host_info().cpu_count).await.unwrap_or(0),
+        "points": points,
+    })))
 }
 
 pub async fn overview(
@@ -254,4 +347,46 @@ mod tests {
         assert_eq!(cargo_version(t).as_deref(), Some("0.4.0"));
         assert_eq!(cargo_version("[dependencies]\nversion = \"1\""), None);
     }
+}
+
+#[derive(Deserialize)]
+pub struct SystemLogQuery {
+    pub kind: String,
+    pub lines: Option<u32>,
+}
+
+pub const SYSTEM_LOG_KINDS: [&str; 5] = ["panel", "nginx", "ssh", "mariadb", "redis"];
+
+/// GET /api/logs/system?kind=panel|nginx|ssh|mariadb|redis&lines=200
+pub async fn system_log(
+    State(state): State<AppState>,
+    user: AuthUser,
+    Query(q): Query<SystemLogQuery>,
+) -> AppResult<Json<serde_json::Value>> {
+    user.require_admin()?;
+    if !SYSTEM_LOG_KINDS.contains(&q.kind.as_str()) {
+        return Err(crate::error::AppError::bad("로그 종류가 올바르지 않습니다"));
+    }
+    let n = q.lines.unwrap_or(200).clamp(10, 2000).to_string();
+    let out = crate::deploy::helper::call_quiet(&state, &["system-log", &q.kind, &n]).await?;
+    Ok(Json(
+        json!({ "kind": q.kind, "lines": out.stdout.lines().collect::<Vec<_>>() }),
+    ))
+}
+
+#[derive(Deserialize)]
+pub struct LimitQuery {
+    pub limit: Option<u32>,
+}
+
+/// GET /api/logs/deployments?limit=100 — 모든 앱의 배포·적용 기록
+pub async fn deployment_log(
+    State(state): State<AppState>,
+    user: AuthUser,
+    Query(q): Query<LimitQuery>,
+) -> AppResult<Json<serde_json::Value>> {
+    user.require_admin()?;
+    Ok(Json(json!(
+        deployments::recent(&state, q.limit.unwrap_or(100).clamp(1, 500)).await?
+    )))
 }

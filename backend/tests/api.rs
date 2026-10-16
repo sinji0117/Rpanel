@@ -1338,6 +1338,48 @@ async fn full_flow() {
         3
     );
 
+    // 지표 기록 (그래프)
+    let now = chrono::Utc::now().timestamp();
+    for i in 0..40 {
+        let sample = rpanel::metrics::Sample {
+            t: now - (39 - i) * 60,
+            c: i as f32,
+            m: 1 << 30,
+            mt: 4 << 30,
+            l: [0.5, 0.4, 0.3],
+            d: vec![("/".into(), 10 << 30, 100 << 30)],
+        };
+        rpanel::routes::system::push_sample(&state, &sample)
+            .await
+            .unwrap();
+    }
+    let r = ctx.get("/api/system/metrics?range=30m", &t).await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+    let pts = r.body["points"].as_array().unwrap();
+    assert!((29..=31).contains(&pts.len()), "{}", pts.len());
+    assert!(pts
+        .windows(2)
+        .all(|w| w[0]["t"].as_i64() < w[1]["t"].as_i64()));
+    assert_eq!(pts.last().unwrap()["c"], 39.0);
+    assert!(r.body["cpu_count"].as_u64().unwrap() > 0);
+    assert_eq!(
+        ctx.get("/api/system/metrics?range=1y", &t).await.status,
+        StatusCode::BAD_REQUEST
+    );
+    let r = ctx.get("/api/system/info", &t).await;
+    assert!(r.body["boot_time"].as_i64().unwrap() > 0);
+    // 로그 메뉴
+    let r = ctx.get("/api/logs/system?kind=panel&lines=50", &t).await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+    assert!(r.body["lines"].is_array());
+    assert_eq!(
+        ctx.get("/api/logs/system?kind=shadow", &t).await.status,
+        StatusCode::BAD_REQUEST
+    );
+    let r = ctx.get("/api/logs/deployments?limit=5", &t).await;
+    assert_eq!(r.status, StatusCode::OK);
+    assert!(!r.body.as_array().unwrap().is_empty());
+
     // 버전 확인 (테스트 설정은 GitHub 확인 끔)
     let r = ctx.get("/api/system/version", &t).await;
     assert_eq!(r.status, StatusCode::OK);

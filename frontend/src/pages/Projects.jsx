@@ -61,7 +61,7 @@ export default function Projects() {
     <>
       <PageHeader
         title={t('프로젝트')}
-        subtitle={t('서비스 단위로 앱(백엔드·프런트)을 묶어 관리합니다')}
+        help={t('서비스 단위로 앱(백엔드·프런트)을 묶어 관리합니다')}
         actions={
           <button className="btn-primary" onClick={() => setOpen(true)}>
             {t('+ 새 프로젝트')}

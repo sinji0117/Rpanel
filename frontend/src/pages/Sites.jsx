@@ -31,6 +31,7 @@ export default function Sites() {
               })
             : t('Rust · Python · HTML · 리버스 프록시 사이트를 만들고 관리합니다')
         }
+        help={t('응답 코드는 서버 안에서 확인한 값입니다. 인터넷에서 접속되려면 도메인 DNS 가 이 서버(또는 앞단 프록시)를 가리켜야 합니다.')}
         actions={
           <>
             <button className="btn-ghost" onClick={() => sites.reload()} disabled={sites.loading}>
@@ -108,7 +109,6 @@ export default function Sites() {
           </table>
         </div>
       )}
-      <p className="mt-4 text-xs text-ink-400">{t('응답 코드는 서버 안에서 확인한 값입니다. 인터넷에서 접속되려면 도메인 DNS 가 이 서버(또는 앞단 프록시)를 가리켜야 합니다.')}</p>
       {creating && <CreateSiteModal open onClose={() => setCreating(false)} />}
     </>
   )

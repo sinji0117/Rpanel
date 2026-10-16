@@ -225,7 +225,14 @@ export function AccountsTab({ app }) {
     <div className="space-y-4">
       <Section
         title={t('사이트 계정 (SSH · SFTP)')}
-        desc={t('FileZilla·WinSCP(SFTP)나 터미널(SSH)로 사이트 파일에 접속하는 계정입니다. 개발자·디자이너마다 계정을 따로 만들고, 필요 없어지면 잠그거나 지우세요.')}
+        desc={
+          <>
+            {t('FileZilla·WinSCP(SFTP)나 터미널(SSH)로 사이트 파일에 접속하는 계정입니다. 개발자·디자이너마다 계정을 따로 만들고, 필요 없어지면 잠그거나 지우세요.')}
+            <br />
+            <br />
+            {t('기본 계정은 사이트를 지울 때 함께 지워집니다. 접속만 막으려면 “잠금”을 쓰세요.')}
+          </>
+        }
         actions={
           <button className="btn-primary" onClick={() => setCreating(true)}>
             + {t('계정 추가')}
@@ -307,9 +314,6 @@ export function AccountsTab({ app }) {
                 ))}
               </tbody>
             </table>
-            {list.data?.accounts.some((a) => !a.is_primary) && (
-              <p className="mt-3 text-xs text-ink-400">{t('기본 계정은 사이트를 지울 때 함께 지워집니다. 접속만 막으려면 “잠금”을 쓰세요.')}</p>
-            )}
           </>
         )}
       </Section>

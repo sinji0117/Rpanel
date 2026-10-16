@@ -660,3 +660,31 @@ fn helper_rejects_bad_runtime_args() {
     );
     let _ = std::fs::remove_dir_all(&tmp);
 }
+
+#[test]
+fn helper_system_log_whitelist() {
+    let run = |args: &[&str]| {
+        Command::new("bash")
+            .arg(helper())
+            .args(args)
+            .output()
+            .unwrap()
+    };
+    for (kind, n) in [
+        ("auth", "10"),
+        ("../etc/shadow", "10"),
+        ("panel;id", "10"),
+        ("", "10"),
+        ("panel", "0"),
+        ("panel", "99999"),
+        ("panel", "1;id"),
+    ] {
+        assert!(
+            !run(&["system-log", kind, n]).status.success(),
+            "system-log {kind} {n} accepted"
+        );
+    }
+    for kind in ["panel", "nginx", "ssh", "mariadb", "redis"] {
+        assert!(run(&["system-log", kind, "5"]).status.success(), "{kind}");
+    }
+}

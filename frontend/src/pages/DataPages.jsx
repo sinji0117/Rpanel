@@ -557,7 +557,7 @@ export function MariaDBPage() {
     <>
       <PageHeader
         title="MariaDB"
-        subtitle={t('데이터베이스와 계정을 만들고 지웁니다. 앱에 연결한 DB 는 배포(적용) 때 접속 주소가 환경변수로 들어갑니다.')}
+        help={t('데이터베이스와 계정을 만들고 지웁니다. 앱에 연결한 DB 는 배포(적용) 때 접속 주소가 환경변수로 들어갑니다.')}
         actions={
           <button className="btn-primary" onClick={() => setCreating(true)}>
             {t('+ 데이터베이스')}
@@ -607,7 +607,7 @@ export function RedisPage() {
   const reload = () => d.reload(true)
   return (
     <>
-      <PageHeader title="Redis" subtitle={t('프로그램별 Redis 계정과 앱별 DB 번호 배정을 관리합니다.')} />
+      <PageHeader title="Redis" help={t('프로그램별 Redis 계정과 앱별 DB 번호 배정을 관리합니다.')} />
       <div className="space-y-4">
         <RedisUsers users={redis_users} reload={reload} showCred={setCred} />
         <Section
@@ -644,7 +644,7 @@ export function BackupsPage() {
   useInterval(() => list.reload(true), 3000, !!list.data?.some((b) => b.status === 'running'))
   return (
     <>
-      <PageHeader title={t('백업')} subtitle={t('백업 예약을 추가·수정·삭제하고, 만들어진 백업 파일을 내려받거나 복원합니다 (/var/lib/rpanel/backups).')} />
+      <PageHeader title={t('백업')} help={t('백업 예약을 추가·수정·삭제하고, 만들어진 백업 파일을 내려받거나 복원합니다 (/var/lib/rpanel/backups).')} />
       <div className="space-y-4">
         <BackupJobs onRan={() => setTimeout(() => list.reload(true), 500)} />
         <ErrorBox error={list.error} />

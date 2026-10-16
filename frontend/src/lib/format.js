@@ -21,7 +21,7 @@ export function uptime(secs) {
   const d = Math.floor(secs / 86400)
   const h = Math.floor((secs % 86400) / 3600)
   const m = Math.floor((secs % 3600) / 60)
-  if (d > 0) return t('{d}일 {h}시간', { d, h })
+  if (d > 0) return t('{d}일 {h}시간 {m}분', { d, h, m })
   if (h > 0) return t('{h}시간 {m}분', { h, m })
   return t('{m}분', { m })
 }

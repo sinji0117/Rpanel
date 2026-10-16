@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router'
 import LogViewer from '../components/LogViewer'
-import { CopyButton, ErrorBox, Field, Modal, Spinner } from '../components/ui'
+import { CardHeader, CopyButton, ErrorBox, Field, Modal, Spinner } from '../components/ui'
 import { useToast } from '../context/ToastContext'
 import { del, download, get, post, put, uploadFile } from '../lib/api'
 import { bytes, dateTime } from '../lib/format'
@@ -436,10 +436,10 @@ export function SslTab({ app, onChanged }) {
 
       {!proxyMode && (
         <section className="card p-5">
-          <h3 className="font-medium">{t("Let's Encrypt 무료 인증서")}</h3>
-          <p className="mt-1 text-sm text-ink-400">
-            {t('도메인({domains})의 DNS 가 이 서버를 가리키고 80 포트가 열려 있어야 합니다. 발급 후 자동 갱신됩니다.', { domains: d.domains.join(', ') })}
-          </p>
+          <CardHeader
+            title={t("Let's Encrypt 무료 인증서")}
+            help={t('도메인({domains})의 DNS 가 이 서버를 가리키고 80 포트가 열려 있어야 합니다. 발급 후 자동 갱신됩니다.', { domains: d.domains.join(', ') })}
+          />
           <form
             className="mt-4 flex flex-wrap items-end gap-3"
             onSubmit={(e) => {
@@ -461,17 +461,13 @@ export function SslTab({ app, onChanged }) {
       )}
 
       <section className="card p-5">
-        <div className="flex items-center justify-between">
-          <div>
-            <h3 className="font-medium">{t('가지고 있는 인증서 올리기')}</h3>
-            <p className="mt-1 text-sm text-ink-400">{t('유료 인증서·와일드카드 인증서 (PEM). 개인키는 암호가 없어야 합니다.')}</p>
-          </div>
+        <CardHeader title={t('가지고 있는 인증서 올리기')} help={t('유료 인증서·와일드카드 인증서 (PEM). 개인키는 암호가 없어야 합니다.')}>
           {!custom && (
             <button className="btn-ghost text-xs" onClick={() => setCustom({ certificate: '', private_key: '' })}>
               {t('인증서 붙여넣기')}
             </button>
           )}
-        </div>
+        </CardHeader>
         {custom && (
           <form
             className="mt-4 space-y-3"

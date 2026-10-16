@@ -1079,6 +1079,19 @@ case "$cmd" in
   ssl-remove)  valid_slug "${1:-}"; ssl_remove "$1" ;;
   backup-files)  valid_slug "${1:-}"; backup_files "$1" "${2:-}" ;;
   restore-files) valid_slug "${1:-}"; restore_files "$1" "${2:-}" ;;
+  system-log)
+    # 패널·웹서버·SSH·DB 로그 (읽기 전용, 정해진 것만)
+    n="${2:-200}"
+    [[ "$n" =~ ^[0-9]{1,4}$ ]] && (( n >= 1 && n <= 5000 )) || die "system-log: lines must be 1..5000"
+    case "${1:-}" in
+      panel)   journalctl -u rpanel.service -n "$n" --no-pager -o short-iso 2>/dev/null || true ;;
+      nginx)   tail -n "$n" /var/log/nginx/error.log 2>/dev/null || true ;;
+      ssh)     journalctl -u ssh.service -u sshd.service -n "$n" --no-pager -o short-iso 2>/dev/null || true ;;
+      mariadb) journalctl -u mariadb.service -n "$n" --no-pager -o short-iso 2>/dev/null || true ;;
+      redis)   journalctl -u redis-server.service -n "$n" --no-pager -o short-iso 2>/dev/null || true ;;
+      *) die "system-log: kind must be panel|nginx|ssh|mariadb|redis" ;;
+    esac
+    ;;
   runtime-install) runtime_install "${1:-}" "${2:-}" ;;
   runtime-remove)  runtime_remove "${1:-}" "${2:-}" ;;
   purge-app)
@@ -1094,7 +1107,7 @@ case "$cmd" in
     echo "purged $1"
     ;;
   *)
-    die "usage: rpanel-helper {prepare-app|install-unit|remove-unit|install-site|remove-site|purge-app} <slug> | svc {start|stop|restart} <slug> | status|journal <slug> | {install,remove,run}-cron|cron-status|cron-log <slug> <id> | db-{create,drop,password} <db> <user> | db-user-create <db> <user> <all|read> (pw stdin) | db-user-drop <db> <user> | db-user-password <db> <user> (pw stdin) | redis-user-set <user> <pattern> <rw|ro> (pw stdin) | redis-user-drop <user> | backup-db <slug> <db> <stamp> | backup-data <slug> <stamp> | restore-db <slug> <db> <file> | restore-data <slug> <file> | nginx-log <slug> access|error <lines> | site-create <slug> <user> <domain> <static|rust|python> | site-password <slug> (stdin) | site-account-create <slug> <user> <ssh|sftp> (pw stdin) | site-account-update <slug> <user> <ssh|sftp> <on|off> | site-account-password <slug> <user> (stdin) | site-account-keys <slug> <user> (stdin) | site-account-delete <slug> <user> | ssl-issue <slug> <email> <domain>... | ssl-custom|ssl-info|ssl-remove <slug> | backup-files <slug> <stamp> | restore-files <slug> <file> | runtime-install|runtime-remove <python|node> <version>"
+    die "usage: rpanel-helper {prepare-app|install-unit|remove-unit|install-site|remove-site|purge-app} <slug> | svc {start|stop|restart} <slug> | status|journal <slug> | {install,remove,run}-cron|cron-status|cron-log <slug> <id> | db-{create,drop,password} <db> <user> | db-user-create <db> <user> <all|read> (pw stdin) | db-user-drop <db> <user> | db-user-password <db> <user> (pw stdin) | redis-user-set <user> <pattern> <rw|ro> (pw stdin) | redis-user-drop <user> | backup-db <slug> <db> <stamp> | backup-data <slug> <stamp> | restore-db <slug> <db> <file> | restore-data <slug> <file> | nginx-log <slug> access|error <lines> | site-create <slug> <user> <domain> <static|rust|python> | site-password <slug> (stdin) | site-account-create <slug> <user> <ssh|sftp> (pw stdin) | site-account-update <slug> <user> <ssh|sftp> <on|off> | site-account-password <slug> <user> (stdin) | site-account-keys <slug> <user> (stdin) | site-account-delete <slug> <user> | ssl-issue <slug> <email> <domain>... | ssl-custom|ssl-info|ssl-remove <slug> | backup-files <slug> <stamp> | restore-files <slug> <file> | runtime-install|runtime-remove <python|node> <version> | system-log <panel|nginx|ssh|mariadb|redis> <lines>"
     ;;
 esac
 }

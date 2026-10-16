@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router'
 import AppForm from '../components/AppForm'
 import LogViewer from '../components/LogViewer'
-import { CopyButton, ErrorBox, KindBadge, PageHeader, Spinner, StatusBadge, Tabs } from '../components/ui'
+import { CardHeader, CopyButton, ErrorBox, HelpTip, KindBadge, PageHeader, Spinner, StatusBadge, Tabs } from '../components/ui'
 import { useToast } from '../context/ToastContext'
 import { del, get, post, put } from '../lib/api'
 import { ago, duration, mergeEnv, parseDotenv, shortSha } from '../lib/format'
@@ -307,12 +307,13 @@ export function EnvTab({ app }) {
   return (
     <div className="card p-5">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-        <p className="text-sm text-ink-400">
-          {app.kind === 'static' ? t('빌드 시점에 주입됩니다 (Vite는 VITE_ 로 시작하는 변수만 번들에 포함).') : t('빌드와 서비스 실행 모두에 주입됩니다.')}{' '}
-          {tx('저장 후 {redeploy}해야 반영됩니다.', { redeploy: <b className="text-ink-100">{t('재배포')}</b> })}
-          {app.port && <> {tx('{port} {bind} 는 자동입니다.', { port: <span className="kbd">PORT</span>, bind: <span className="kbd">BIND_ADDR</span> })}</>}
-        </p>
-        <div className="flex gap-2">
+        <h3 className="font-medium">{t('환경변수')}</h3>
+        <div className="flex items-center gap-2">
+          <HelpTip label={t('환경변수 도움말')}>
+            {app.kind === 'static' ? t('빌드 시점에 주입됩니다 (Vite는 VITE_ 로 시작하는 변수만 번들에 포함).') : t('빌드와 서비스 실행 모두에 주입됩니다.')}{' '}
+            {tx('저장 후 {redeploy}해야 반영됩니다.', { redeploy: <b className="text-ink-100">{t('재배포')}</b> })}
+            {app.port && <> {tx('{port} {bind} 는 자동입니다.', { port: <span className="kbd">PORT</span>, bind: <span className="kbd">BIND_ADDR</span> })}</>}
+          </HelpTip>
           <button className="btn-ghost px-2.5 py-1 text-xs" onClick={() => setReveal((r) => !r)}>
             {reveal ? t('값 숨기기') : t('값 보기')}
           </button>
@@ -431,7 +432,7 @@ export function EnvTab({ app }) {
   )
 }
 
-function JournalTab({ app }) {
+export function JournalTab({ app }) {
   const [n, setN] = useState(200)
   const j = useFetch(() => get(`/apps/${app.id}/journal?lines=${n}`), [app.id, n])
   const [follow, setFollow] = useState(false)
@@ -475,12 +476,21 @@ function GitTab({ app }) {
   return (
     <div className="grid gap-4 lg:grid-cols-2">
       <section className="card p-5">
-        <h3 className="font-medium">Deploy key (SSH)</h3>
-        <p className="mt-1 text-sm text-ink-400">
-          {tx('이 앱 전용 읽기 키입니다. GitLab → 프로젝트 → Settings → Repository → {keys} 에 공개키를 등록하세요 (쓰기 권한 체크 X). 프로젝트마다 따로 등록해야 합니다.', {
-            keys: <b>Deploy keys</b>,
-          })}
-        </p>
+        <CardHeader
+          title="Deploy key (SSH)"
+          help={
+            <>
+              {tx('이 앱 전용 읽기 키입니다. GitLab → 프로젝트 → Settings → Repository → {keys} 에 공개키를 등록하세요 (쓰기 권한 체크 X). 프로젝트마다 따로 등록해야 합니다.', {
+                keys: <b>Deploy keys</b>,
+              })}
+              <br />
+              <br />
+              {tx('Git URL 예: {url} — 이 서버에서 접속할 수 있는 주소를 쓰세요.', {
+                url: <span className="font-mono break-all">{t('ssh://git@gitlab.example.com:2222/그룹/저장소.git')}</span>,
+              })}
+            </>
+          }
+        />
         {key.data?.public_key ? (
           <div className="mt-4 space-y-2">
             <pre className="overflow-x-auto rounded-lg border border-ink-700 bg-ink-950 p-3 font-mono text-[11px] break-all whitespace-pre-wrap text-ink-300">
@@ -512,21 +522,25 @@ function GitTab({ app }) {
         >
           {key.data?.public_key ? t('키 다시 만들기') : t('Deploy key 만들기')}
         </button>
-        <p className="mt-4 text-xs text-ink-400">
-          {tx('Git URL 예: {url} — 이 서버에서 접속할 수 있는 주소를 쓰세요.', {
-            url: <span className="font-mono">{t('ssh://git@gitlab.example.com:2222/그룹/저장소.git')}</span>,
-          })}
-        </p>
       </section>
 
       <section className="card p-5">
-        <h3 className="font-medium">{t('Webhook — push 시 자동 배포')}</h3>
-        <p className="mt-1 text-sm text-ink-400">
-          {tx('GitLab → Settings → Webhooks → URL과 Secret token 입력, {push} 체크 (브랜치 필터: {branch}).', {
-            push: <b>Push events</b>,
-            branch: <span className="font-mono">{hook.data?.branch}</span>,
-          })}
-        </p>
+        <CardHeader
+          title={t('Webhook — push 시 자동 배포')}
+          help={
+            <>
+              {tx('GitLab → Settings → Webhooks → URL과 Secret token 입력, {push} 체크 (브랜치 필터: {branch}).', {
+                push: <b>Push events</b>,
+                branch: <span className="font-mono">{hook.data?.branch}</span>,
+              })}
+              <br />
+              <br />
+              {tx('Git 서버가 이 패널 주소(8443)에 접속할 수 있어야 합니다. 닿지 않으면 CI 에서 {curl} 로 호출하세요.', {
+                curl: <span className="font-mono break-all">curl -X POST -H "X-Gitlab-Token: …"</span>,
+              })}
+            </>
+          }
+        />
         {hook.data && (
           <div className="mt-4 space-y-3">
             <div>
@@ -559,11 +573,6 @@ function GitTab({ app }) {
             </button>
           </div>
         )}
-        <p className="mt-4 text-xs text-ink-400">
-          {tx('Git 서버가 이 패널 주소(8443)에 접속할 수 있어야 합니다. 닿지 않으면 CI 에서 {curl} 로 호출하세요.', {
-            curl: <span className="font-mono">curl -X POST -H "X-Gitlab-Token: …"</span>,
-          })}
-        </p>
       </section>
     </div>
   )

@@ -16,6 +16,7 @@ const NAV = [
   { to: '/mariadb', label: 'MariaDB', icon: DB_ICON },
   { to: '/redis', label: 'Redis', icon: 'M12 3 3 7.5 12 12l9-4.5L12 3zM3 12l9 4.5 9-4.5M3 16.5 12 21l9-4.5' },
   { to: '/backups', label: '백업', icon: 'M4 7h16v13H4zM4 7l2-3h12l2 3M9 12h6' },
+  { to: '/logs', label: '로그', icon: 'M5 4h14v16H5zM8 8h8M8 12h8M8 16h5' },
   { to: '/admins', label: '관리자', icon: 'M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM4 21c0-4 3.6-6 8-6s8 2 8 6' },
   { to: '/settings', label: '설정', icon: 'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM4 12h2m12 0h2M12 4v2m0 12v2' },
 ]

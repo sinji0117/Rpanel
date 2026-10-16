@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Link } from 'react-router'
 import { genPassword } from '../components/CreateSiteModal'
 import { ErrorBox, Field, Modal, PageHeader, Section, Spinner } from '../components/ui'
 import { useToast } from '../context/ToastContext'
@@ -71,14 +72,13 @@ function AdminModal({ initial, onClose, onSaved }) {
 export default function AdminsPage() {
   const toast = useToast()
   const list = useFetch(() => get('/users'), [])
-  const audit = useFetch(() => get('/audit?limit=200'), [])
   const [editing, setEditing] = useState(null)
 
   return (
     <>
       <PageHeader
         title={t('관리자')}
-        subtitle={t('패널에 로그인할 수 있는 관리자 계정을 추가·수정·삭제합니다. 모든 관리자는 같은 권한을 가집니다.')}
+        help={t('패널에 로그인할 수 있는 관리자 계정을 추가·수정·삭제합니다. 모든 관리자는 같은 권한을 가집니다.')}
         actions={
           <button className="btn-primary" onClick={() => setEditing({})}>
             + {t('관리자 추가')}
@@ -139,24 +139,11 @@ export default function AdminsPage() {
           )}
         </Section>
 
-        <section className="card">
-          <h2 className="border-b border-ink-700/70 px-5 py-3.5 text-sm font-medium">{t('활동 기록')}</h2>
-          <div className="max-h-[480px] overflow-auto">
-            <table className="w-full text-sm">
-              <tbody className="divide-y divide-ink-800">
-                {audit.data?.map((e) => (
-                  <tr key={e.id}>
-                    <td className="px-5 py-2 text-xs whitespace-nowrap text-ink-400">{dateTime(e.created_at)}</td>
-                    <td className="px-3 py-2 font-mono text-xs">{e.action}</td>
-                    <td className="px-3 py-2 text-xs text-ink-300">{e.target}</td>
-                    <td className="px-3 py-2 text-xs text-ink-400">{e.email ?? '—'}</td>
-                    <td className="px-5 py-2 font-mono text-xs text-ink-400">{e.ip}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </section>
+        <p className="text-xs text-ink-400">
+          <Link to="/logs?tab=audit" className="hover:text-ink-100">
+            {t('관리자 활동 기록은 로그 메뉴에서 볼 수 있습니다 →')}
+          </Link>
+        </p>
       </div>
       {editing && (
         <AdminModal
@@ -166,7 +153,6 @@ export default function AdminsPage() {
             toast.push(editing.id ? t('저장했습니다') : t('관리자 {email} 을(를) 추가했습니다', { email: r.email }), 'success')
             setEditing(null)
             list.reload(true)
-            audit.reload(true)
           }}
         />
       )}

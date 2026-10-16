@@ -78,6 +78,8 @@ export function createMockBackend({ needsSetup = false } = {}) {
         exec_mode: 'dry-run',
         host: { hostname: 'app-server', os: 'Linux 24.04 Ubuntu 24.04.3 LTS', kernel: '6.8.0', cpu_brand: 'Intel Xeon E5-2690', cpu_count: 8 },
         app_port_range: [8100, 8999],
+        boot_time: Math.floor(Date.now() / 1000) - (3 * 86400 + 4 * 3600 + 5 * 60),
+        panel_started_at: Math.floor(Date.now() / 1000) - 7200,
       })
     if (path === '/system/overview')
       return json(route, 200, {
@@ -88,6 +90,31 @@ export function createMockBackend({ needsSetup = false } = {}) {
       })
     if (path === '/audit') return json(route, 200, [])
     if (path === '/system/version') return json(route, 200, db.version)
+    if (path === '/system/metrics') {
+      const n = { '30m': 30, '1h': 60, '6h': 360, '24h': 1440, '7d': 10080 }[url.searchParams.get('range') || '30m']
+      const nowS = Math.floor(Date.now() / 1000)
+      const step = Math.max(1, Math.ceil(n / 120))
+      const points = []
+      for (let i = n - 1; i >= 0; i -= step)
+        points.push({ t: nowS - i * 60, c: 5 + (i % 7), m: 4 * 2 ** 30, mt: 47 * 2 ** 30, l: [0.3, 0.2, 0.15], d: [['/', 41 * 2 ** 30, 371 * 2 ** 30]] })
+      return json(route, 200, { range: url.searchParams.get('range') || '30m', interval: 60, cpu_count: 6, points })
+    }
+    if (path === '/logs/deployments')
+      return json(
+        route,
+        200,
+        db.deployments.map((d) => ({ ...d, app_name: db.apps.find((a) => a.id === d.app_id)?.name, app_slug: '' })),
+      )
+    if (path === '/logs/system') {
+      const kind = url.searchParams.get('kind')
+      if (!['panel', 'nginx', 'ssh', 'mariadb', 'redis'].includes(kind)) return json(route, 400, { error: 'bad_request', message: '로그 종류가 올바르지 않습니다' })
+      const lines =
+        {
+          panel: ['2026-10-16T12:00:00+0900 rpanel[1]: starting rpanel 0.4.0', '2026-10-16T12:00:01+0900 rpanel[1]: WARN slow request'],
+          ssh: ['Accepted publickey for shop from 1.2.3.4', 'Failed password for root from 5.6.7.8'],
+        }[kind] ?? []
+      return json(route, 200, { kind, lines })
+    }
 
     // ── runtimes ── (설치는 GET 두 번째에 끝난 것으로)
     if (path === '/runtimes' && method === 'GET') {

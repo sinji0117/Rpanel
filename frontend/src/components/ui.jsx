@@ -34,7 +34,47 @@ export function Spinner({ className = '' }) {
   return <span className={`inline-block h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent ${className}`} aria-label={t('로딩 중')} />
 }
 
-export function PageHeader({ title, subtitle, actions, children }) {
+/** ? 아이콘 — 누르면 설명이 말풍선으로 열림 (바깥 클릭·Esc 로 닫힘) */
+export function HelpTip({ children, label, align = 'right' }) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef(null)
+  useEffect(() => {
+    if (!open) return
+    const onDown = (e) => ref.current && !ref.current.contains(e.target) && setOpen(false)
+    const onKey = (e) => e.key === 'Escape' && setOpen(false)
+    document.addEventListener('mousedown', onDown)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDown)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [open])
+  if (!children) return null
+  const pos = align === 'center' ? 'left-1/2 -translate-x-1/2' : align === 'left' ? 'left-0' : 'right-0'
+  return (
+    <span ref={ref} className="relative inline-flex">
+      <button
+        type="button"
+        className={`inline-flex h-6 w-6 items-center justify-center rounded-full border text-xs font-semibold transition ${open ? 'border-signal/60 text-signal' : 'border-ink-600 text-ink-400 hover:border-ink-400 hover:text-ink-100'}`}
+        aria-label={label ?? t('도움말')}
+        aria-expanded={open}
+        onClick={() => setOpen((o) => !o)}
+      >
+        ?
+      </button>
+      {open && (
+        <span
+          role="tooltip"
+          className={`absolute top-full z-30 mt-2 w-72 max-w-[80vw] rounded-lg border border-ink-700 bg-ink-900 p-3 text-left text-sm leading-relaxed font-normal text-ink-300 shadow-xl shadow-black/30 ${pos}`}
+        >
+          {children}
+        </span>
+      )}
+    </span>
+  )
+}
+
+export function PageHeader({ title, subtitle, help, actions, children }) {
   return (
     <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
       <div className="min-w-0">
@@ -42,7 +82,12 @@ export function PageHeader({ title, subtitle, actions, children }) {
         {subtitle && <p className="mt-1 text-sm text-ink-400">{subtitle}</p>}
         {children}
       </div>
-      {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
+      {(actions || help) && (
+        <div className="flex flex-wrap items-center gap-2">
+          <HelpTip label={t('{title} 도움말', { title })}>{help}</HelpTip>
+          {actions}
+        </div>
+      )}
     </div>
   )
 }
@@ -50,8 +95,10 @@ export function PageHeader({ title, subtitle, actions, children }) {
 export function Empty({ title, children, action }) {
   return (
     <div className="card flex flex-col items-center px-6 py-14 text-center">
-      <p className="font-medium">{title}</p>
-      {children && <p className="mt-1.5 max-w-md text-sm text-ink-400">{children}</p>}
+      <p className="inline-flex items-center gap-2 font-medium">
+        {title}
+        <HelpTip align="center">{children}</HelpTip>
+      </p>
       {action && <div className="mt-5">{action}</div>}
     </div>
   )
@@ -91,15 +138,32 @@ export function Modal({ open, title, onClose, children, wide = false }) {
   )
 }
 
+/** 카드 제목 줄: 제목 + (? 도움말) + 버튼 */
+export function CardHeader({ title, help, className = '', children }) {
+  return (
+    <div className={`flex flex-wrap items-center justify-between gap-3 ${className}`}>
+      <h3 className="font-medium">{title}</h3>
+      {(help || children) && (
+        <div className="flex items-center gap-2">
+          <HelpTip label={typeof title === 'string' ? t('{title} 도움말', { title }) : undefined}>{help}</HelpTip>
+          {children}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export function Section({ title, desc, actions, children }) {
   return (
     <section className="card p-5">
-      <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h3 className="font-medium">{title}</h3>
-          {desc && <p className="mt-1 max-w-2xl text-sm text-ink-400">{desc}</p>}
-        </div>
-        {actions && <div className="flex gap-2">{actions}</div>}
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <h3 className="font-medium">{title}</h3>
+        {(actions || desc) && (
+          <div className="flex items-center gap-2">
+            <HelpTip label={typeof title === 'string' ? t('{title} 도움말', { title }) : undefined}>{desc}</HelpTip>
+            {actions}
+          </div>
+        )}
       </div>
       {children}
     </section>

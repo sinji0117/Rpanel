@@ -245,8 +245,48 @@ fn ct_eq(a: &[u8], b: &[u8]) -> bool {
         == 0
 }
 
+/// HMAC-SHA256 (GitHub 웹훅 서명 확인용)
+pub fn hmac_sha256(key: &[u8], msg: &[u8]) -> [u8; 32] {
+    const BLOCK: usize = 64;
+    let mut k = [0u8; BLOCK];
+    if key.len() > BLOCK {
+        k[..32].copy_from_slice(&Sha256::digest(key));
+    } else {
+        k[..key.len()].copy_from_slice(key);
+    }
+    let mut ipad = [0x36u8; BLOCK];
+    let mut opad = [0x5cu8; BLOCK];
+    for i in 0..BLOCK {
+        ipad[i] ^= k[i];
+        opad[i] ^= k[i];
+    }
+    let mut inner = Sha256::new();
+    inner.update(ipad);
+    inner.update(msg);
+    let ih = inner.finalize();
+    let mut outer = Sha256::new();
+    outer.update(opad);
+    outer.update(ih);
+    outer.finalize().into()
+}
+
+/// GitHub: `X-Hub-Signature-256: sha256=<hex>` 를 webhook 토큰(Secret)으로 확인
+fn github_signature_ok(headers: &HeaderMap, body: &[u8], secret: &str) -> bool {
+    let Some(sig) = headers
+        .get("x-hub-signature-256")
+        .and_then(|v| v.to_str().ok())
+    else {
+        return false;
+    };
+    let Some(hex_sig) = sig.strip_prefix("sha256=") else {
+        return false;
+    };
+    let expected = hex::encode(hmac_sha256(secret.as_bytes(), body));
+    ct_eq(expected.as_bytes(), hex_sig.to_ascii_lowercase().as_bytes())
+}
+
 /// POST /api/hooks/{slug}
-/// 토큰: `X-Gitlab-Token` 또는 `X-Rpanel-Token` 헤더 (또는 ?token=)
+/// 인증: GitHub `X-Hub-Signature-256`(Secret = 웹훅 토큰), 또는 `X-Gitlab-Token` / `X-Rpanel-Token` 헤더 (또는 ?token=)
 /// 본문에 `ref`(refs/heads/<branch>)가 있으면 앱 브랜치와 같을 때만 배포
 pub async fn webhook(
     State(state): State<AppState>,
@@ -276,9 +316,22 @@ pub async fn webhook(
         .map(str::to_string)
         .or_else(|| q.get("token").cloned())
         .unwrap_or_default();
-    if provided.is_empty() || !ct_eq(provided.as_bytes(), app.webhook_token.as_bytes()) {
+    let github = github_signature_ok(&headers, &body, &app.webhook_token);
+    if !github && (provided.is_empty() || !ct_eq(provided.as_bytes(), app.webhook_token.as_bytes()))
+    {
         audit::log(&state, None, "hook.denied", &slug, &ip).await;
         return Err(AppError::Unauthorized);
+    }
+    // GitHub 이 웹훅을 만들 때 보내는 ping, push 가 아닌 이벤트는 배포하지 않음
+    match headers.get("x-github-event").and_then(|v| v.to_str().ok()) {
+        Some("ping") => return Ok((StatusCode::OK, Json(json!({ "pong": true })))),
+        Some(ev) if ev != "push" => {
+            return Ok((
+                StatusCode::OK,
+                Json(json!({ "skipped": true, "reason": format!("event {ev}") })),
+            ))
+        }
+        _ => {}
     }
     if let Ok(v) = serde_json::from_slice::<serde_json::Value>(&body) {
         if let Some(r) = v.get("ref").and_then(|r| r.as_str()) {
@@ -300,7 +353,29 @@ pub async fn webhook(
 
 #[cfg(test)]
 mod tests {
-    use super::ct_eq;
+    use super::{ct_eq, hmac_sha256};
+
+    #[test]
+    fn hmac_matches_rfc4231() {
+        // RFC 4231 test case 2
+        assert_eq!(
+            hex::encode(hmac_sha256(b"Jefe", b"what do ya want for nothing?")),
+            "5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843"
+        );
+        // GitHub 문서 예시
+        assert_eq!(
+            hex::encode(hmac_sha256(b"It's a Secret to Everybody", b"Hello, World!")),
+            "757107ea0eb2509fc211221cce984b8a37570b6d7586c22c46f4379c8b043e17"
+        );
+        let long_key = [0xaau8; 131];
+        assert_eq!(
+            hex::encode(hmac_sha256(
+                &long_key,
+                b"Test Using Larger Than Block-Size Key - Hash Key First"
+            )),
+            "60e431591ee0b67f0d8a26aacbf5b77f8e0bc6213728c5140546040f0ee37f54"
+        );
+    }
 
     #[test]
     fn constant_time_eq() {

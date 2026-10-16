@@ -172,6 +172,115 @@ fn git_env(state: &AppState, paths: &AppPaths, spec: CmdSpec) -> CmdSpec {
     }
 }
 
+/// git clone/fetch 실패 메시지에 고치는 방법을 덧붙임
+fn git_hint(e: anyhow::Error, url: &str, branch: &str) -> anyhow::Error {
+    let msg = format!("{e:#}");
+    let lower = msg.to_ascii_lowercase();
+    let https = url.starts_with("https://") || url.starts_with("http://");
+    let hint = if https
+        && (lower.contains("could not read username")
+            || lower.contains("authentication failed")
+            || lower.contains("repository not found")
+            || lower.contains("terminal prompts disabled"))
+    {
+        let ssh = ssh_url(url).unwrap_or_else(|| "git@github.com:계정/저장소.git".into());
+        Some(format!(
+            "저장소가 비공개이거나 주소가 틀렸습니다. 비공개 저장소는 Git URL 을 SSH 주소({ssh})로 바꾸고, \
+             앱의 'Git · 웹훅' 탭에서 Deploy key 를 만들어 GitHub 저장소 Settings → Deploy keys 에 등록한 뒤 다시 배포하세요."
+        ))
+    } else if lower.contains("permission denied (publickey)")
+        || lower.contains("could not read from remote repository")
+    {
+        Some(
+            "저장소에 접근할 수 없습니다. 앱의 'Git · 웹훅' 탭에서 Deploy key 를 만들고, 그 공개키를 저장소의 Deploy keys \
+             (GitHub: Settings → Deploy keys, GitLab: Settings → Repository → Deploy keys)에 등록했는지 확인하세요."
+                .to_string(),
+        )
+    } else if lower.contains("remote branch") && lower.contains("not found")
+        || lower.contains("couldn't find remote ref")
+    {
+        Some(format!(
+            "브랜치 '{branch}' 가 저장소에 없습니다. 앱 설정의 브랜치를 확인하세요 (예: main / master)."
+        ))
+    } else if lower.contains("could not resolve host") || lower.contains("connection timed out") {
+        Some("서버에서 Git 서버에 접속하지 못했습니다. 주소와 서버의 인터넷(방화벽) 연결을 확인하세요.".to_string())
+    } else {
+        None
+    };
+    match hint {
+        Some(h) => anyhow::anyhow!("{h}\n원래 오류: {msg}"),
+        None => e,
+    }
+}
+
+/// https://github.com/owner/repo(.git) → git@github.com:owner/repo.git
+pub fn ssh_url(url: &str) -> Option<String> {
+    let rest = url
+        .strip_prefix("https://")
+        .or_else(|| url.strip_prefix("http://"))?;
+    let rest = rest.split_once('@').map(|(_, r)| r).unwrap_or(rest);
+    let (host, path) = rest.split_once('/')?;
+    let path = path.trim_end_matches('/');
+    if host.contains(':') || path.split('/').count() < 2 || path.is_empty() {
+        return None;
+    }
+    let path = path.strip_suffix(".git").unwrap_or(path);
+    Some(format!("git@{host}:{path}.git"))
+}
+
+#[cfg(test)]
+mod git_hint_tests {
+    use super::*;
+
+    #[test]
+    fn ssh_urls() {
+        assert_eq!(
+            ssh_url("https://github.com/sinji0117/bandiuri").as_deref(),
+            Some("git@github.com:sinji0117/bandiuri.git")
+        );
+        assert_eq!(
+            ssh_url("https://github.com/a/b.git").as_deref(),
+            Some("git@github.com:a/b.git")
+        );
+        assert_eq!(
+            ssh_url("https://gitlab.com/g/sub/r/").as_deref(),
+            Some("git@gitlab.com:g/sub/r.git")
+        );
+        assert_eq!(
+            ssh_url("https://user:tok@github.com/a/b").as_deref(),
+            Some("git@github.com:a/b.git")
+        );
+        assert_eq!(ssh_url("https://git.example.com:8443/a/b"), None);
+        assert_eq!(ssh_url("git@github.com:a/b.git"), None);
+        assert_eq!(ssh_url("https://github.com/onlyowner"), None);
+    }
+
+    #[test]
+    fn hints() {
+        let e = anyhow::anyhow!("명령 실패 (exit 128): git clone … — fatal: could not read Username for 'https://github.com': terminal prompts disabled");
+        let m = format!(
+            "{:#}",
+            git_hint(e, "https://github.com/sinji0117/bandiuri", "main")
+        );
+        assert!(m.contains("git@github.com:sinji0117/bandiuri.git"), "{m}");
+        assert!(m.contains("Deploy keys"));
+        assert!(m.contains("원래 오류"));
+        let e = anyhow::anyhow!("git@github.com: Permission denied (publickey).");
+        assert!(
+            format!("{:#}", git_hint(e, "git@github.com:a/b.git", "main")).contains("Deploy key")
+        );
+        let e = anyhow::anyhow!("warning: Could not find remote branch dev to clone. fatal: Remote branch dev not found in upstream origin");
+        assert!(
+            format!("{:#}", git_hint(e, "git@github.com:a/b.git", "dev")).contains("브랜치 'dev'")
+        );
+        let e = anyhow::anyhow!("something else");
+        assert_eq!(
+            format!("{:#}", git_hint(e, "https://x/a/b", "main")),
+            "something else"
+        );
+    }
+}
+
 fn with_env(mut spec: CmdSpec, vars: &[EnvVar]) -> CmdSpec {
     for v in vars {
         // 빌드 프로세스 PATH/HOME은 패널이 통제
@@ -286,7 +395,8 @@ async fn run(
             ),
             log,
         )
-        .await?;
+        .await
+        .map_err(|e| git_hint(e, app.git_url(), &app.git_branch))?;
         run_ok(
             exec,
             CmdSpec::new("git", &["-C", &repo, "reset", "--hard", "FETCH_HEAD"]),
@@ -335,7 +445,8 @@ async fn run(
             ),
             log,
         )
-        .await?;
+        .await
+        .map_err(|e| git_hint(e, app.git_url(), &app.git_branch))?;
     }
     let sha = run_ok(
         exec,

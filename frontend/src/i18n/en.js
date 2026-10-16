@@ -857,4 +857,22 @@ export default {
   '시험 알림입니다': 'This is a test notification',
   '기준 사용량은 50 ~ 99% 사이로 정하세요': 'Thresholds must be between 50 and 99%',
   'Telegram 은 봇 토큰과 chat id 를 함께 넣어야 합니다': 'Telegram needs both a bot token and a chat id',
+  '공개 저장소는 https 주소 그대로 됩니다. 비공개 저장소는 SSH 주소(git@github.com:계정/저장소.git)를 넣고, 만든 뒤 Git · 웹훅 탭의 Deploy key 를 저장소에 등록하세요.':
+    'Public repositories work with the https address. For private repositories, use the SSH address (git@github.com:owner/repo.git) and, after creating the app, add the Deploy key from the Git · Webhook tab to the repository.',
+  '비공개 저장소라면 SSH 주소를 써야 합니다.': 'Private repositories need the SSH address.',
+  '{url} 로 바꾸기': 'Change to {url}',
+  '지금 Git 주소가 {url} 입니다. 공개 저장소면 그대로 되지만, {private} 저장소는 SSH 주소로 바꾸고 아래 Deploy key 를 저장소에 등록해야 합니다.':
+    'The Git address is {url}. That works for public repositories, but {private} repositories need the SSH address and the Deploy key below added to the repository.',
+  비공개: 'private',
+  'Git 주소를 {url} 로 바꿨습니다': 'Git address changed to {url}',
+  '이 앱 전용 읽기 키입니다. 비공개 저장소에 공개키를 등록하세요 (쓰기 권한은 체크하지 않음). 저장소마다 따로 등록해야 합니다.':
+    'A read-only key for this app. Add the public key to the private repository (leave write access unchecked). Each repository needs its own key.',
+  'GitHub: 저장소 → Settings → {keys} → Add deploy key': 'GitHub: repository → Settings → {keys} → Add deploy key',
+  'GitLab: 프로젝트 → Settings → Repository → {keys}': 'GitLab: project → Settings → Repository → {keys}',
+  '키를 새로 만들면 저장소(GitHub·GitLab)에 다시 등록해야 합니다. 계속할까요?': 'A new key must be added to the repository (GitHub/GitLab) again. Continue?',
+  'GitHub: 저장소 → Settings → Webhooks → Add webhook → Payload URL 에 URL, Content type 은 {json}, Secret 에 아래 Secret, 이벤트는 {push}.':
+    'GitHub: repository → Settings → Webhooks → Add webhook → URL as Payload URL, Content type {json}, the Secret below as Secret, events: {push}.',
+  'GitLab: Settings → Webhooks → URL 과 Secret token 입력, {push} 체크.': 'GitLab: Settings → Webhooks → enter URL and Secret token, check {push}.',
+  '브랜치 {branch} 에 push 할 때만 배포합니다.': 'Deploys only on pushes to branch {branch}.',
+  '토큰을 바꾸면 GitHub·GitLab 웹훅 설정도 바꿔야 합니다. 계속할까요?': 'After changing the token you must update the GitHub/GitLab webhook too. Continue?',
 }

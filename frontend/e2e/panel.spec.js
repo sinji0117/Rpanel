@@ -612,8 +612,7 @@ test('알림: 종 아이콘 · 목록 · 설정 · 시험 알림, 메뉴 순서,
   await page.goto('/')
 
   // 메뉴 순서: … 로그 · 런타임 · 설정 · 관리자
-  const labels = await page.locator('aside nav a').allTextContents()
-  expect(labels.slice(-4)).toEqual(['로그', '런타임', '설정', '관리자'])
+  await expect(page.locator('aside nav a')).toHaveText(['대시보드', '사이트', '프로젝트', 'MariaDB', 'Redis', '백업', '로그', '런타임', '설정', '관리자'])
 
   // 종 아이콘: 안 읽은 2개 → 펼치면 번역된 제목 → 누르면 링크로 이동하고 읽음
   await expect(page.getByTestId('notification-count').first()).toHaveText('2')
@@ -653,4 +652,17 @@ test('알림: 종 아이콘 · 목록 · 설정 · 시험 알림, 메뉴 순서,
   await expect(page.getByText('앱이 없습니다')).toBeVisible()
   await page.getByRole('button', { name: 'Beripick 도움말' }).click()
   await expect(page.getByRole('tooltip')).toContainText('Git 저장소에서 빌드하는 앱입니다')
+})
+
+test('https Git 주소 → SSH 주소로 바꾸기 안내', async ({ page }) => {
+  const backend = seededBackend()
+  backend.db.apps.find((a) => a.id === 2).git_url = 'https://github.com/sinji0117/bandiuri'
+  await backend.install(page)
+  await page.goto('/apps/2')
+  await page.getByRole('tab', { name: 'Git · 웹훅' }).click()
+  await expect(page.getByTestId('https-warning')).toContainText('https://github.com/sinji0117/bandiuri')
+  await page.getByRole('button', { name: 'git@github.com:sinji0117/bandiuri.git 로 바꾸기' }).click()
+  await expect(page.getByText('Git 주소를 git@github.com:sinji0117/bandiuri.git 로 바꿨습니다')).toBeVisible()
+  await expect(page.getByTestId('https-warning')).toHaveCount(0)
+  expect(backend.db.apps.find((a) => a.id === 2).git_url).toBe('git@github.com:sinji0117/bandiuri.git')
 })

@@ -537,6 +537,66 @@ async fn full_flow() {
         .unwrap();
     assert_eq!(wait_deploy(&ctx, &t, hid).await["status"], "success");
 
+    // GitHub 웹훅: X-Hub-Signature-256 (Secret = 웹훅 토큰), ping, 잘못된 서명
+    let gh_req = |sig: String, event: &str, body: &str| {
+        Request::builder()
+            .method(Method::POST)
+            .uri("/api/hooks/beripick-front")
+            .header("x-hub-signature-256", sig)
+            .header("x-github-event", event)
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(body.to_string()))
+            .unwrap()
+    };
+    let sign = |body: &str| {
+        format!(
+            "sha256={}",
+            hex::encode(rpanel::routes::deployments::hmac_sha256(
+                token.as_bytes(),
+                body.as_bytes()
+            ))
+        )
+    };
+    let ping = r#"{"zen":"Keep it logically awesome."}"#;
+    let res = ctx
+        .app
+        .clone()
+        .oneshot(gh_req(sign(ping), "ping", ping))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK, "ping");
+    let push = r#"{"ref":"refs/heads/main","after":"abc"}"#;
+    let res = ctx
+        .app
+        .clone()
+        .oneshot(gh_req("sha256=00".into(), "push", push))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::UNAUTHORIZED, "bad signature");
+    let res = ctx
+        .app
+        .clone()
+        .oneshot(gh_req(sign(push), "push", &push.replace("main", "dev")))
+        .await
+        .unwrap();
+    assert_eq!(
+        res.status(),
+        StatusCode::UNAUTHORIZED,
+        "signature over different body"
+    );
+    let res = ctx
+        .app
+        .clone()
+        .oneshot(gh_req(sign(push), "push", push))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::ACCEPTED, "signed github push");
+    let bytes = res.into_body().collect().await.unwrap().to_bytes();
+    let gid = serde_json::from_slice::<Value>(&bytes).unwrap()["deployment_id"]
+        .as_u64()
+        .unwrap();
+    assert_eq!(wait_deploy(&ctx, &t, gid).await["status"], "success");
+
     // ── 서비스 / 저널 / 키 ──
     assert_eq!(
         ctx.get(&format!("/api/apps/{api_id}/service"), &t)

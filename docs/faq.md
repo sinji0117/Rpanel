@@ -40,6 +40,9 @@ curl -fsSL https://raw.githubusercontent.com/sinji0117/Rpanel/main/install.sh | 
 1. 도메인 DNS에 `panel` A 레코드를 서버 IP로 추가합니다.
 2. 서버에서 `sudo rpanel-update --force --panel-domain=panel.내도메인.com --email=내이메일`을 실행합니다. 기존 사이트와 데이터는 그대로 유지됩니다.
 
+**배포하면 `could not read Username for 'https://github.com'` 오류가 나요.**
+비공개 저장소를 https 주소로 넣었을 때 나는 오류입니다. Git 주소를 SSH 주소로 바꾸고 Deploy key 를 등록하세요. ([Git으로 자동 배포하기 → 비공개 저장소](git-deploy.md#비공개private-저장소))
+
 **Python 3.13 (또는 다른 Rust·Node.js 버전)을 쓰고 싶어요.**
 왼쪽 메뉴 **런타임**에서 설치하고 기본 버전으로 정하거나, 앱마다 **설정** 탭에서 고릅니다. ([언어 버전 (런타임)](runtimes.md))
 

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router'
-import AppForm from '../components/AppForm'
+import AppForm, { sshUrl, toPayload } from '../components/AppForm'
 import LogViewer from '../components/LogViewer'
 import { CardHeader, CopyButton, ErrorBox, HelpTip, KindBadge, PageHeader, Spinner, StatusBadge, Tabs } from '../components/ui'
 import { useToast } from '../context/ToastContext'
@@ -168,7 +168,7 @@ export default function AppDetail() {
       {tab === 'cron' && <CronTab app={a} />}
       {tab === 'nginx' && <NginxLogTab app={a} />}
       {tab === 'logs' && <JournalTab app={a} />}
-      {tab === 'git' && <GitTab app={a} />}
+      {tab === 'git' && <GitTab app={a} onSaved={(n) => app.setData(n)} />}
       {tab === 'files' && <FileManager app={a} />}
       {tab === 'ssl' && <SslTab app={a} onChanged={() => app.reload(true)} />}
       {tab === 'accounts' && <AccountsTab app={a} />}
@@ -466,23 +466,55 @@ export function JournalTab({ app }) {
   )
 }
 
-function GitTab({ app }) {
+function GitTab({ app, onSaved }) {
   const toast = useToast()
   const key = useFetch(() => get(`/apps/${app.id}/deploy-key`), [app.id])
   const hook = useFetch(() => get(`/apps/${app.id}/webhook`), [app.id])
   const [busy, setBusy] = useState(false)
   const hookUrl = hook.data ? `${window.location.origin}${hook.data.path}` : ''
 
+  const ssh = sshUrl(app.git_url)
   return (
     <div className="grid gap-4 lg:grid-cols-2">
+      {ssh && (
+        <div className="rounded-lg border border-warn/40 bg-warn/10 px-4 py-3 text-sm lg:col-span-2" data-testid="https-warning">
+          <p>
+            {tx('지금 Git 주소가 {url} 입니다. 공개 저장소면 그대로 되지만, {private} 저장소는 SSH 주소로 바꾸고 아래 Deploy key 를 저장소에 등록해야 합니다.', {
+              url: <span className="font-mono">{app.git_url}</span>,
+              private: <b>{t('비공개')}</b>,
+            })}
+          </p>
+          <button
+            className="btn-ghost mt-2 text-xs"
+            disabled={busy}
+            onClick={async () => {
+              setBusy(true)
+              try {
+                const n = await put(`/apps/${app.id}`, toPayload({ ...app, git_url: ssh }))
+                onSaved?.(n)
+                toast.push(t('Git 주소를 {url} 로 바꿨습니다', { url: ssh }), 'success')
+              } catch (e) {
+                toast.push(e.message, 'error')
+              } finally {
+                setBusy(false)
+              }
+            }}
+          >
+            {t('{url} 로 바꾸기', { url: ssh })}
+          </button>
+        </div>
+      )}
       <section className="card p-5">
         <CardHeader
           title="Deploy key (SSH)"
           help={
             <>
-              {tx('이 앱 전용 읽기 키입니다. GitLab → 프로젝트 → Settings → Repository → {keys} 에 공개키를 등록하세요 (쓰기 권한 체크 X). 프로젝트마다 따로 등록해야 합니다.', {
-                keys: <b>Deploy keys</b>,
-              })}
+              {t('이 앱 전용 읽기 키입니다. 비공개 저장소에 공개키를 등록하세요 (쓰기 권한은 체크하지 않음). 저장소마다 따로 등록해야 합니다.')}
+              <br />
+              <br />
+              {tx('GitHub: 저장소 → Settings → {keys} → Add deploy key', { keys: <b>Deploy keys</b> })}
+              <br />
+              {tx('GitLab: 프로젝트 → Settings → Repository → {keys}', { keys: <b>Deploy keys</b> })}
               <br />
               <br />
               {tx('Git URL 예: {url} — 이 서버에서 접속할 수 있는 주소를 쓰세요.', {
@@ -507,7 +539,7 @@ function GitTab({ app }) {
           className="btn-ghost mt-4 text-xs"
           disabled={busy}
           onClick={async () => {
-            if (key.data?.public_key && !window.confirm(t('키를 새로 만들면 GitLab에 다시 등록해야 합니다. 계속할까요?'))) return
+            if (key.data?.public_key && !window.confirm(t('키를 새로 만들면 저장소(GitHub·GitLab)에 다시 등록해야 합니다. 계속할까요?'))) return
             setBusy(true)
             try {
               const r = await post(`/apps/${app.id}/deploy-key`)
@@ -529,10 +561,16 @@ function GitTab({ app }) {
           title={t('Webhook — push 시 자동 배포')}
           help={
             <>
-              {tx('GitLab → Settings → Webhooks → URL과 Secret token 입력, {push} 체크 (브랜치 필터: {branch}).', {
-                push: <b>Push events</b>,
-                branch: <span className="font-mono">{hook.data?.branch}</span>,
+              {tx('GitHub: 저장소 → Settings → Webhooks → Add webhook → Payload URL 에 URL, Content type 은 {json}, Secret 에 아래 Secret, 이벤트는 {push}.', {
+                json: <b>application/json</b>,
+                push: <b>Just the push event</b>,
               })}
+              <br />
+              <br />
+              {tx('GitLab: Settings → Webhooks → URL 과 Secret token 입력, {push} 체크.', { push: <b>Push events</b> })}
+              <br />
+              <br />
+              {tx('브랜치 {branch} 에 push 할 때만 배포합니다.', { branch: <span className="font-mono">{hook.data?.branch}</span> })}
               <br />
               <br />
               {tx('Git 서버가 이 패널 주소(8443)에 접속할 수 있어야 합니다. 닿지 않으면 CI 에서 {curl} 로 호출하세요.', {
@@ -551,7 +589,7 @@ function GitTab({ app }) {
               </div>
             </div>
             <div>
-              <span className="label">Secret token (X-Gitlab-Token)</span>
+              <span className="label">Secret</span>
               <div className="flex gap-2">
                 <input readOnly aria-label="Webhook token" type="password" className="input font-mono text-xs" value={hook.data.token} />
                 <CopyButton text={hook.data.token} />
@@ -560,7 +598,7 @@ function GitTab({ app }) {
             <button
               className="btn-ghost text-xs"
               onClick={async () => {
-                if (!window.confirm(t('토큰을 바꾸면 GitLab 설정도 바꿔야 합니다. 계속할까요?'))) return
+                if (!window.confirm(t('토큰을 바꾸면 GitHub·GitLab 웹훅 설정도 바꿔야 합니다. 계속할까요?'))) return
                 try {
                   hook.setData(await post(`/apps/${app.id}/webhook`))
                   toast.push(t('토큰을 교체했습니다'), 'success')

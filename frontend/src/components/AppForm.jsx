@@ -8,6 +8,13 @@ export const KINDS = [
   { id: 'static', label: 'Static', desc: 'npm run build → Nginx 정적 (React·Vite)' },
 ]
 
+/** https://github.com/owner/repo(.git) → git@github.com:owner/repo.git (변환할 수 없으면 null) */
+export function sshUrl(url) {
+  const m = /^https?:\/\/(?:[^@/]+@)?([^/:]+)\/(.+?)\/?$/.exec((url ?? '').trim())
+  if (!m || !m[2].includes('/')) return null
+  return `git@${m[1]}:${m[2].replace(/\.git$/, '')}.git`
+}
+
 export function slugify(name) {
   return name
     .toLowerCase()
@@ -113,8 +120,22 @@ export default function AppForm({ initial, mode = 'create', onSubmit, submitting
         </Field>
       </div>
 
-      <Field label={t('Git 저장소')} htmlFor="app-git" hint={t('private 저장소는 ssh://git@<호스트>:<포트>/그룹/저장소.git 형식 + 생성 후 Deploy key 등록')}>
-        <input id="app-git" className="input font-mono" required value={v.git_url} onChange={set('git_url')} placeholder="https://github.com/me/app.git" />
+      <Field
+        label={t('Git 저장소')}
+        htmlFor="app-git"
+        hint={t(
+          '공개 저장소는 https 주소 그대로 됩니다. 비공개 저장소는 SSH 주소(git@github.com:계정/저장소.git)를 넣고, 만든 뒤 Git · 웹훅 탭의 Deploy key 를 저장소에 등록하세요.',
+        )}
+      >
+        <input id="app-git" className="input font-mono" required value={v.git_url} onChange={set('git_url')} placeholder="git@github.com:me/app.git" />
+        {sshUrl(v.git_url) && (
+          <p className="mt-1.5 flex flex-wrap items-center gap-2 text-xs text-warn">
+            {t('비공개 저장소라면 SSH 주소를 써야 합니다.')}
+            <button type="button" className="btn-ghost px-2 py-0.5 text-xs" onClick={() => setV((s) => ({ ...s, git_url: sshUrl(s.git_url) }))}>
+              {t('{url} 로 바꾸기', { url: sshUrl(v.git_url) })}
+            </button>
+          </p>
+        )}
       </Field>
 
       <div className="grid gap-4 sm:grid-cols-2">

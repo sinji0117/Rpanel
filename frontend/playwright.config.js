@@ -8,7 +8,8 @@ export default defineConfig({
   testDir: './e2e',
   timeout: 30_000,
   fullyParallel: true,
-  reporter: process.env.CI ? 'line' : 'list',
+  // CI: 실패 내용을 GitHub 실행 요약(annotations)에도 표시
+  reporter: process.env.CI ? [['line'], ['github']] : 'list',
   use: {
     baseURL: process.env.E2E_BASE_URL || 'http://127.0.0.1:4173',
     trace: 'retain-on-failure',

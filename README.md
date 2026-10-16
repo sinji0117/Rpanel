@@ -1,5 +1,14 @@
 # Rpanel
 
+[![license](https://img.shields.io/github/license/sinji0117/Rpanel?label=license&color=blue)](LICENSE)
+[![language](https://img.shields.io/badge/language-Rust-dea584?logo=rust&logoColor=white)](https://www.rust-lang.org/)
+[![frontend](https://img.shields.io/badge/frontend-React%2019-61dafb?logo=react&logoColor=black)](frontend)
+[![os](https://img.shields.io/badge/OS-Ubuntu%2024.04-e95420?logo=ubuntu&logoColor=white)](#준비물)
+[![CI](https://github.com/sinji0117/Rpanel/actions/workflows/ci.yml/badge.svg)](https://github.com/sinji0117/Rpanel/actions/workflows/ci.yml)
+[![release](https://img.shields.io/github/v/release/sinji0117/Rpanel?label=release&color=brightgreen)](https://github.com/sinji0117/Rpanel/releases)
+[![stars](https://img.shields.io/github/stars/sinji0117/Rpanel?label=stars&color=yellow)](https://github.com/sinji0117/Rpanel/stargazers)
+[![Buy Me a Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-%ED%9B%84%EC%9B%90%ED%95%98%EA%B8%B0-ffdd00?logo=buymeacoffee&logoColor=black)](https://buymeacoffee.com/bandiuri)
+
 **Rust로 만든 웹 서비스를 내 서버에 올리고 관리하는 무료 관리 화면(웹 패널)입니다.**
 
 리눅스 명령어를 잘 몰라도 브라우저에서 클릭으로 사이트를 만들고, 프로그램을 올리고, https 자물쇠를 붙이고, 백업할 수 있습니다.
@@ -267,3 +276,14 @@ sudo rpanel-uninstall
 
 - 설치 옵션, 구조, 보안 설계, 개발·테스트 방법, API는 **[기술 문서](docs/ADVANCED.md)**를 보세요.
 - 라이선스: MIT ([LICENSE](LICENSE)). 개인·회사 모두 무료로 쓰고 고치고 배포할 수 있습니다.
+
+---
+
+## 후원하기
+
+Rpanel이 도움이 되셨다면 커피 한 잔으로 응원해 주세요. 후원은 기능 개선과 유지보수에 큰 힘이 됩니다. ☕
+
+<a href="https://buymeacoffee.com/bandiuri" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" height="50"></a>
+
+- 후원이 어렵다면 GitHub에서 ⭐ **Star**를 눌러 주는 것도 큰 응원이 됩니다.
+- 버그나 아이디어는 [이슈](https://github.com/sinji0117/Rpanel/issues)로 남겨 주세요.

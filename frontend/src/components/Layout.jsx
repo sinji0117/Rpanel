@@ -11,6 +11,16 @@ const NAV = [
   { to: '/settings', label: '설정', icon: 'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM4 12h2m12 0h2M12 4v2m0 12v2' },
 ]
 
+export const DONATE_URL = 'https://buymeacoffee.com/bandiuri'
+
+function DonateLink({ className = '' }) {
+  return (
+    <a href={DONATE_URL} target="_blank" rel="noopener noreferrer" className={`inline-flex items-center gap-1.5 text-xs text-ink-400 hover:text-warn ${className}`}>
+      <span aria-hidden="true">☕</span> 후원하기
+    </a>
+  )
+}
+
 export function Logo() {
   return (
     <div className="flex items-center gap-2.5">
@@ -61,9 +71,12 @@ export default function Layout() {
           <p className="truncate text-xs text-ink-400" title={user?.email}>
             {user?.email}
           </p>
-          <button className="mt-2 text-xs text-ink-400 hover:text-ink-100" onClick={logout}>
-            로그아웃
-          </button>
+          <div className="mt-2 flex items-center justify-between">
+            <button className="text-xs text-ink-400 hover:text-ink-100" onClick={logout}>
+              로그아웃
+            </button>
+            <DonateLink />
+          </div>
         </div>
       </aside>
 
@@ -76,9 +89,12 @@ export default function Layout() {
       {open && (
         <div className="border-b border-ink-800 px-3 py-3 md:hidden">
           {nav}
-          <button className="mt-2 px-3 text-sm text-ink-400" onClick={logout}>
-            로그아웃
-          </button>
+          <div className="mt-2 flex items-center justify-between px-3">
+            <button className="text-sm text-ink-400" onClick={logout}>
+              로그아웃
+            </button>
+            <DonateLink />
+          </div>
         </div>
       )}
 

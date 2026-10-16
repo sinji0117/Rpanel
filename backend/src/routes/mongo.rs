@@ -159,11 +159,11 @@ pub async fn create(
     Json(input): Json<CreateInput>,
 ) -> AppResult<(StatusCode, Json<Value>)> {
     user.require_admin()?;
-    let name = input.name.trim().to_lowercase();
+    let name = input.name.trim().to_string();
     mongo::valid_name("DB 이름", &name).map_err(AppError::BadRequest)?;
     let username = input
         .username
-        .map(|s| s.trim().to_lowercase())
+        .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| name.clone());
     mongo::valid_name("계정 이름", &username).map_err(AppError::BadRequest)?;

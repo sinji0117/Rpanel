@@ -20,7 +20,8 @@ export default defineConfig({
   webServer: process.env.E2E_BASE_URL
     ? undefined
     : {
-        command: 'npm run build && npm run preview',
+        // 127.0.0.1 로 고정 (localhost 가 IPv6(::1)로만 열리는 환경 대비)
+        command: 'npm run build && npx vite preview --host 127.0.0.1 --port 4173 --strictPort',
         url: 'http://127.0.0.1:4173',
         reuseExistingServer: !process.env.CI,
         timeout: 120_000,

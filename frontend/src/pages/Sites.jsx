@@ -36,6 +36,9 @@ export default function Sites() {
             {t('도메인을 입력하면 사이트 유저·폴더·Nginx 설정이 만들어집니다. 파일은 파일 관리자나 SFTP 로 올리세요.')}
             <br />
             <br />
+            {t('“계정”은 파일형 사이트의 SSH·SFTP 사이트 유저입니다. 프로젝트(Git)로 만든 앱은 코드를 Git 에서 받아 배포하므로 사이트 계정이 없고, 프로젝트 화면에서 관리합니다.')}
+            <br />
+            <br />
             {t('응답 코드는 서버 안에서 확인한 값입니다. 인터넷에서 접속되려면 도메인 DNS 가 이 서버(또는 앞단 프록시)를 가리켜야 합니다.')}
           </>
         }
@@ -70,6 +73,7 @@ export default function Sites() {
                 <th className="px-5 py-3 font-medium">{t('도메인')}</th>
                 <th className="px-3 py-3 font-medium">{t('응답')}</th>
                 <th className="px-3 py-3 font-medium">{t('사이트')}</th>
+                <th className="px-3 py-3 font-medium">{t('계정')}</th>
                 <th className="px-3 py-3 font-medium">{t('상태')}</th>
                 <th className="px-5 py-3 font-medium">{t('최근 적용')}</th>
               </tr>
@@ -95,6 +99,23 @@ export default function Sites() {
                     <Link to={`/apps/${s.app_id}`} className="flex items-center gap-2 hover:text-signal">
                       {s.app_name} <KindBadge kind={s.kind} source={s.source} />
                     </Link>
+                  </td>
+                  <td className="px-3 py-3 text-xs">
+                    {s.site_user ? (
+                      <Link to={`/apps/${s.app_id}?tab=accounts`} className="font-mono hover:text-signal" title={t('SSH·SFTP 계정 관리')}>
+                        {s.site_user}
+                      </Link>
+                    ) : s.source === 'git' ? (
+                      <Link
+                        to={`/projects/${s.project_id ?? ''}`}
+                        className="text-ink-400 hover:text-signal"
+                        title={t('Git 프로젝트 앱은 코드를 Git 에서 받아 배포하므로 SFTP 사이트 계정이 없습니다. 배포·환경변수·DB 는 프로젝트 화면에서 관리합니다.')}
+                      >
+                        {t('Git 배포')}
+                      </Link>
+                    ) : (
+                      <span className="text-ink-500">–</span>
+                    )}
                   </td>
                   <td className="px-3 py-3">
                     <StatusBadge status={s.app_status} />

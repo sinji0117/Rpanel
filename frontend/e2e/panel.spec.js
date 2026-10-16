@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { createMockBackend } from './mockApi'
+import { createMockBackend, PKG_VERSION } from './mockApi'
 
 /** 패널의 확인·입력 팝업에 자동으로 "확인" (이름 입력이 필요한 삭제는 그 이름을 넣음) */
 async function acceptPopups(page, promptValue = '') {
@@ -535,9 +535,9 @@ test('버전 표시 (지금 · GitHub) 와 런타임 버전 설치·기본 변�
   await backend.install(page)
   await acceptPopups(page)
   await page.goto('/')
-  await expect(page.getByTestId('update-badge')).toHaveText('새 버전 v0.5.0')
-  await expect(page.getByTestId('version-current')).toHaveText('v0.4.0')
-  await expect(page.getByTestId('version-latest')).toHaveText('v0.5.0')
+  await expect(page.getByTestId('update-badge')).toHaveText('새 버전 v9.9.9')
+  await expect(page.getByTestId('version-current')).toHaveText(`v${PKG_VERSION}`)
+  await expect(page.getByTestId('version-latest')).toHaveText('v9.9.9')
   await expect(page.getByText('sudo rpanel-update')).toBeVisible()
 
   await page.getByRole('link', { name: '런타임' }).click()
@@ -650,7 +650,7 @@ test('알림: 종 아이콘 · 목록 · 설정 · 시험 알림, 메뉴 순서,
   await page.goto('/')
 
   // 메뉴 순서: … 로그 · 런타임 · 설정 · 관리자
-  await expect(page.locator('aside nav a')).toHaveText(['대시보드', '사이트', '프로젝트', 'MariaDB', 'Redis', '백업', '로그', '런타임', '설정', '관리자'])
+  await expect(page.locator('aside nav a')).toHaveText(['대시보드', '사이트', '프로젝트', 'MariaDB', 'MongoDB', 'Redis', '백업', '로그', '런타임', '설정', '관리자'])
 
   // 종 아이콘: 안 읽은 2개 → 펼치면 번역된 제목 → 누르면 링크로 이동하고 읽음
   await expect(page.getByTestId('notification-count').first()).toHaveText('2')
@@ -731,4 +731,140 @@ test('MariaDB 삭제: 이름을 입력해야 삭제되는 팝업 (브라우저 a
   await expect(page.getByText('shopdb 삭제됨')).toBeVisible()
   await expect(page.getByTestId('db-shopdb')).toHaveCount(0)
   expect(nativeDialogs).toBe(0)
+})
+
+test('서버가 업데이트됐는데 화면이 옛 버전이면 한 번 새로 고침, 그래도 다르면 안내', async ({ page }) => {
+  const backend = createMockBackend()
+  backend.db.loggedIn = true
+  backend.db.version.current = '99.0.0'
+  await backend.install(page)
+  let loads = 0
+  page.on('load', () => loads++)
+  await page.goto('/')
+  await expect(page.getByTestId('stale-bundle')).toContainText('v99.0.0')
+  expect(loads).toBe(2) // 처음 + 자동 새로 고침 한 번
+})
+
+test('DB 웹 관리: 패널 관리자 화면에서 행 추가·수정·삭제, SQL 실행', async ({ page }) => {
+  const backend = seededBackend()
+  backend.db.dbs.push({ id: 31, app_id: 2, name: 'beripick_api', username: 'beripick_api', env_key: 'DATABASE_URL', created_at: '' })
+  await backend.install(page)
+  let nativeDialogs = 0
+  page.on('dialog', (d) => (nativeDialogs++, d.dismiss()))
+  await page.goto('/mariadb')
+  await page.getByTestId('dbweb-beripick_api').click()
+  await expect(page).toHaveURL(/\/mariadb\/31\/web$/)
+  await page
+    .getByTestId('db-tables')
+    .getByRole('button', { name: /orders/ })
+    .click()
+  const rows = page.getByTestId('db-rows')
+  await expect(rows).toContainText('사과')
+  await expect(rows.getByText('NULL')).toBeVisible()
+
+  // 추가
+  await page.getByRole('button', { name: '+ 행 추가' }).click()
+  const add = page.getByRole('dialog', { name: 'orders 행 추가' })
+  await add.getByLabel(/^name/).fill('감')
+  await add.getByRole('button', { name: '추가', exact: true }).click()
+  await expect(rows).toContainText('감')
+  expect(backend.db.dbweb.rows.at(-1)).toEqual([3, '감', null])
+
+  // 수정 (바뀐 값만)
+  await rows.getByRole('row').filter({ hasText: '사과' }).getByRole('button', { name: '수정' }).click()
+  const edit = page.getByRole('dialog', { name: 'orders 행 수정' })
+  await edit.getByLabel(/^name/).fill('청사과')
+  await edit.getByRole('button', { name: '저장', exact: true }).click()
+  await expect(rows).toContainText('청사과')
+
+  // 삭제는 패널 팝업으로 확인
+  await rows.getByRole('row').filter({ hasText: '배' }).getByRole('button', { name: '삭제' }).click()
+  const dlg = page.getByRole('alertdialog', { name: '행 삭제' })
+  await dlg.getByRole('button', { name: '삭제', exact: true }).click()
+  await expect(rows.getByText('배', { exact: true })).toHaveCount(0)
+
+  // SQL 실행: 결과 표, 오류 표시
+  await page.getByRole('button', { name: /SQL 실행/ }).click()
+  await page.getByTestId('sql-input').fill('SELECT * FROM orders')
+  await page.getByRole('button', { name: '실행', exact: true }).click()
+  await expect(page.getByTestId('sql-result')).toContainText('2행')
+  await page.getByTestId('sql-input').fill('oops')
+  await page.getByRole('button', { name: '실행', exact: true }).click()
+  await expect(page.getByRole('alert')).toContainText('SQL syntax')
+  expect(nativeDialogs).toBe(0)
+})
+
+test('DB 웹 관리: 패널 계정 없이 DB 계정으로 로그인 (/db)', async ({ page }) => {
+  const backend = createMockBackend()
+  await backend.install(page)
+  await page.goto('/db')
+  await expect(page.getByRole('heading', { name: 'DB 웹 관리' })).toBeVisible()
+  await page.getByLabel('DB 계정').fill('beripick_api')
+  await page.getByLabel('비밀번호').fill('wrong')
+  await page.getByRole('button', { name: '로그인' }).click()
+  await expect(page.getByRole('alert')).toContainText('올바르지 않습니다')
+  await page.getByLabel('비밀번호').fill('secretpw')
+  await page.getByRole('button', { name: '로그인' }).click()
+  await expect(page.getByTestId('db-user')).toHaveText('beripick_api')
+  await page
+    .getByTestId('db-tables')
+    .getByRole('button', { name: /orders/ })
+    .click()
+  await expect(page.getByTestId('db-rows')).toContainText('사과')
+  // 새로 고침해도 세션 유지, 로그아웃하면 로그인 화면
+  await page.reload()
+  await expect(page.getByTestId('db-user')).toHaveText('beripick_api')
+  await page.getByRole('button', { name: '로그아웃' }).click()
+  await expect(page.getByLabel('DB 계정')).toBeVisible()
+})
+
+test('MongoDB 메뉴와 앱 데이터베이스 탭', async ({ page }) => {
+  const backend = seededBackend()
+  await backend.install(page)
+  await acceptPopups(page)
+  await page.goto('/apps/2')
+  await page.getByRole('tab', { name: '데이터베이스' }).click()
+  await page.getByTestId('app-mongo-create').click()
+  await expect(page.getByText('MongoDB beripick_api 생성됨')).toBeVisible()
+  expect(backend.db.mongos[0]).toMatchObject({ name: 'beripick_api', app_id: 2, env_key: 'MONGODB_URL' })
+  await page.goto('/mongodb')
+  await expect(page.getByText('MongoDB 8.0.4')).toBeVisible()
+  await expect(page.getByText('beripick_api', { exact: true }).first()).toBeVisible()
+})
+
+test('프로젝트: 프런트·백엔드·관리자를 한 화면에서, /api/ 연결과 전체 배포', async ({ page }) => {
+  const backend = seededBackend()
+  backend.db.apps.push(
+    { ...backend.db.apps[0], id: 3, name: 'Beripick Web', slug: 'beripick-web', kind: 'static', port: null, domains: 'beripick.com', api_proxy_port: null },
+    { ...backend.db.apps[0], id: 4, name: 'Beripick Admin', slug: 'beripick-admin', kind: 'static', port: null, domains: 'admin.beripick.com', api_proxy_port: 8100 },
+  )
+  await backend.install(page)
+  await acceptPopups(page)
+  await page.goto('/projects/1')
+  await expect(page.getByTestId('project-app-beripick-api')).toContainText('백엔드 (API)')
+  await expect(page.getByTestId('project-app-beripick-admin')).toContainText('관리자 프런트')
+  const web = page.getByTestId('project-app-beripick-web')
+  await expect(web).toContainText('프런트')
+  await web.getByLabel('Beripick Web 의 /api/ 연결').selectOption('8100')
+  await expect(page.getByText('저장했습니다 — 배포(적용)하면 반영됩니다')).toBeVisible()
+  expect(backend.db.apps.find((a) => a.id === 3).api_proxy_port).toBe(8100)
+  await page.getByTestId('deploy-all').click()
+  await expect(page.getByText('3개 앱 배포를 시작했습니다')).toBeVisible()
+})
+
+test('패널 도메인 설정과 사이트 계정 표시', async ({ page }) => {
+  const backend = seededBackend()
+  await backend.install(page)
+  await acceptPopups(page)
+  await page.goto('/settings')
+  await page.getByLabel('도메인', { exact: true }).fill('panel.beripick.com')
+  await page.getByLabel('이메일 (인증서 만료 알림)').fill('a@b.co')
+  await page.getByRole('button', { name: '연결', exact: true }).click()
+  await expect(page.getByTestId('panel-domain')).toContainText('https://panel.beripick.com')
+  await page.getByRole('button', { name: '해제' }).click()
+  await expect(page.getByLabel('도메인', { exact: true })).toBeVisible()
+  expect(backend.db.panelDomain).toBe(null)
+
+  await page.goto('/sites')
+  await expect(page.getByRole('link', { name: 'Git 배포' }).first()).toBeVisible()
 })

@@ -10,6 +10,189 @@ import { ProjectFormModal } from './Projects'
 import { t, tx } from '../i18n'
 import { confirmDialog } from '../components/Dialog'
 
+const isBackend = (a) => a.kind === 'rust' || a.kind === 'python'
+const isAdminFront = (a) => a.kind === 'static' && /admin|관리/i.test(`${a.name} ${a.slug} ${a.domains}`)
+
+function roleOf(a) {
+  if (isBackend(a)) return t('백엔드 (API)')
+  if (a.kind === 'static') return isAdminFront(a) ? t('관리자 프런트') : t('프런트')
+  return t('사이트')
+}
+
+function Domains({ value }) {
+  const list = (value || '').split(/\s+/).filter(Boolean)
+  if (!list.length) return <span className="text-ink-500">{t('도메인 없음')}</span>
+  return (
+    <span className="flex flex-wrap gap-x-2">
+      {list.map((d) => (
+        <a key={d} href={`http://${d}`} target="_blank" rel="noreferrer" className="font-mono hover:text-signal">
+          {d}
+        </a>
+      ))}
+    </span>
+  )
+}
+
+/** 프런트 → /api/ → 백엔드 연결 고르기 */
+function ApiLink({ app, backends, reload }) {
+  const toast = useToast()
+  const [busy, setBusy] = useState(false)
+  const target = backends.find((b) => b.port && b.port === app.api_proxy_port)
+  return (
+    <label className="flex flex-wrap items-center gap-2 text-xs text-ink-400">
+      {t('/api/ 연결')}
+      <select
+        className="input w-auto py-1 text-xs"
+        value={app.api_proxy_port ?? ''}
+        disabled={busy}
+        aria-label={t('{name} 의 /api/ 연결', { name: app.name })}
+        onChange={async (e) => {
+          const port = e.target.value ? Number(e.target.value) : null
+          setBusy(true)
+          try {
+            await put(`/apps/${app.id}`, { ...app, api_proxy_port: port })
+            toast.push(t('저장했습니다 — 배포(적용)하면 반영됩니다'), 'success')
+            reload()
+          } catch (err) {
+            toast.push(err.message, 'error')
+          } finally {
+            setBusy(false)
+          }
+        }}
+      >
+        <option value="">{t('연결 안 함')}</option>
+        {backends.map((b) => (
+          <option key={b.id} value={b.port ?? ''} disabled={!b.port}>
+            {b.name} (:{b.port})
+          </option>
+        ))}
+        {app.api_proxy_port && !target && <option value={app.api_proxy_port}>:{app.api_proxy_port}</option>}
+      </select>
+    </label>
+  )
+}
+
+function AppCard({ a, backends, reload }) {
+  const toast = useToast()
+  const nav = useNavigate()
+  return (
+    <div className="card flex flex-col gap-3 p-4" data-testid={`project-app-${a.slug}`}>
+      <div className="flex items-start gap-2">
+        <div className="min-w-0 flex-1">
+          <p className="text-xs text-ink-400">{roleOf(a)}</p>
+          <Link to={`/apps/${a.id}`} className="flex items-center gap-2 font-medium hover:text-signal">
+            {a.name} <KindBadge kind={a.kind} />
+          </Link>
+        </div>
+        <StatusBadge status={a.status} />
+      </div>
+      <div className="space-y-1 text-xs text-ink-300">
+        <Domains value={a.domains} />
+        <p className="font-mono text-ink-400">
+          {a.port ? `:${a.port}` : ''} {a.current_commit ? `· ${shortSha(a.current_commit)}` : `· ${t('배포 전')}`}
+        </p>
+      </div>
+      {a.kind === 'static' && a.source === 'git' && <ApiLink app={a} backends={backends} reload={reload} />}
+      <div className="mt-auto flex gap-1.5">
+        <button
+          className="btn-primary px-2.5 py-1 text-xs"
+          disabled={a.status === 'deploying'}
+          onClick={async () => {
+            try {
+              const { deployment_id } = await post(`/apps/${a.id}/deploy`)
+              nav(`/deployments/${deployment_id}`)
+            } catch (e) {
+              toast.push(e.message, 'error')
+            }
+          }}
+        >
+          {t('배포')}
+        </button>
+        <Link to={`/apps/${a.id}`} className="btn-ghost px-2.5 py-1 text-xs">
+          {t('관리')}
+        </Link>
+      </div>
+    </div>
+  )
+}
+
+function ProjectOverview({ apps, reload, onAdd, projectName = '' }) {
+  const toast = useToast()
+  const [busy, setBusy] = useState(false)
+  const backends = apps.filter(isBackend)
+  const fronts = apps.filter((a) => a.kind === 'static' && !isAdminFront(a))
+  const admins = apps.filter(isAdminFront)
+  const others = apps.filter((a) => !isBackend(a) && a.kind !== 'static')
+  const groups = [
+    { id: 'front', title: t('프런트'), list: fronts, add: { kind: 'static', name: '', api_proxy_port: backends[0]?.port ?? '' } },
+    { id: 'back', title: t('백엔드 (API)'), list: backends, add: { kind: 'rust' } },
+    { id: 'admin', title: t('관리자 프런트'), list: admins, add: { kind: 'static', name: `${projectName} Admin`.trim(), api_proxy_port: backends[0]?.port ?? '' } },
+  ]
+  return (
+    <div className="space-y-5">
+      <div className="card flex flex-wrap items-center gap-3 p-4 text-sm">
+        <p className="flex-1 text-ink-300">
+          {t(
+            '프런트·백엔드·관리자 화면을 한 곳에서 관리합니다. 프런트의 “/api/ 연결”에서 백엔드를 고르면 같은 도메인의 /api/ 요청이 백엔드로 갑니다. 관리자 화면은 별도 Static 앱으로 만들어 admin.example.com 같은 다른 도메인을 붙이세요.',
+          )}
+        </p>
+        <button
+          className="btn-primary"
+          disabled={busy}
+          data-testid="deploy-all"
+          onClick={async () => {
+            if (!(await confirmDialog(t('이 프로젝트의 앱 {n}개를 모두 배포합니다 (백엔드 먼저).', { n: apps.length }), { title: t('전체 배포'), confirmText: t('배포') }))) return
+            setBusy(true)
+            let ok = 0
+            for (const a of [...backends, ...apps.filter((x) => !isBackend(x))]) {
+              try {
+                await post(`/apps/${a.id}/deploy`)
+                ok++
+              } catch (e) {
+                toast.push(`${a.name}: ${e.message}`, 'error')
+              }
+            }
+            setBusy(false)
+            toast.push(t('{n}개 앱 배포를 시작했습니다', { n: ok }), 'success')
+            reload()
+          }}
+        >
+          {t('전체 배포')}
+        </button>
+      </div>
+      {groups.map((g) => (
+        <section key={g.id}>
+          <div className="mb-2 flex items-center gap-2">
+            <h2 className="text-sm font-medium text-ink-300">{g.title}</h2>
+            <button className="btn-ghost px-2 py-0.5 text-xs" onClick={() => onAdd(g.add)}>
+              + {t('추가')}
+            </button>
+          </div>
+          {g.list.length ? (
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+              {g.list.map((a) => (
+                <AppCard key={a.id} a={a} backends={backends} reload={reload} />
+              ))}
+            </div>
+          ) : (
+            <p className="rounded-lg border border-dashed border-ink-700 px-4 py-3 text-xs text-ink-500">{t('아직 없습니다')}</p>
+          )}
+        </section>
+      ))}
+      {others.length > 0 && (
+        <section>
+          <h2 className="mb-2 text-sm font-medium text-ink-300">{t('기타')}</h2>
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            {others.map((a) => (
+              <AppCard key={a.id} a={a} backends={backends} reload={reload} />
+            ))}
+          </div>
+        </section>
+      )}
+    </div>
+  )
+}
+
 export default function ProjectDetail() {
   const { id } = useParams()
   const nav = useNavigate()
@@ -70,37 +253,7 @@ export default function ProjectDetail() {
       />
 
       {apps.data?.length ? (
-        <div className="card overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead className="border-b border-ink-700/70 text-left text-xs text-ink-400">
-              <tr>
-                <th className="px-5 py-3 font-medium">{t('앱')}</th>
-                <th className="px-3 py-3 font-medium">{t('상태')}</th>
-                <th className="px-3 py-3 font-medium">{t('도메인')}</th>
-                <th className="px-3 py-3 font-medium">{t('포트')}</th>
-                <th className="px-5 py-3 font-medium">{t('커밋')}</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-ink-800">
-              {apps.data.map((a) => (
-                <tr key={a.id} className="hover:bg-ink-850">
-                  <td className="px-5 py-3">
-                    <Link to={`/apps/${a.id}`} className="flex items-center gap-2.5 font-medium hover:text-signal">
-                      {a.name} <KindBadge kind={a.kind} />
-                    </Link>
-                    <span className="font-mono text-xs text-ink-400">{a.slug}</span>
-                  </td>
-                  <td className="px-3 py-3">
-                    <StatusBadge status={a.status} />
-                  </td>
-                  <td className="max-w-56 truncate px-3 py-3 font-mono text-xs text-ink-300">{a.domains || '–'}</td>
-                  <td className="px-3 py-3 font-mono text-xs text-ink-300">{a.port ?? (a.api_proxy_port ? `→${a.api_proxy_port}` : '–')}</td>
-                  <td className="px-5 py-3 font-mono text-xs text-ink-400">{shortSha(a.current_commit)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <ProjectOverview projectName={p.name} apps={apps.data} reload={() => apps.reload(true)} onAdd={(preset) => setCreating(preset || true)} />
       ) : (
         <Empty
           title={t('앱이 없습니다')}
@@ -112,10 +265,12 @@ export default function ProjectDetail() {
         />
       )}
 
-      <Modal open={creating} onClose={() => setCreating(false)} title={t('새 앱')} wide>
+      <Modal open={!!creating} onClose={() => setCreating(false)} title={t('새 앱')} wide>
         <ErrorBox error={error} />
         <div className={error ? 'mt-4' : ''}>
           <AppForm
+            key={String(creating)}
+            initial={typeof creating === 'object' ? creating : undefined}
             submitting={busy}
             onSubmit={async (payload) => {
               setBusy(true)

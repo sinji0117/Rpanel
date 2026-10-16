@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Link } from 'react-router'
 import LogViewer from '../components/LogViewer'
 import { CopyButton, ErrorBox, Field, Section, Spinner, StatusBadge } from '../components/ui'
 import { BackupJobs } from './BackupJobs'
@@ -69,6 +70,74 @@ export function DbCredentials({ url }) {
 }
 
 // ───────────────────────── 데이터베이스 · Redis ─────────────────────────
+
+/** 앱에 연결된 MongoDB (MONGODB_URL 자동 주입) */
+function MongoSection({ app }) {
+  const toast = useToast()
+  const m = useFetch(() => get('/mongo'), [])
+  const [busy, setBusy] = useState(false)
+  if (m.loading || m.error || !m.data) return null
+  const linked = (m.data.databases || []).filter((d) => d.app_id === app.id)
+  const ready = m.data.configured && m.data.available
+  const suggested =
+    app.slug
+      .replace(/-/g, '_')
+      .replace(/^[^a-z]+/, '')
+      .slice(0, 50) || 'app_db'
+  return (
+    <Section
+      title="MongoDB"
+      desc={t('이 앱 전용 MongoDB 데이터베이스와 계정을 만들고 MONGODB_URL 로 자동 주입합니다. 계정 추가·백업은 MongoDB 메뉴에서 합니다.')}
+      actions={
+        <>
+          <Link to="/mongodb" className="btn-ghost">
+            {t('MongoDB 메뉴')}
+          </Link>
+          {ready && (
+            <button
+              className="btn-primary"
+              disabled={busy}
+              data-testid="app-mongo-create"
+              onClick={async () => {
+                setBusy(true)
+                try {
+                  const r = await post('/mongo', { name: suggested, app_id: app.id, env_key: linked.length ? `MONGODB_URL_${linked.length + 1}` : 'MONGODB_URL' })
+                  toast.push(t('MongoDB {name} 생성됨 — 재배포하면 {env_key} 가 주입됩니다', { name: r.database.name, env_key: r.database.env_key }), 'success')
+                  m.reload(true)
+                } catch (e) {
+                  toast.push(e.message, 'error')
+                } finally {
+                  setBusy(false)
+                }
+              }}
+            >
+              {t('+ MongoDB')}
+            </button>
+          )}
+        </>
+      }
+    >
+      {!ready ? (
+        <p className="text-sm text-ink-400">{m.data.error || t('MongoDB 를 쓸 수 없습니다')}</p>
+      ) : linked.length === 0 ? (
+        <p className="text-sm text-ink-400">{t('연결된 MongoDB 가 없습니다.')}</p>
+      ) : (
+        <ul className="divide-y divide-ink-800">
+          {linked.map((db) => (
+            <li key={db.id} className="space-y-2 py-3">
+              <div className="flex flex-wrap items-center gap-3 text-sm">
+                <span className="font-mono font-medium">{db.name}</span>
+                <span className="text-xs text-ink-400">{t('사용자 {username}', { username: db.username })}</span>
+                <span className="kbd">{db.env_key}</span>
+              </div>
+              {db.url && <Secret value={db.url} />}
+            </li>
+          ))}
+        </ul>
+      )}
+    </Section>
+  )
+}
 
 export function DatabaseTab({ app, onChanged }) {
   const toast = useToast()
@@ -242,6 +311,8 @@ export function DatabaseTab({ app, onChanged }) {
           <p className="text-sm text-ink-400">{t('배정된 Redis DB가 없습니다.')}</p>
         )}
       </Section>
+
+      <MongoSection app={app} />
     </div>
   )
 }

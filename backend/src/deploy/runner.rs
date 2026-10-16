@@ -99,14 +99,23 @@ async fn finish(
         Ok(sha) => log.line(format!("✔ 배포 완료 ({})", short(sha))).await,
         Err(e) => log.line(format!("✘ {status}: {e:#}")).await,
     }
+    // 로그 본문을 먼저 저장 → 상태가 '끝남'으로 보일 때 로그도 이미 있음
+    if let Err(e) =
+        crate::logstore::deploy_log_save(state, deploy_id, app_id, &log.contents()).await
+    {
+        tracing::error!(error = %e, "failed to save deployment log");
+    }
     let db = &state.db;
     let _ = sqlx::query(
-        "UPDATE deployments SET status = ?, error = ?, log = ?, finished_at = CURRENT_TIMESTAMP(3), \
+        "UPDATE deployments SET status = ?, error = ?, finished_at = CURRENT_TIMESTAMP(3), \
          commit_sha = COALESCE(commit_sha, ?) WHERE id = ?",
     )
     .bind(status)
-    .bind(error.as_deref().map(|e| e.chars().take(1000).collect::<String>()))
-    .bind(log.contents())
+    .bind(
+        error
+            .as_deref()
+            .map(|e| e.chars().take(1000).collect::<String>()),
+    )
     .bind(result.as_ref().ok().filter(|s| !s.is_empty()))
     .bind(deploy_id)
     .execute(db)

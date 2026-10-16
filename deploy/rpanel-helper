@@ -499,7 +499,47 @@ redis_user_drop() {
 BACKUPS="$DATA/backups"
 valid_stamp() { [[ "${1:-}" =~ ^[0-9]{8}-[0-9]{6}$ ]] || die "invalid stamp"; }
 valid_backup_scope() { [[ "${1:-}" == _databases ]] || valid_slug "${1:-}"; }
-valid_backup_file() { [[ "${1:-}" =~ ^[0-9]{8}-[0-9]{6}-(db-[a-z][a-z0-9_]+\.sql|data\.tar|files\.tar)\.gz$ ]] || die "invalid backup file name"; }
+valid_backup_file() { [[ "${1:-}" =~ ^[0-9]{8}-[0-9]{6}-(db-[a-z][a-z0-9_]+\.sql|mongo-[a-z][a-z0-9_]+\.archive|data\.tar|files\.tar)\.gz$ ]] || die "invalid backup file name"; }
+
+# ── MongoDB (관리자 주소는 /etc/rpanel/rpanel.env 의 MONGODB_URL, 명령줄 대신 설정 파일로 넘김) ──
+MONGO_ENV="${RPANEL_TEST_ENV_FILE:-/etc/rpanel/rpanel.env}"
+valid_mongo_db() {
+  [[ "${1:-}" =~ ^[a-z][a-z0-9_]{1,62}$ ]] || die "invalid mongo db: '${1:-}'"
+  case "$1" in admin|local|config|rpanel|rpanel_logs) die "reserved mongo db: $1" ;; esac
+}
+mongo_cfg() { # 임시 설정 파일 (root 0600) 경로를 출력
+  local url cfg
+  url="$(grep -E '^MONGODB_URL=' "$MONGO_ENV" 2>/dev/null | tail -n1 | cut -d= -f2-)"
+  [[ -n "$url" && "$url" == mongodb://* && "$url" != *'"'* ]] || die "MONGODB_URL 이 설정되지 않았습니다"
+  cfg="$(mktemp /tmp/rpanel-mongo.XXXXXX)"; chmod 0600 "$cfg"
+  printf 'uri: "%s"\n' "$url" > "$cfg"
+  echo "$cfg"
+}
+
+backup_mongo() {
+  local slug="$1" name="$2" stamp="$3" dir out cfg
+  valid_mongo_db "$name"; valid_stamp "$stamp"
+  command -v mongodump >/dev/null || die "mongodump 가 없습니다 (mongodb-database-tools)"
+  dir="$(backup_dir "$slug")"; out="$dir/$stamp-mongo-$name.archive.gz"
+  cfg="$(mongo_cfg)"
+  mongodump --config="$cfg" --db="$name" --archive="$out.part" --gzip --quiet \
+    || { rm -f "$out.part" "$cfg"; die "mongodump 실패"; }
+  rm -f "$cfg"
+  mv "$out.part" "$out"
+  finish_file "$out"
+}
+
+restore_mongo() {
+  local slug="$1" name="$2" file="$3" path cfg
+  valid_mongo_db "$name"; valid_backup_file "$file"
+  [[ "$file" == *-mongo-"$name".archive.gz ]] || die "다른 DB의 백업입니다"
+  path="$BACKUPS/$slug/$file"; [[ -f "$path" && ! -L "$path" ]] || die "백업 파일이 없습니다"
+  cfg="$(mongo_cfg)"
+  mongorestore --config="$cfg" --nsInclude="$name.*" --drop --archive="$path" --gzip --quiet \
+    || { rm -f "$cfg"; die "복원 실패"; }
+  rm -f "$cfg"
+  echo "restored $name from $file"
+}
 
 backup_dir() {
   install -d -o rpanel -g rpanel -m 0750 "$BACKUPS" "$BACKUPS/$1"
@@ -864,6 +904,153 @@ ssl_remove() {
   echo "removed certificates for $slug"
 }
 
+# ───────────────────────── 패널 전용 도메인 ─────────────────────────
+# 패널을 https://panel.example.com (443) 으로도 열 수 있게 — 설정 내용은 이 스크립트가 직접 만듦
+
+PANEL_DOMAIN_CONF="rpanel-panel-domain.conf"
+PANEL_UPSTREAM="${RPANEL_PANEL_UPSTREAM:-127.0.0.1:8090}"
+
+# panel_domain_conf <domain> [cert key]  — 인증서가 없으면 80 포트(ACME)만
+panel_domain_conf() {
+  local domain="$1" cert="${2:-}" key="${3:-}" v6=0
+  grep -qs 'listen \[::\]' "$AVAIL/rpanel-panel.conf" && v6=1
+  echo "$MARK (panel domain) — 패널 설정 화면에서 바꿉니다"
+  echo "server {"
+  echo "    listen 80;"
+  if ((v6)); then echo "    listen [::]:80;"; fi
+  echo "    server_name $domain;"
+  echo "    location ^~ /.well-known/acme-challenge/ {"
+  echo "        root $ACME_ROOT;"
+  echo '        default_type "text/plain";'
+  echo '        try_files $uri =404;'
+  echo "    }"
+  echo "    location / {"
+  if [[ -n "$cert" ]]; then
+    echo '        return 301 https://$host$request_uri;'
+  else
+    echo '        return 503;'
+  fi
+  echo "    }"
+  echo "}"
+  [[ -n "$cert" ]] || return 0
+  echo
+  echo "server {"
+  echo "    listen 443 ssl http2;"
+  if ((v6)); then echo "    listen [::]:443 ssl http2;"; fi
+  echo "    server_name $domain;"
+  echo "    ssl_certificate     $cert;"
+  echo "    ssl_certificate_key $key;"
+  sed "s|__UPSTREAM__|$PANEL_UPSTREAM|g" <<'CONF'
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_session_cache shared:rpanel_panel_domain:5m;
+
+    root /usr/share/rpanel/www;
+    index index.html;
+    access_log /var/log/nginx/rpanel-panel-access.log;
+    error_log  /var/log/nginx/rpanel-panel-error.log;
+
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-Frame-Options "DENY" always;
+    add_header Referrer-Policy "same-origin" always;
+    add_header Strict-Transport-Security "max-age=31536000" always;
+    add_header Content-Security-Policy "default-src 'self'; connect-src 'self' wss:; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'" always;
+
+    client_max_body_size 2m;
+
+    location ~ ^/api/apps/[0-9]+/files/upload$ {
+        client_max_body_size 2048m;
+        proxy_request_buffering off;
+        proxy_pass http://__UPSTREAM__;
+        proxy_http_version 1.1;
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
+    }
+
+    location /api/ {
+        proxy_pass http://__UPSTREAM__;
+        proxy_http_version 1.1;
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header Upgrade    $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_read_timeout 3600s;
+        proxy_buffering off;
+    }
+
+    location /assets/ {
+        expires 1y;
+        try_files $uri =404;
+    }
+
+    location / {
+        expires -1;
+        try_files $uri $uri/ /index.html;
+    }
+}
+CONF
+}
+
+panel_domain_install_conf() {
+  local dst="$AVAIL/$PANEL_DOMAIN_CONF" link="$ENABLED/$PANEL_DOMAIN_CONF" backup="" tmp
+  tmp="$(mktemp)"; panel_domain_conf "$@" > "$tmp"
+  if [[ -f "$dst" ]]; then backup=$(mktemp); cp -p "$dst" "$backup"; fi
+  install -m 0644 -o root -g root "$tmp" "$dst"; rm -f "$tmp"
+  ln -sfn "$dst" "$link"
+  if ! nginx -t 2>/tmp/rpanel-nginx-test.$$; then
+    cat /tmp/rpanel-nginx-test.$$ >&2; rm -f /tmp/rpanel-nginx-test.$$
+    if [[ -n "$backup" ]]; then mv "$backup" "$dst"; else rm -f "$dst" "$link"; fi
+    die "nginx -t failed — 이전 설정으로 되돌렸습니다"
+  fi
+  rm -f /tmp/rpanel-nginx-test.$$ "${backup:-/nonexistent}"
+  systemctl reload nginx
+}
+
+# 앱 사이트가 이미 쓰는 도메인이면 거부
+panel_domain_conflict() {
+  local domain="$1" f b
+  for f in "$AVAIL"/rpanel-*.conf; do
+    [[ -f "$f" ]] || continue
+    b="$(basename "$f")"
+    [[ "$b" == "$PANEL_DOMAIN_CONF" || "$b" == rpanel-panel.conf ]] && continue
+    if grep -E '^[[:space:]]*server_name[[:space:]]' "$f" | tr -s ' ;\t' '\n' | grep -qxF "$domain"; then
+      die "도메인 $domain 은(는) 이미 다른 사이트에서 사용 중입니다"
+    fi
+  done
+}
+
+panel_domain_set() {
+  local domain="$1" email="$2"
+  valid_domain "$domain"; valid_email "$email"
+  panel_domain_conflict "$domain"
+  command -v certbot >/dev/null || die "certbot 이 설치되어 있지 않습니다 (apt install certbot)"
+  install -d -m 0755 "$ACME_ROOT"
+  # 1) 80 포트로 ACME 경로를 먼저 열고  2) 인증서 발급  3) 443 설정
+  panel_domain_install_conf "$domain"
+  if ! certbot certonly --webroot -w "$ACME_ROOT" --cert-name rpanel-panel-domain \
+      --non-interactive --agree-tos -m "$email" --keep-until-expiring --expand -d "$domain" 2>&1; then
+    rm -f "$ENABLED/$PANEL_DOMAIN_CONF" "$AVAIL/$PANEL_DOMAIN_CONF"
+    nginx -t >/dev/null 2>&1 && systemctl reload nginx
+    die "Let's Encrypt 발급 실패 — 도메인 DNS 가 이 서버를 가리키는지, 80 포트가 열려 있는지 확인하세요"
+  fi
+  panel_domain_install_conf "$domain" /etc/letsencrypt/live/rpanel-panel-domain/fullchain.pem /etc/letsencrypt/live/rpanel-panel-domain/privkey.pem
+  echo "panel domain https://$domain"
+}
+
+panel_domain_remove() {
+  rm -f "$ENABLED/$PANEL_DOMAIN_CONF" "$AVAIL/$PANEL_DOMAIN_CONF"
+  if command -v certbot >/dev/null && [[ -d /etc/letsencrypt/live/rpanel-panel-domain ]]; then
+    certbot delete --cert-name rpanel-panel-domain --non-interactive >/dev/null 2>&1 || true
+  fi
+  if nginx -t >/dev/null 2>&1; then systemctl reload nginx; fi
+  echo "panel domain removed"
+}
+
 # ───────────────────────── 파일 사이트 백업 ─────────────────────────
 
 backup_files() {
@@ -1062,6 +1249,8 @@ case "$cmd" in
   redis-user-set)   redis_user_set "${1:-}" "${2:-}" "${3:-}" ;;
   redis-user-drop)  redis_user_drop "${1:-}" ;;
   backup-db)   valid_backup_scope "${1:-}"; backup_db "$1" "${2:-}" "${3:-}" ;;
+  backup-mongo)  valid_backup_scope "${1:-}"; backup_mongo "$1" "${2:-}" "${3:-}" ;;
+  restore-mongo) valid_backup_scope "${1:-}"; restore_mongo "$1" "${2:-}" "${3:-}" ;;
   backup-data) valid_slug "${1:-}"; backup_data "$1" "${2:-}" ;;
   restore-db)  valid_backup_scope "${1:-}"; restore_db "$1" "${2:-}" "${3:-}" ;;
   restore-data) valid_slug "${1:-}"; restore_data "$1" "${2:-}" ;;
@@ -1093,6 +1282,8 @@ case "$cmd" in
     esac
     ;;
   runtime-install) runtime_install "${1:-}" "${2:-}" ;;
+  panel-domain-set)    panel_domain_set "${1:-}" "${2:-}" ;;
+  panel-domain-remove) panel_domain_remove ;;
   runtime-remove)  runtime_remove "${1:-}" "${2:-}" ;;
   purge-app)
     valid_slug "${1:-}"
@@ -1107,7 +1298,7 @@ case "$cmd" in
     echo "purged $1"
     ;;
   *)
-    die "usage: rpanel-helper {prepare-app|install-unit|remove-unit|install-site|remove-site|purge-app} <slug> | svc {start|stop|restart} <slug> | status|journal <slug> | {install,remove,run}-cron|cron-status|cron-log <slug> <id> | db-{create,drop,password} <db> <user> | db-user-create <db> <user> <all|read> (pw stdin) | db-user-drop <db> <user> | db-user-password <db> <user> (pw stdin) | redis-user-set <user> <pattern> <rw|ro> (pw stdin) | redis-user-drop <user> | backup-db <slug> <db> <stamp> | backup-data <slug> <stamp> | restore-db <slug> <db> <file> | restore-data <slug> <file> | nginx-log <slug> access|error <lines> | site-create <slug> <user> <domain> <static|rust|python> | site-password <slug> (stdin) | site-account-create <slug> <user> <ssh|sftp> (pw stdin) | site-account-update <slug> <user> <ssh|sftp> <on|off> | site-account-password <slug> <user> (stdin) | site-account-keys <slug> <user> (stdin) | site-account-delete <slug> <user> | ssl-issue <slug> <email> <domain>... | ssl-custom|ssl-info|ssl-remove <slug> | backup-files <slug> <stamp> | restore-files <slug> <file> | runtime-install|runtime-remove <python|node> <version> | system-log <panel|nginx|ssh|mariadb|redis> <lines>"
+    die "usage: rpanel-helper {prepare-app|install-unit|remove-unit|install-site|remove-site|purge-app} <slug> | svc {start|stop|restart} <slug> | status|journal <slug> | {install,remove,run}-cron|cron-status|cron-log <slug> <id> | db-{create,drop,password} <db> <user> | db-user-create <db> <user> <all|read> (pw stdin) | db-user-drop <db> <user> | db-user-password <db> <user> (pw stdin) | redis-user-set <user> <pattern> <rw|ro> (pw stdin) | redis-user-drop <user> | backup-db <slug> <db> <stamp> | backup-data <slug> <stamp> | restore-db <slug> <db> <file> | restore-data <slug> <file> | nginx-log <slug> access|error <lines> | site-create <slug> <user> <domain> <static|rust|python> | site-password <slug> (stdin) | site-account-create <slug> <user> <ssh|sftp> (pw stdin) | site-account-update <slug> <user> <ssh|sftp> <on|off> | site-account-password <slug> <user> (stdin) | site-account-keys <slug> <user> (stdin) | site-account-delete <slug> <user> | ssl-issue <slug> <email> <domain>... | ssl-custom|ssl-info|ssl-remove <slug> | backup-files <slug> <stamp> | restore-files <slug> <file> | backup-mongo <slug> <db> <stamp> | restore-mongo <slug> <db> <file> | runtime-install|runtime-remove <python|node> <version> | system-log <panel|nginx|ssh|mariadb|redis> <lines> | panel-domain-set <domain> <email> | panel-domain-remove"
     ;;
 esac
 }

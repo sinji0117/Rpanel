@@ -19,6 +19,7 @@
 #   --no-ssh-password        사이트 유저의 SSH/SFTP 비밀번호 로그인을 켜지 않음 (--ssh-password 로 다시 켬)
 #   --dry-run-mode           패널을 RPANEL_EXEC_MODE=dry-run 으로 시작 (둘러보기용)
 #   --no-build               빌드 생략 (이미 빌드된 결과물 사용)
+#   --no-mongodb             MongoDB 를 설치하지 않음 (패널 로그는 MariaDB 에 저장, --mongodb 로 다시 켬)
 #
 # 여러 번 실행해도 안전합니다. 비밀값과 처음 고른 옵션은 /etc/rpanel/rpanel.env 에 저장돼 다음 실행(업데이트)에도 그대로 쓰입니다.
 set -euo pipefail
@@ -37,6 +38,7 @@ PROXY_IP="${RPANEL_TRUSTED_PROXY:-}"
 ALLOW_FROM="$(envget RPANEL_ALLOW_FROM)"
 PANEL_DOMAIN="$(envget RPANEL_PANEL_DOMAIN)"
 EMAIL="$(envget RPANEL_EMAIL)"
+MONGO="$(envget RPANEL_MONGODB)"; MONGO="${MONGO:-1}"
 for arg in "$@"; do
   case "$arg" in
     --mode=*) MODE_ARG="${arg#*=}" ;;
@@ -46,12 +48,14 @@ for arg in "$@"; do
     --panel-domain=*) PANEL_DOMAIN="${arg#*=}" ;;
     --email=*) EMAIL="${arg#*=}" ;;
     --no-build) BUILD=0 ;;
+    --no-mongodb) MONGO=0 ;;
+    --mongodb) MONGO=1 ;;
     --no-firewall) FIREWALL=0 ;;
     --firewall) FIREWALL=1 ;;
     --no-ssh-password) SSH_PASSWORD=0 ;;
     --ssh-password) SSH_PASSWORD=1 ;;
     --dry-run-mode) EXEC_MODE=dry-run ;;
-    -h|--help) sed -n '2,23p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,24p' "$0"; exit 0 ;;
     *) echo "알 수 없는 옵션: $arg  (--help)" >&2; exit 2 ;;
   esac
 done
@@ -200,6 +204,52 @@ if [[ -z "$REDIS_URL_V" || "$REDIS_URL_V" == *"<"* || "$REDIS_URL_V" != *":$REDI
   REDIS_URL_V="redis://:$REDIS_PW@127.0.0.1:6379/10"
 fi
 
+# ───────────────────────── 3-1. MongoDB ─────────────────────────
+# 패널 로그 저장 + 프로젝트용 MongoDB. 127.0.0.1 에서만, 인증 필수. root 권한 관리자 계정을 패널에 넘김.
+MONGO_URL_V="$(envget MONGODB_URL)"
+if (( MONGO )); then
+  say "3-1 MongoDB"
+  ARCH="$(dpkg --print-architecture)"
+  if [[ "$ARCH" == amd64 ]] && ! grep -qw avx /proc/cpuinfo; then
+    warn "이 CPU(가상머신)에 AVX 기능이 없어 MongoDB 5 이상을 실행할 수 없습니다 — MongoDB 설치를 건너뜁니다"
+    warn "가상머신이면 CPU 종류를 host 로 바꾼 뒤 'sudo rpanel-update --force --mongodb' 로 다시 설치하세요. 패널 로그는 MariaDB 에 저장됩니다"
+    MONGO_URL_V=""
+  else
+    if ! command -v mongod >/dev/null; then
+      curl -fsSL https://www.mongodb.org/static/pgp/server-8.0.asc | gpg --dearmor --yes -o /usr/share/keyrings/mongodb-server-8.0.gpg \
+        || die "MongoDB 저장소 키를 받지 못했습니다 (인터넷 연결 확인, 또는 --no-mongodb)"
+      echo "deb [ arch=amd64,arm64 signed-by=/usr/share/keyrings/mongodb-server-8.0.gpg ] https://repo.mongodb.org/apt/ubuntu noble/mongodb-org/8.0 multiverse" \
+        > /etc/apt/sources.list.d/mongodb-org-8.0.list
+      apt-get update -q >/dev/null
+      apt-get install -y -q mongodb-org >/dev/null || die "MongoDB 설치 실패 (--no-mongodb 로 건너뛸 수 있습니다)"
+    fi
+    MCONF=/etc/mongod.conf
+    # 바인드는 127.0.0.1 만
+    if grep -qE '^\s*bindIp:' "$MCONF"; then sed -i -E 's/^(\s*)bindIp:.*/\1bindIp: 127.0.0.1/' "$MCONF"; fi
+    systemctl enable mongod >/dev/null 2>&1 || true
+    mongo_up() { for _ in $(seq 1 40); do mongosh --quiet --eval 'db.adminCommand({ping:1}).ok' "$@" 2>/dev/null | grep -q 1 && return 0; sleep 0.5; done; return 1; }
+    MONGO_PW=""
+    [[ -n "$MONGO_URL_V" ]] && MONGO_PW="$(echo "$MONGO_URL_V" | sed -nE 's#^mongodb://rpanel_admin:([^@]+)@.*#\1#p')"
+    if [[ -z "$MONGO_PW" ]]; then
+      # 처음: 인증 없이 띄워 관리자 계정을 만든 뒤 인증 켜기
+      sed -i -E '/^security:/,/^[^ ]/{/^security:/d;/^\s+authorization:/d}' "$MCONF"
+      systemctl restart mongod
+      mongo_up || die "MongoDB 가 시작되지 않았습니다: journalctl -u mongod -n 50"
+      MONGO_PW="$(genpw)"
+      mongosh --quiet admin --eval "if (!db.getUser('rpanel_admin')) { db.createUser({user:'rpanel_admin', pwd:'$MONGO_PW', roles:['root']}) } else { db.changeUserPassword('rpanel_admin', '$MONGO_PW') }" >/dev/null \
+        || die "MongoDB 관리자 계정을 만들지 못했습니다"
+      info "MongoDB 관리자 계정 생성"
+    fi
+    grep -qE '^security:' "$MCONF" || printf '\nsecurity:\n  authorization: enabled\n' >> "$MCONF"
+    systemctl restart mongod
+    MONGO_URL_V="mongodb://rpanel_admin:$MONGO_PW@127.0.0.1:27017/?authSource=admin"
+    mongo_up "$MONGO_URL_V" || die "MongoDB 인증 접속 실패: journalctl -u mongod -n 50"
+    info "MongoDB $(mongod --version | awk 'NR==1{print $3}') · 127.0.0.1:27017 (인증 필수)"
+  fi
+else
+  MONGO_URL_V=""
+fi
+
 # ───────────────────────── 4. Node.js ─────────────────────────
 say "4/8 Node.js 22"
 node_ok() {
@@ -306,13 +356,14 @@ COOKIE=true
 EXTRA=""
 if [[ -f $ENVF ]]; then
   # 스크립트가 관리하지 않는 사용자 추가 설정은 보존
-  EXTRA="$(grep -Ev '^(#|$|DATABASE_URL=|REDIS_URL=|JWT_SECRET=|BIND_ADDR=|RPANEL_EXEC_MODE=|COOKIE_SECURE=|RPANEL_EDGE_MODE=|RPANEL_TRUSTED_PROXY=|RPANEL_IPV6=|RPANEL_ALLOW_FROM=|RPANEL_FIREWALL=|RPANEL_SSH_PASSWORD=|RPANEL_PANEL_DOMAIN=|RPANEL_EMAIL=)' "$ENVF" || true)"
+  EXTRA="$(grep -Ev '^(#|$|DATABASE_URL=|REDIS_URL=|MONGODB_URL=|RPANEL_MONGODB=|JWT_SECRET=|BIND_ADDR=|RPANEL_EXEC_MODE=|COOKIE_SECURE=|RPANEL_EDGE_MODE=|RPANEL_TRUSTED_PROXY=|RPANEL_IPV6=|RPANEL_ALLOW_FROM=|RPANEL_FIREWALL=|RPANEL_SSH_PASSWORD=|RPANEL_PANEL_DOMAIN=|RPANEL_EMAIL=)' "$ENVF" || true)"
   cp -p "$ENVF" "$ENVF.bak"
 fi
 {
   echo "# /etc/rpanel/rpanel.env — install.sh 가 관리 (비밀값은 재실행해도 유지됩니다)"
   echo "DATABASE_URL=$DB_URL"
   echo "REDIS_URL=$REDIS_URL_V"
+  echo "MONGODB_URL=$MONGO_URL_V"
   echo "JWT_SECRET=$JWT"
   echo "BIND_ADDR=127.0.0.1:8090"
   echo "RPANEL_EXEC_MODE=$MODE"
@@ -326,6 +377,7 @@ fi
   echo "RPANEL_SSH_PASSWORD=$SSH_PASSWORD"
   echo "RPANEL_PANEL_DOMAIN=$PANEL_DOMAIN"
   echo "RPANEL_EMAIL=$EMAIL"
+  echo "RPANEL_MONGODB=$MONGO"
   if [[ -n "$EXTRA" ]]; then
     echo "$EXTRA"
   else

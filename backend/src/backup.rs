@@ -35,7 +35,7 @@ pub fn stamp_now() -> String {
 /// 파일 이름 검증 (helper 와 같은 규칙)
 pub fn valid_file_name(f: &str) -> bool {
     static RE: once_cell::sync::Lazy<regex::Regex> = once_cell::sync::Lazy::new(|| {
-        regex::Regex::new(r"^[0-9]{8}-[0-9]{6}-(db-[a-z][a-z0-9_]+\.sql|data\.tar|files\.tar)\.gz$")
+        regex::Regex::new(r"^[0-9]{8}-[0-9]{6}-(db-[a-z][a-z0-9_]+\.sql|mongo-[a-z][a-z0-9_]+\.archive|data\.tar|files\.tar)\.gz$")
             .unwrap()
     });
     RE.is_match(f)
@@ -63,6 +63,7 @@ struct Item {
     target: String,
     file: String,
     database_id: Option<u64>,
+    mongo_id: Option<u64>,
 }
 
 struct Running {
@@ -105,7 +106,19 @@ pub async fn start_app(
             target: db.name.clone(),
             file: format!("{stamp}-db-{}.sql.gz", db.name),
             database_id: Some(db.id),
+            mongo_id: None,
         });
+    }
+    if state.mongo.is_some() {
+        for m in crate::routes::mongo::list_for_app(state, app.id).await? {
+            items.push(Item {
+                kind: "mongo",
+                target: m.name.clone(),
+                file: format!("{stamp}-mongo-{}.archive.gz", m.name),
+                database_id: None,
+                mongo_id: Some(m.id),
+            });
+        }
     }
     if app.site_user.is_some() {
         items.push(Item {
@@ -113,6 +126,7 @@ pub async fn start_app(
             target: "htdocs".into(),
             file: format!("{stamp}-files.tar.gz"),
             database_id: None,
+            mongo_id: None,
         });
     } else if app.kind().is_service() {
         items.push(Item {
@@ -120,6 +134,7 @@ pub async fn start_app(
             target: "data".into(),
             file: format!("{stamp}-data.tar.gz"),
             database_id: None,
+            mongo_id: None,
         });
     }
     if items.is_empty() {
@@ -165,8 +180,36 @@ pub async fn start_database(
         target: db.name.clone(),
         file: format!("{stamp}-db-{}.sql.gz", db.name),
         database_id: Some(db.id),
+        mongo_id: None,
     }];
     launch(state, lock, scope, db.app_id, items, stamp, trigger, job).await
+}
+
+/// MongoDB 데이터베이스 하나만 백업 (mongodump)
+pub async fn start_mongo(
+    state: &AppState,
+    m: &crate::routes::mongo::MongoDb,
+    trigger: &str,
+    job: JobRef,
+) -> AppResult<Vec<u64>> {
+    let scope = match m.app_id {
+        Some(id) => sqlx::query_scalar::<_, String>("SELECT slug FROM apps WHERE id = ?")
+            .bind(id)
+            .fetch_optional(&state.db)
+            .await?
+            .ok_or(AppError::NotFound)?,
+        None => DB_SCOPE.to_string(),
+    };
+    let stamp = stamp_now();
+    let lock = take_lock(state, &format!("mongo-{}", m.id)).await?;
+    let items = vec![Item {
+        kind: "mongo",
+        target: m.name.clone(),
+        file: format!("{stamp}-mongo-{}.archive.gz", m.name),
+        database_id: None,
+        mongo_id: Some(m.id),
+    }];
+    launch(state, lock, scope, m.app_id, items, stamp, trigger, job).await
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -183,11 +226,12 @@ async fn launch(
     let mut running = Vec::new();
     for it in items {
         let res = sqlx::query(
-            "INSERT INTO backups (app_id, database_id, job_id, kind, target, file, status, trigger_by) \
-             VALUES (?, ?, ?, ?, ?, ?, 'running', ?)",
+            "INSERT INTO backups (app_id, database_id, mongo_id, job_id, kind, target, file, status, trigger_by) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, 'running', ?)",
         )
         .bind(app_id)
         .bind(it.database_id)
+        .bind(it.mongo_id)
         .bind(job.map(|j| j.0))
         .bind(it.kind)
         .bind(&it.target)
@@ -210,6 +254,15 @@ async fn launch(
         for job_item in running {
             let log = LogSink::capture();
             let result = match job_item.kind {
+                "mongo" => {
+                    helper::call_long(
+                        &state,
+                        &["backup-mongo", &scope, &job_item.target, &stamp],
+                        &log,
+                        3600,
+                    )
+                    .await
+                }
                 "db" => {
                     helper::call_long(
                         &state,
@@ -464,6 +517,19 @@ pub async fn run_job(state: &AppState, job: &BackupJob, trigger: &str) -> AppRes
                 match start_database(state, &db, trigger, jr).await {
                     Ok(ids) => n += ids.len(),
                     Err(e) => tracing::warn!(db = %db.name, error = %e, "backup skipped"),
+                }
+            }
+            if state.mongo.is_some() {
+                let ms = sqlx::query_as::<_, crate::routes::mongo::MongoDb>(
+                    "SELECT id, app_id, name, username, password, env_key, created_at FROM mongo_databases WHERE app_id IS NULL ORDER BY id",
+                )
+                .fetch_all(&state.db)
+                .await?;
+                for m in ms {
+                    match start_mongo(state, &m, trigger, jr).await {
+                        Ok(ids) => n += ids.len(),
+                        Err(e) => tracing::warn!(db = %m.name, error = %e, "mongo backup skipped"),
+                    }
                 }
             }
             Ok(n)

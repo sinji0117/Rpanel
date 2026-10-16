@@ -30,6 +30,8 @@ pub struct SiteCheck {
     pub app_slug: String,
     pub kind: String,
     pub source: String,
+    /// 파일형 사이트의 사이트 유저 (Git 앱은 없음 — 코드가 Git 에서 오므로 SFTP 계정이 필요 없음)
+    pub site_user: Option<String>,
     pub https: bool,
     pub app_status: String,
     pub project_id: Option<u64>,
@@ -94,6 +96,7 @@ pub async fn list(State(state): State<AppState>, _u: AuthUser) -> AppResult<Json
             app_slug: app.slug.clone(),
             kind: app.kind.clone(),
             source: app.source.clone(),
+            site_user: app.site_user.clone(),
             https: app.has_ssl(),
             app_status: app.status.clone(),
             project_id: app.project_id,

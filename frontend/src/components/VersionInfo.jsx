@@ -85,3 +85,35 @@ export function VersionBadge() {
     </Link>
   )
 }
+
+/* global __APP_VERSION__ */
+export const BUNDLE_VERSION = typeof __APP_VERSION__ === 'undefined' ? null : __APP_VERSION__
+
+/**
+ * 서버(패널)는 업데이트됐는데 브라우저가 옛 화면을 들고 있으면 한 번 새로 고침.
+ * 그래도 다르면(예: 서버 쪽 화면 빌드가 늦음) 위쪽에 안내 띠를 보여 줌.
+ */
+export function StaleBundleBanner() {
+  const v = useVersion()
+  const server = v.data?.current
+  if (!server || !BUNDLE_VERSION || server === BUNDLE_VERSION) return null
+  let reloaded = null
+  try {
+    reloaded = sessionStorage.getItem('rpanel.reloadedFor')
+    if (reloaded !== server) {
+      sessionStorage.setItem('rpanel.reloadedFor', server)
+      window.location.reload()
+      return null
+    }
+  } catch {
+    /* 저장소를 못 쓰면 안내만 */
+  }
+  return (
+    <div role="status" className="mb-4 flex flex-wrap items-center gap-3 rounded-lg border border-sky-400/40 bg-sky-400/10 px-4 py-2.5 text-sm" data-testid="stale-bundle">
+      {t('패널이 v{server} 로 업데이트됐습니다. 지금 화면은 v{bundle} 입니다.', { server, bundle: BUNDLE_VERSION })}
+      <button className="btn-ghost px-2.5 py-1 text-xs" onClick={() => window.location.reload()}>
+        {t('새로 고침')}
+      </button>
+    </div>
+  )
+}

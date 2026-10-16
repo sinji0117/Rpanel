@@ -5,8 +5,7 @@ use axum::{
     http::StatusCode,
     Json,
 };
-use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::{
@@ -16,48 +15,6 @@ use crate::{
     notify::{self, Event, Settings, EVENTS},
     state::AppState,
 };
-
-#[derive(sqlx::FromRow)]
-struct Row {
-    id: u64,
-    kind: String,
-    level: String,
-    title: String,
-    params: String,
-    body: Option<String>,
-    link: Option<String>,
-    read_at: Option<DateTime<Utc>>,
-    created_at: DateTime<Utc>,
-}
-
-#[derive(Serialize)]
-pub struct Notification {
-    pub id: u64,
-    pub kind: String,
-    pub level: String,
-    pub title: String,
-    pub params: Value,
-    pub body: Option<String>,
-    pub link: Option<String>,
-    pub read_at: Option<DateTime<Utc>>,
-    pub created_at: DateTime<Utc>,
-}
-
-impl From<Row> for Notification {
-    fn from(r: Row) -> Self {
-        Self {
-            id: r.id,
-            kind: r.kind,
-            level: r.level,
-            title: r.title,
-            params: serde_json::from_str(&r.params).unwrap_or_else(|_| json!({})),
-            body: r.body,
-            link: r.link,
-            read_at: r.read_at,
-            created_at: r.created_at,
-        }
-    }
-}
 
 #[derive(Deserialize)]
 pub struct ListQuery {
@@ -73,22 +30,8 @@ pub async fn list(
     Query(q): Query<ListQuery>,
 ) -> AppResult<Json<Value>> {
     user.require_admin()?;
-    let sql = format!(
-        "SELECT id, kind, level, title, CAST(COALESCE(params, '{{}}') AS CHAR) AS params, body, link, read_at, created_at \
-         FROM notifications {} ORDER BY id DESC LIMIT ?",
-        if q.unread { "WHERE read_at IS NULL" } else { "" }
-    );
-    let items: Vec<Notification> = sqlx::query_as::<_, Row>(&sql)
-        .bind(q.limit.unwrap_or(50).clamp(1, 500))
-        .fetch_all(&state.db)
-        .await?
-        .into_iter()
-        .map(Notification::from)
-        .collect();
-    let (unread,): (i64,) =
-        sqlx::query_as("SELECT COUNT(*) FROM notifications WHERE read_at IS NULL")
-            .fetch_one(&state.db)
-            .await?;
+    let (items, unread) =
+        crate::logstore::notify_list(&state, q.limit.unwrap_or(50).clamp(1, 500), q.unread).await?;
     Ok(Json(json!({ "items": items, "unread": unread })))
 }
 
@@ -107,24 +50,8 @@ pub async fn mark_read(
     Json(input): Json<ReadInput>,
 ) -> AppResult<Json<Value>> {
     user.require_admin()?;
-    if input.all {
-        sqlx::query(
-            "UPDATE notifications SET read_at = CURRENT_TIMESTAMP(3) WHERE read_at IS NULL",
-        )
-        .execute(&state.db)
-        .await?;
-    } else {
-        for id in input.ids.iter().take(500) {
-            sqlx::query("UPDATE notifications SET read_at = CURRENT_TIMESTAMP(3) WHERE id = ? AND read_at IS NULL")
-                .bind(id)
-                .execute(&state.db)
-                .await?;
-        }
-    }
-    let (unread,): (i64,) =
-        sqlx::query_as("SELECT COUNT(*) FROM notifications WHERE read_at IS NULL")
-            .fetch_one(&state.db)
-            .await?;
+    crate::logstore::notify_mark_read(&state, &input.ids, input.all).await?;
+    let unread = crate::logstore::notify_unread(&state).await?;
     Ok(Json(json!({ "unread": unread })))
 }
 
@@ -135,9 +62,7 @@ pub async fn clear(
     ClientIp(ip): ClientIp,
 ) -> AppResult<StatusCode> {
     user.require_admin()?;
-    sqlx::query("DELETE FROM notifications")
-        .execute(&state.db)
-        .await?;
+    crate::logstore::notify_clear(&state).await?;
     audit::log(&state, Some(user.id), "notifications.clear", "", &ip).await;
     Ok(StatusCode::NO_CONTENT)
 }
@@ -188,11 +113,18 @@ pub async fn test(State(state): State<AppState>, user: AuthUser) -> AppResult<Js
     let s = notify::load_settings(&state).await;
     let ev = Event::new("test", "info", "시험 알림입니다", json!({}))
         .body("Rpanel 알림이 잘 도착했습니다.");
-    sqlx::query("INSERT INTO notifications (kind, level, title, params, body) VALUES ('test', 'info', ?, '{}', ?)")
-        .bind(ev.title)
-        .bind(&ev.body)
-        .execute(&state.db)
-        .await?;
+    crate::logstore::notify_insert(
+        &state,
+        crate::logstore::NewNotification {
+            kind: "test",
+            level: "info",
+            title: ev.title,
+            params: &ev.params,
+            body: ev.body.as_deref(),
+            link: None,
+        },
+    )
+    .await?;
     if !notify::has_channel(&s.channels) {
         return Ok(Json(json!({ "results": [] })));
     }

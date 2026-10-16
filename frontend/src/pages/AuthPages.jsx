@@ -4,7 +4,7 @@ import { Logo, ThemeLangSwitch } from '../components/Layout'
 import { ErrorBox, Field } from '../components/ui'
 import { t } from '../i18n'
 
-function Shell({ title, subtitle, children }) {
+export function Shell({ title, subtitle, children }) {
   return (
     <div className="relative flex min-h-screen items-center justify-center px-4">
       <div className="absolute top-4 right-4">

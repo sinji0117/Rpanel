@@ -164,7 +164,7 @@ pub async fn fetch(state: &AppState, id: u64) -> AppResult<App> {
         .ok_or(AppError::NotFound)
 }
 
-/// 다른 앱이 이미 쓰는 도메인 거부
+/// 다른 앱이나 패널 전용 도메인이 이미 쓰는 도메인 거부
 pub async fn check_domain_conflicts(
     state: &AppState,
     domains: &str,
@@ -173,6 +173,16 @@ pub async fn check_domain_conflicts(
     if domains.is_empty() {
         return Ok(());
     }
+    crate::routes::panel_domain::conflicts(state, domains).await?;
+    check_app_domains(state, domains, exclude_id).await
+}
+
+/// 다른 앱이 이미 쓰는 도메인 거부
+pub async fn check_app_domains(
+    state: &AppState,
+    domains: &str,
+    exclude_id: Option<u64>,
+) -> AppResult<()> {
     let rows: Vec<(u64, String, String)> =
         sqlx::query_as("SELECT id, slug, domains FROM apps WHERE domains <> ''")
             .fetch_all(&state.db)
@@ -479,6 +489,7 @@ pub async fn delete(
             tracing::warn!(error = %e, db = n, "redis flush on app delete failed");
         }
     }
+    crate::logstore::deploy_logs_delete_app(&state, app.id).await;
     sqlx::query("DELETE FROM apps WHERE id = ?")
         .bind(id)
         .execute(&state.db)

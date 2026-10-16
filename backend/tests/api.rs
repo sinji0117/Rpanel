@@ -114,9 +114,29 @@ async fn full_flow() {
         eprintln!("RPANEL_TEST_DATABASE_URL / RPANEL_TEST_REDIS_URL 미설정 — 통합 테스트 건너뜀");
         return;
     };
-    let cfg = Config::for_tests(db_url, redis_url);
+    let mut cfg = Config::for_tests(db_url, redis_url);
+    // MongoDB 가 있으면 패널 로그를 MongoDB 에 저장하는 경로로 전체 흐름을 검사
+    cfg.mongodb_url = std::env::var("RPANEL_TEST_MONGODB_URL")
+        .ok()
+        .filter(|v| !v.is_empty());
+    let mongo_users = std::env::var("RPANEL_TEST_MONGO_USERS").is_ok_and(|v| v == "1");
     let state = rpanel::build_state(cfg).await.expect("state");
+    if let Some(m) = &state.mongo {
+        m.database(rpanel::logstore::LOG_DB)
+            .drop()
+            .await
+            .expect("drop log db");
+        for name in ["shop_mongo"] {
+            let _ = m
+                .database(name)
+                .run_command(mongodb::bson::doc! { "dropAllUsersFromDatabase": 1 })
+                .await;
+            let _ = m.database(name).drop().await;
+        }
+    }
     for t in [
+        "mongo_users",
+        "mongo_databases",
         "notifications",
         "panel_settings",
         "runtimes",
@@ -139,6 +159,9 @@ async fn full_flow() {
             .await
             .unwrap();
     }
+    rpanel::logstore::init(&state)
+        .await
+        .expect("log store init");
     let ctx = Ctx {
         app: routes::router(state.clone()),
     };
@@ -314,6 +337,62 @@ async fn full_flow() {
         .post(&format!("/api/projects/{pid}/apps"), &t, json!({"name":"Dup","kind":"static","git_url":"https://github.com/a/b.git","domains":"API.beripick.com"}))
         .await;
     assert_eq!(r.status, StatusCode::CONFLICT, "domain conflict");
+
+    // 패널 전용 도메인
+    let pd = "/api/system/panel-domain";
+    for (body, code) in [
+        (
+            json!({"domain":"panel","email":"a@b.co"}),
+            StatusCode::BAD_REQUEST,
+        ),
+        (
+            json!({"domain":"panel.example.com","email":"x"}),
+            StatusCode::BAD_REQUEST,
+        ),
+        (
+            json!({"domain":"api.beripick.com","email":"a@b.co"}),
+            StatusCode::CONFLICT,
+        ),
+    ] {
+        let r = ctx
+            .req(Method::PUT, pd, Some(&t), None, Some(body.clone()))
+            .await;
+        assert_eq!(r.status, code, "{body} {:?}", r.body);
+    }
+    let r = ctx
+        .req(
+            Method::PUT,
+            pd,
+            Some(&t),
+            None,
+            Some(json!({"domain":"Panel.Example.com","email":"a@b.co"})),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+    assert_eq!(
+        ctx.get(pd, &t).await.body["url"],
+        "https://panel.example.com"
+    );
+    // 같은 도메인으로 다시 설정(인증서 갱신)은 허용, 앱 도메인으로는 거부
+    let r = ctx
+        .req(
+            Method::PUT,
+            pd,
+            Some(&t),
+            None,
+            Some(json!({"domain":"panel.example.com","email":"a@b.co"})),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+    let r = ctx.post(&format!("/api/projects/{pid}/apps"), &t, json!({"name":"PD","kind":"static","git_url":"https://github.com/a/b.git","domains":"panel.example.com"})).await;
+    assert_eq!(r.status, StatusCode::CONFLICT, "{:?}", r.body);
+    assert_eq!(
+        ctx.req(Method::DELETE, pd, Some(&t), None, None)
+            .await
+            .status,
+        StatusCode::NO_CONTENT
+    );
+    assert!(ctx.get(pd, &t).await.body["domain"].is_null());
 
     let r = ctx
         .post(
@@ -1667,6 +1746,218 @@ async fn full_flow() {
     )
     .await;
 
+    // ── 로그 저장소 / MongoDB ──
+    let r = ctx.get("/api/system/info", &t).await;
+    assert_eq!(
+        r.body["log_store"],
+        if state.mongo.is_some() {
+            "mongodb"
+        } else {
+            "mariadb"
+        }
+    );
+    let r = ctx.get("/api/mongo", &t).await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+    assert_eq!(r.body["configured"], state.mongo.is_some());
+    if let Some(m) = &state.mongo {
+        assert_eq!(r.body["available"], true, "{:?}", r.body);
+        // 로그가 MongoDB 에 실제로 들어갔는지 (활동 기록·배포 로그·알림·지표)
+        let ldb = m.database(rpanel::logstore::LOG_DB);
+        for coll in ["audit", "deployment_logs", "notifications"] {
+            let n = ldb
+                .collection::<mongodb::bson::Document>(coll)
+                .count_documents(mongodb::bson::doc! {})
+                .await
+                .unwrap();
+            assert!(n > 0 || coll == "notifications", "{coll} empty");
+        }
+        let audit = ctx.get("/api/audit?limit=5", &t).await;
+        assert!(audit.body.as_array().unwrap().len() == 5);
+        assert!(audit.body[0]["id"].as_u64().unwrap() > audit.body[1]["id"].as_u64().unwrap());
+    } else {
+        let r = ctx
+            .post("/api/mongo", &t, json!({"name":"shop_mongo"}))
+            .await;
+        assert_eq!(r.status, StatusCode::BAD_REQUEST, "no mongo → 400");
+    }
+    for bad in ["admin", "rpanel_logs", "Shop", "a-b", "x"] {
+        if state.mongo.is_some() {
+            let r = ctx.post("/api/mongo", &t, json!({"name": bad})).await;
+            assert_eq!(r.status, StatusCode::BAD_REQUEST, "{bad}");
+        }
+    }
+    if mongo_users {
+        let r = ctx
+            .post(
+                "/api/mongo",
+                &t,
+                json!({"name":"shop_mongo","app_id": py_id}),
+            )
+            .await;
+        assert_eq!(r.status, StatusCode::CREATED, "{:?}", r.body);
+        let mid = r.body["database"]["id"].as_u64().unwrap();
+        let url = r.body["url"].as_str().unwrap().to_string();
+        assert!(
+            url.starts_with("mongodb://shop_mongo:")
+                && url.ends_with("/shop_mongo?authSource=shop_mongo"),
+            "{url}"
+        );
+        assert!(r.body["database"].get("password").is_none());
+        assert_eq!(
+            ctx.post("/api/mongo", &t, json!({"name":"shop_mongo"}))
+                .await
+                .status,
+            StatusCode::CONFLICT
+        );
+        // 앱 환경변수에 자동 주입
+        let env = ctx.get(&format!("/api/apps/{py_id}/env"), &t).await;
+        assert!(env.body["managed"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|m| m["key"] == "MONGODB_URL" && m["value"] == url));
+        // 실제로 그 계정으로 쓰기·읽기 (TEST 서버 주소로 바꿔서)
+        let host = std::env::var("RPANEL_TEST_MONGODB_URL").unwrap();
+        let host = host
+            .split('@')
+            .nth(1)
+            .unwrap()
+            .split('/')
+            .next()
+            .unwrap()
+            .to_string();
+        let as_user = |u: &str| u.replace("127.0.0.1:27017", &host);
+        let c = mongodb::Client::with_uri_str(as_user(&url)).await.unwrap();
+        c.database("shop_mongo")
+            .collection::<mongodb::bson::Document>("orders")
+            .insert_one(mongodb::bson::doc! { "n": 1 })
+            .await
+            .expect("app user can write");
+        // 읽기 전용 계정
+        let r = ctx
+            .post(
+                &format!("/api/mongo/{mid}/users"),
+                &t,
+                json!({"username":"shop_reader","role":"read"}),
+            )
+            .await;
+        assert_eq!(r.status, StatusCode::CREATED, "{:?}", r.body);
+        let uid = r.body["id"].as_u64().unwrap();
+        let ro = mongodb::Client::with_uri_str(as_user(r.body["url"].as_str().unwrap()))
+            .await
+            .unwrap();
+        let coll = ro
+            .database("shop_mongo")
+            .collection::<mongodb::bson::Document>("orders");
+        assert_eq!(
+            coll.count_documents(mongodb::bson::doc! {})
+                .await
+                .expect("reader can read"),
+            1
+        );
+        assert!(
+            coll.insert_one(mongodb::bson::doc! { "n": 2 })
+                .await
+                .is_err(),
+            "reader must not write"
+        );
+        assert_eq!(
+            ctx.post(
+                &format!("/api/mongo/{mid}/users"),
+                &t,
+                json!({"username":"shop_reader"})
+            )
+            .await
+            .status,
+            StatusCode::CONFLICT
+        );
+        assert_eq!(
+            ctx.post(
+                &format!("/api/mongo/{mid}/users"),
+                &t,
+                json!({"username":"x2","role":"root"})
+            )
+            .await
+            .status,
+            StatusCode::BAD_REQUEST
+        );
+        // 비밀번호 바꾸면 옛 주소로는 안 됨
+        let r = ctx
+            .post(
+                &format!("/api/mongo/{mid}/users/{uid}/password"),
+                &t,
+                json!({}),
+            )
+            .await;
+        assert_eq!(r.status, StatusCode::OK);
+        let old =
+            mongodb::Client::with_uri_str(as_user(&url.replace("shop_mongo:", "shop_reader:")))
+                .await
+                .unwrap();
+        assert!(old
+            .database("shop_mongo")
+            .collection::<mongodb::bson::Document>("orders")
+            .count_documents(mongodb::bson::doc! {})
+            .await
+            .is_err());
+        let r = ctx.get("/api/mongo", &t).await;
+        let d = &r.body["databases"][0];
+        assert_eq!(d["users"].as_array().unwrap().len(), 1);
+        assert_eq!(d["app_id"], py_id);
+        // 연결 해제 · 삭제
+        assert_eq!(
+            ctx.req(
+                Method::PUT,
+                &format!("/api/mongo/{mid}"),
+                Some(&t),
+                None,
+                Some(json!({"app_id": null}))
+            )
+            .await
+            .status,
+            StatusCode::OK
+        );
+        assert_eq!(
+            ctx.req(
+                Method::DELETE,
+                &format!("/api/mongo/{mid}/users/{uid}"),
+                Some(&t),
+                None,
+                None
+            )
+            .await
+            .status,
+            StatusCode::NO_CONTENT
+        );
+        assert_eq!(
+            ctx.req(
+                Method::DELETE,
+                &format!("/api/mongo/{mid}"),
+                Some(&t),
+                None,
+                None
+            )
+            .await
+            .status,
+            StatusCode::NO_CONTENT
+        );
+        assert!(
+            c.database("shop_mongo")
+                .collection::<mongodb::bson::Document>("orders")
+                .count_documents(mongodb::bson::doc! {})
+                .await
+                .is_err(),
+            "user dropped"
+        );
+        assert_eq!(
+            ctx.get("/api/mongo", &t).await.body["databases"]
+                .as_array()
+                .unwrap()
+                .len(),
+            0
+        );
+    }
+
     // 버전 확인 (테스트 설정은 GitHub 확인 끔)
     let r = ctx.get("/api/system/version", &t).await;
     assert_eq!(r.status, StatusCode::OK);
@@ -2391,6 +2682,284 @@ async fn full_flow() {
         ctx.get("/api/auth/me", &t).await.status,
         StatusCode::UNAUTHORIZED
     );
+
+    // ── DB 웹 관리 (테스트 DB 계정으로 직접 접속) ──
+    {
+        let r = ctx
+            .req(
+                Method::POST,
+                "/api/auth/login",
+                None,
+                None,
+                Some(json!({"email":"admin@example.com","password":"new-password-22"})),
+            )
+            .await;
+        assert_eq!(r.status, StatusCode::OK);
+        let t = r.body["access_token"].as_str().unwrap().to_string();
+        let url = state.cfg.database_url.clone();
+        let rest = url.strip_prefix("mysql://").unwrap();
+        let (userpass, hostdb) = rest.split_once('@').unwrap();
+        let (dbuser, dbpass) = userpass.split_once(':').unwrap();
+        let dbname = hostdb
+            .split_once('/')
+            .unwrap()
+            .1
+            .split('?')
+            .next()
+            .unwrap()
+            .to_string();
+        sqlx::query("DROP TABLE IF EXISTS dbweb_t")
+            .execute(&state.db)
+            .await
+            .unwrap();
+        sqlx::query("CREATE TABLE dbweb_t (id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY, name VARCHAR(40) NOT NULL, price DECIMAL(10,2) NULL, made_at DATETIME NULL)")
+            .execute(&state.db)
+            .await
+            .unwrap();
+        let wid: u64 = sqlx::query("INSERT INTO app_databases (name, username, password, env_key) VALUES (?, ?, ?, 'DBWEB_URL')")
+            .bind(&dbname)
+            .bind(dbuser)
+            .bind(dbpass)
+            .execute(&state.db)
+            .await
+            .unwrap()
+            .last_insert_id();
+        let base = format!("/api/dbweb/admin/{wid}");
+        let r = ctx.get(&base, &t).await;
+        assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+        assert!(r.body["tables"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|x| x["name"] == "dbweb_t"));
+        let r = ctx
+            .post(
+                &format!("{base}/table/dbweb_t/insert"),
+                &t,
+                json!({"values":{"name":"사과","price":"1200.50","made_at":"2026-01-02 03:04:05"}}),
+            )
+            .await;
+        assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+        assert_eq!(r.body["affected"], 1);
+        let rid = r.body["last_insert_id"].as_u64().unwrap();
+        ctx.post(
+            &format!("{base}/table/dbweb_t/insert"),
+            &t,
+            json!({"values":{"name":"배"}}),
+        )
+        .await;
+        let r = ctx
+            .get(&format!("{base}/table/dbweb_t?size=1&page=1"), &t)
+            .await;
+        assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+        assert_eq!(r.body["total"], 2);
+        assert_eq!(r.body["primary_key"], json!(["id"]));
+        assert_eq!(r.body["rows"].as_array().unwrap().len(), 1);
+        assert_eq!(r.body["rows"][0][0], json!(rid));
+        assert_eq!(r.body["rows"][0][1], "사과");
+        assert_eq!(r.body["rows"][0][2], "1200.50");
+        assert_eq!(r.body["rows"][0][3], "2026-01-02 03:04:05");
+        let r = ctx
+            .post(
+                &format!("{base}/table/dbweb_t/update"),
+                &t,
+                json!({"key":{"id":rid},"values":{"name":"청사과","price":null}}),
+            )
+            .await;
+        assert_eq!(r.body["affected"], 1, "{:?}", r.body);
+        for (op, body) in [
+            ("update", json!({"key":{"id":rid},"values":{"nope":1}})),
+            ("update", json!({"key":{},"values":{"name":"x"}})),
+            ("delete", json!({"key":{}})),
+        ] {
+            let r = ctx
+                .post(&format!("{base}/table/dbweb_t/{op}"), &t, body.clone())
+                .await;
+            assert_eq!(r.status, StatusCode::BAD_REQUEST, "{op} {body}");
+        }
+        assert_eq!(
+            ctx.get(&format!("{base}/table/no_such"), &t).await.status,
+            StatusCode::NOT_FOUND
+        );
+        assert_eq!(
+            ctx.get(&format!("{base}/table/a%60b"), &t).await.status,
+            StatusCode::NOT_FOUND
+        );
+        let r = ctx
+            .post(
+                &format!("{base}/query"),
+                &t,
+                json!({"sql":"SELECT name, price FROM dbweb_t ORDER BY id"}),
+            )
+            .await;
+        assert_eq!(r.status, StatusCode::OK);
+        assert_eq!(r.body["columns"], json!(["name", "price"]));
+        assert_eq!(r.body["rows"][0], json!(["청사과", null]));
+        let r = ctx
+            .post(&format!("{base}/query"), &t, json!({"sql":"SELEC oops"}))
+            .await;
+        assert_eq!(r.status, StatusCode::OK);
+        assert!(
+            r.body["error"].as_str().unwrap().contains("syntax"),
+            "{:?}",
+            r.body
+        );
+        // prepared 로 안 되는 문장도 실행
+        let r = ctx
+            .post(
+                &format!("{base}/query"),
+                &t,
+                json!({"sql":"SHOW CREATE TABLE dbweb_t"}),
+            )
+            .await;
+        assert!(r.body["error"].is_null(), "{:?}", r.body);
+        let r = ctx
+            .post(
+                &format!("{base}/query"),
+                &t,
+                json!({"sql":"DELETE FROM dbweb_t WHERE name = '배'"}),
+            )
+            .await;
+        assert_eq!(r.body["affected"], 1, "{:?}", r.body);
+        let r = ctx
+            .post(
+                &format!("{base}/table/dbweb_t/delete"),
+                &t,
+                json!({"key":{"id":rid}}),
+            )
+            .await;
+        assert_eq!(r.body["affected"], 1, "{:?}", r.body);
+        // 관리자가 아니면 거부, 없는 id 는 404
+        assert_eq!(
+            ctx.get("/api/dbweb/admin/999999", &t).await.status,
+            StatusCode::NOT_FOUND
+        );
+        assert_eq!(
+            ctx.req(Method::GET, &base, None, None, None).await.status,
+            StatusCode::UNAUTHORIZED
+        );
+
+        // DB 계정 로그인 입구
+        let login = |u: &str, p: &str| json!({"username": u, "password": p});
+        for (body, code) in [
+            (login(dbuser, "wrong-password"), StatusCode::BAD_REQUEST),
+            (login("root", "x"), StatusCode::BAD_REQUEST),
+            (login("", "x"), StatusCode::BAD_REQUEST),
+        ] {
+            let r = ctx
+                .req(
+                    Method::POST,
+                    "/api/dbweb/login",
+                    None,
+                    None,
+                    Some(body.clone()),
+                )
+                .await;
+            assert_eq!(r.status, code, "{body} {:?}", r.body);
+        }
+        // 패널 자신의 DB 는 목록에서 빠짐
+        let r = ctx
+            .req(
+                Method::POST,
+                "/api/dbweb/login",
+                None,
+                None,
+                Some(login(dbuser, dbpass)),
+            )
+            .await;
+        if r.status == StatusCode::OK {
+            assert!(!r.body["databases"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|d| d == dbname.as_str()));
+        } else {
+            assert_eq!(r.status, StatusCode::BAD_REQUEST, "{:?}", r.body);
+        }
+        // 세션이 있으면 그 계정이 볼 수 있는 DB 만
+        let token = "ab".repeat(24);
+        let mut rc = state.redis.clone();
+        let _: () = redis::cmd("SET")
+            .arg(state.key(&["dbweb", "session", &token]))
+            .arg(json!({"username": dbuser, "password": dbpass, "databases": [dbname]}).to_string())
+            .arg("EX")
+            .arg(60)
+            .query_async(&mut rc)
+            .await
+            .unwrap();
+        let sreq = |m: Method, uri: String, body: Option<Value>| {
+            let mut b = Request::builder()
+                .method(m)
+                .uri(uri)
+                .header("x-requested-with", "rpanel")
+                .header("x-db-token", token.clone());
+            if body.is_some() {
+                b = b.header(header::CONTENT_TYPE, "application/json");
+            }
+            b.body(
+                body.map(|v| Body::from(v.to_string()))
+                    .unwrap_or_else(Body::empty),
+            )
+            .unwrap()
+        };
+        let res = ctx
+            .app
+            .clone()
+            .oneshot(sreq(Method::GET, "/api/dbweb/me".into(), None))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        let res = ctx
+            .app
+            .clone()
+            .oneshot(sreq(Method::GET, format!("/api/dbweb/s/{dbname}"), None))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        let res = ctx
+            .app
+            .clone()
+            .oneshot(sreq(Method::GET, "/api/dbweb/s/mysql".into(), None))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::FORBIDDEN);
+        let res = ctx
+            .app
+            .clone()
+            .oneshot(sreq(
+                Method::POST,
+                format!("/api/dbweb/s/{dbname}/query"),
+                Some(json!({"sql":"SELECT COUNT(*) AS n FROM dbweb_t"})),
+            ))
+            .await
+            .unwrap();
+        let v: Value =
+            serde_json::from_slice(&res.into_body().collect().await.unwrap().to_bytes()).unwrap();
+        assert_eq!(v["rows"][0][0], 0, "{v}");
+        let res = ctx
+            .app
+            .clone()
+            .oneshot(sreq(Method::POST, "/api/dbweb/logout".into(), None))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::NO_CONTENT);
+        let res = ctx
+            .app
+            .clone()
+            .oneshot(sreq(Method::GET, "/api/dbweb/me".into(), None))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+        sqlx::query("DELETE FROM app_databases WHERE id = ?")
+            .bind(wid)
+            .execute(&state.db)
+            .await
+            .unwrap();
+        sqlx::query("DROP TABLE dbweb_t")
+            .execute(&state.db)
+            .await
+            .unwrap();
+    }
 
     // ── 로그인 rate limit ──
     let mut last = StatusCode::OK;

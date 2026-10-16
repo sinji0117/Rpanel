@@ -48,6 +48,10 @@ pub struct Config {
     pub redis_db_max: u32,
     /// 앱 DATABASE_URL 의 호스트:포트
     pub app_db_host: String,
+    /// MongoDB 관리자 접속 주소 (root 권한) — 없으면 MongoDB 기능·로그 저장을 쓰지 않음
+    pub mongodb_url: Option<String>,
+    /// 앱에 알려 줄 MongoDB 주소 (host:port)
+    pub app_mongo_host: String,
     /// 예약 백업 실행 시각 (서버 로컬 시각, 0~23)
     pub backup_hour: u32,
     /// direct: 이 서버의 Nginx 가 80/443 을 직접 받음 (SSL 도 여기서, Let's Encrypt)
@@ -143,6 +147,8 @@ impl Config {
             redis_db_min: var("RPANEL_REDIS_DB_MIN").map(|v| v.parse()).transpose()?.unwrap_or(4),
             redis_db_max: var("RPANEL_REDIS_DB_MAX").map(|v| v.parse()).transpose()?.unwrap_or(15),
             app_db_host: var("RPANEL_APP_DB_HOST").unwrap_or_else(|| "127.0.0.1:3306".into()),
+            mongodb_url: var("MONGODB_URL").filter(|v| !v.trim().is_empty() && !v.contains('<')),
+            app_mongo_host: var("RPANEL_APP_MONGO_HOST").unwrap_or_else(|| "127.0.0.1:27017".into()),
             backup_hour: var("RPANEL_BACKUP_HOUR").map(|v| v.parse()).transpose()?.unwrap_or(3).min(23),
             edge_mode: match var("RPANEL_EDGE_MODE").as_deref() {
                 Some("proxy") => EdgeMode::Proxy,
@@ -182,6 +188,8 @@ impl Config {
             redis_db_min: 4,
             redis_db_max: 15,
             app_db_host: "127.0.0.1:3306".into(),
+            mongodb_url: None,
+            app_mongo_host: "127.0.0.1:27017".into(),
             backup_hour: 3,
             edge_mode: EdgeMode::Direct,
             files_bin: "/bin/false".into(),

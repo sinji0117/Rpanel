@@ -153,6 +153,18 @@ pub async fn restore(
                 b.target
             )));
         }
+    } else if b.kind == "mongo" {
+        let exists: Option<u64> =
+            sqlx::query_scalar("SELECT id FROM mongo_databases WHERE name = ?")
+                .bind(&b.target)
+                .fetch_optional(&state.db)
+                .await?;
+        if exists.is_none() {
+            return Err(AppError::bad(format!(
+                "MongoDB 데이터베이스 {} 가 더 이상 없습니다. 같은 이름으로 다시 만든 뒤 복원하세요",
+                b.target
+            )));
+        }
     } else if b.app_id.is_none() {
         return Err(AppError::bad("앱이 없는 파일 백업입니다"));
     }
@@ -161,6 +173,14 @@ pub async fn restore(
         helper::call_long(
             &state,
             &["restore-db", &scope, &b.target, &b.file],
+            &log,
+            3600,
+        )
+        .await
+    } else if b.kind == "mongo" {
+        helper::call_long(
+            &state,
+            &["restore-mongo", &scope, &b.target, &b.file],
             &log,
             3600,
         )

@@ -255,6 +255,9 @@ function DatabaseCard({ db, apps, reload, showCred }) {
           <span className="text-xs text-ink-400">{t('앱에 연결 안 됨')}</span>
         )}
         <span className="ml-auto flex flex-wrap gap-1.5">
+          <Link to={`/mariadb/${db.id}/web`} className="btn-ghost px-2.5 py-1 text-xs" data-testid={`dbweb-${db.name}`}>
+            {t('웹 관리')}
+          </Link>
           <button className="btn-ghost px-2.5 py-1 text-xs" onClick={() => setAdding((x) => !x)}>
             {t('+ 계정')}
           </button>
@@ -567,6 +570,10 @@ export function MariaDBPage() {
             {t('데이터베이스와 계정을 만들고 지웁니다. 앱에 연결한 DB 는 배포(적용) 때 접속 주소가 환경변수로 들어갑니다.')}
             <br />
             {t('“+ 데이터베이스”로 만들거나, 앱의 데이터베이스 탭에서 만드세요.')}
+            <br />
+            {t('“웹 관리”로 테이블 데이터를 보고 고치거나 SQL 을 실행합니다. 개발자는 패널 계정 없이 {url} 에서 DB 계정으로 로그인할 수 있습니다.', {
+              url: `${window.location.origin}/db`,
+            })}
           </>
         }
         actions={

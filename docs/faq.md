@@ -38,7 +38,14 @@ curl -fsSL https://raw.githubusercontent.com/sinji0117/Rpanel/main/install.sh | 
 
 **패널 주소를 `https://panel.내도메인.com`처럼 쓰고 싶어요.**
 1. 도메인 DNS에 `panel` A 레코드를 서버 IP로 추가합니다.
-2. 서버에서 `sudo rpanel-update --force --panel-domain=panel.내도메인.com --email=내이메일`을 실행합니다. 기존 사이트와 데이터는 그대로 유지됩니다.
+2. 패널 → **설정 → 패널 도메인**에 `panel.내도메인.com`과 이메일을 넣고 **연결**을 누릅니다. 인증서를 자동으로 받고 `https://panel.내도메인.com`(443)으로 열립니다. 기존 `https://서버IP:8443`도 계속 쓸 수 있습니다.
+   - 80·443 포트가 인터넷에서 열려 있어야 합니다. (설치 때 `--panel-domain=… --email=…` 옵션으로 넣을 수도 있습니다.)
+
+**프로젝트로 앱을 만들었는데 사이트 메뉴에서 계정 관리가 안 돼요.**
+정상입니다. 프로젝트(Git)로 만든 앱은 코드를 Git 에서 받아 배포하므로 SFTP 사이트 계정이 없습니다. 사이트 목록 **계정** 칸의 `Git 배포`를 누르면 프로젝트 화면으로 가고, 배포·환경변수·DB 는 거기서 관리합니다. 파일을 직접 올려야 하는 사이트는 **사이트** 메뉴에서 만드세요.
+
+**개발자에게 DB만 보여 주고 싶어요.**
+MariaDB 메뉴에서 그 DB 에 계정을 하나 더 만들고(필요하면 읽기 전용), `https://패널주소/db` 와 계정 이름·비밀번호를 알려 주세요. 패널 계정 없이 그 DB 만 보고 고칠 수 있습니다. ([데이터베이스 쓰기](database.md#db-웹-관리-브라우저에서-데이터-보기고치기))
 
 **배포하면 `could not read Username for 'https://github.com'` 오류가 나요.**
 비공개 저장소를 https 주소로 넣었을 때 나는 오류입니다. Git 주소를 SSH 주소로 바꾸고 Deploy key 를 등록하세요. ([Git으로 자동 배포하기 → 비공개 저장소](git-deploy.md#비공개private-저장소))

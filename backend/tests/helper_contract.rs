@@ -689,3 +689,129 @@ fn helper_system_log_whitelist() {
         assert!(run(&["system-log", kind, "5"]).status.success(), "{kind}");
     }
 }
+
+#[test]
+fn helper_rejects_bad_mongo_backup_args() {
+    let run = |args: &[&str]| {
+        Command::new("bash")
+            .arg(helper())
+            .args(args)
+            .env("RPANEL_TEST_ENV_FILE", "/nonexistent")
+            .output()
+            .unwrap()
+    };
+    for db in [
+        "admin",
+        "local",
+        "config",
+        "rpanel_logs",
+        "Shop",
+        "a;b",
+        "../x",
+        "x",
+    ] {
+        let out = run(&["backup-mongo", "_databases", db, "20261016-120000"]);
+        assert!(!out.status.success(), "backup-mongo {db} accepted");
+        let out = run(&[
+            "restore-mongo",
+            "_databases",
+            db,
+            &format!("20261016-120000-mongo-{db}.archive.gz"),
+        ]);
+        assert!(!out.status.success(), "restore-mongo {db} accepted");
+    }
+    // 다른 DB 의 백업 파일로 복원 금지, 잘못된 파일 이름 거부
+    assert!(!run(&[
+        "restore-mongo",
+        "_databases",
+        "shop",
+        "20261016-120000-mongo-other.archive.gz"
+    ])
+    .status
+    .success());
+    assert!(
+        !run(&["restore-mongo", "_databases", "shop", "../../etc/passwd"])
+            .status
+            .success()
+    );
+    assert!(
+        !run(&["backup-mongo", "bad scope", "shop", "20261016-120000"])
+            .status
+            .success()
+    );
+    // MONGODB_URL 이 없으면 덤프하지 않음
+    let out = run(&["backup-mongo", "_databases", "shop", "20261016-120000"]);
+    assert!(!out.status.success());
+}
+
+#[test]
+fn helper_panel_domain() {
+    let run = |args: &[&str]| {
+        Command::new("bash")
+            .arg(helper())
+            .args(args)
+            .output()
+            .unwrap()
+    };
+    for (d, e) in [
+        ("", "a@b.co"),
+        ("panel", "a@b.co"),
+        ("Panel.Example.com", "a@b.co"),
+        ("panel.example.com;id", "a@b.co"),
+        ("panel.example.com", "not-an-email"),
+        ("panel.example.com", ""),
+    ] {
+        assert!(
+            !run(&["panel-domain-set", d, e]).status.success(),
+            "{d} {e} accepted"
+        );
+    }
+    // 만들어지는 설정: 인증서 전에는 80(ACME)만, 뒤에는 443 + 패널 API 프록시
+    let tmp = std::env::temp_dir().join(format!("rpanel-pd-{}", std::process::id()));
+    std::fs::create_dir_all(&tmp).unwrap();
+    std::fs::write(
+        tmp.join("rpanel-shop.conf"),
+        "server {\n    server_name shop.example.com www.shop.example.com;\n}\n",
+    )
+    .unwrap();
+    let script = |body: &str| {
+        Command::new("bash")
+            .arg("-c")
+            .arg(format!(
+                "source '{}'; AVAIL='{}'; {body}",
+                helper(),
+                tmp.display()
+            ))
+            .output()
+            .unwrap()
+    };
+    let out = script("panel_domain_conf panel.example.com");
+    let s = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        s.contains("server_name panel.example.com;")
+            && s.contains("acme-challenge")
+            && !s.contains("443"),
+        "{s}"
+    );
+    let out = script("panel_domain_conf panel.example.com /etc/letsencrypt/live/rpanel-panel-domain/fullchain.pem /k.pem");
+    let s = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        s.contains("listen 443 ssl http2;")
+            && s.contains("proxy_pass http://127.0.0.1:8090;")
+            && s.contains("return 301 https://$host$request_uri;"),
+        "{s}"
+    );
+    assert!(!script("panel_domain_conflict www.shop.example.com")
+        .status
+        .success());
+    assert!(script("panel_domain_conflict panel.example.com")
+        .status
+        .success());
+    assert!(
+        script("panel_domain_conflict shop.example")
+            .status
+            .success(),
+        "no partial match"
+    );
+    let _ = std::fs::remove_dir_all(&tmp);
+}

@@ -232,25 +232,22 @@ pub async fn emit(state: &AppState, ev: Event) {
     if !settings.enabled(ev.kind) {
         return;
     }
-    let res = sqlx::query("INSERT INTO notifications (kind, level, title, params, body, link) VALUES (?, ?, ?, ?, ?, ?)")
-        .bind(ev.kind)
-        .bind(ev.level)
-        .bind(ev.title)
-        .bind(ev.params.to_string())
-        .bind(&ev.body)
-        .bind(&ev.link)
-        .execute(&state.db)
-        .await;
+    let res = crate::logstore::notify_insert(
+        state,
+        crate::logstore::NewNotification {
+            kind: ev.kind,
+            level: ev.level,
+            title: ev.title,
+            params: &ev.params,
+            body: ev.body.as_deref(),
+            link: ev.link.as_deref(),
+        },
+    )
+    .await;
     if let Err(e) = res {
         tracing::warn!(error = %e, "notification not stored");
         return;
     }
-    // 오래된 알림 정리 (최근 1000개만)
-    let _ = sqlx::query(
-        "DELETE FROM notifications WHERE id < (SELECT id FROM (SELECT id FROM notifications ORDER BY id DESC LIMIT 1 OFFSET 999) x)",
-    )
-    .execute(&state.db)
-    .await;
     if has_channel(&settings.channels) {
         let channels = settings.channels.clone();
         let host = crate::metrics::host_info()

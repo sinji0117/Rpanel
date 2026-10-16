@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Link, useNavigate, useParams } from 'react-router'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router'
 import AppForm, { sshUrl, toPayload } from '../components/AppForm'
 import DeploymentLogPanel from '../components/DeploymentLog'
 import LogViewer from '../components/LogViewer'
@@ -20,7 +20,8 @@ export default function AppDetail() {
   const nav = useNavigate()
   const toast = useToast()
   const app = useFetch(() => get(`/apps/${id}`), [id])
-  const [tabState, setTab] = useState(null)
+  const [params] = useSearchParams()
+  const [tabState, setTab] = useState(() => params.get('tab'))
   const [deploying, setDeploying] = useState(false)
   // 배포 탭에서 로그를 볼 배포 (null = 가장 최근)
   const [logId, setLogId] = useState(null)

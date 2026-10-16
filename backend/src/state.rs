@@ -15,6 +15,8 @@ pub struct AppState {
     pub db: MySqlPool,
     pub redis: ConnectionManager,
     pub redis_client: redis::Client,
+    /// MongoDB (설정돼 있을 때만) — 패널 로그 저장과 프로젝트용 MongoDB 관리
+    pub mongo: Option<mongodb::Client>,
     pub cfg: Arc<Config>,
     pub exec: Arc<dyn Executor>,
     /// 동시 빌드 제한

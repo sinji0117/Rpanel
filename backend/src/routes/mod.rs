@@ -2,9 +2,12 @@ pub mod apps;
 pub mod backups;
 pub mod cron;
 pub mod databases;
+pub mod dbweb;
 pub mod deployments;
 pub mod files;
+pub mod mongo;
 pub mod notifications;
+pub mod panel_domain;
 pub mod projects;
 pub mod runtimes;
 pub mod site_accounts;
@@ -113,6 +116,38 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/databases/{db}/backups",
             post(backups::create_for_database),
+        )
+        .route(
+            "/system/panel-domain",
+            get(panel_domain::get)
+                .put(panel_domain::set)
+                .delete(panel_domain::remove),
+        )
+        // DB 웹 관리 (MariaDB)
+        .route("/dbweb/admin/{id}", get(dbweb::admin_tables))
+        .route("/dbweb/admin/{id}/query", post(dbweb::admin_query))
+        .route("/dbweb/admin/{id}/table/{table}", get(dbweb::admin_browse))
+        .route(
+            "/dbweb/admin/{id}/table/{table}/{op}",
+            post(dbweb::admin_row),
+        )
+        .route("/dbweb/login", post(dbweb::login))
+        .route("/dbweb/logout", post(dbweb::logout))
+        .route("/dbweb/me", get(dbweb::me))
+        .route("/dbweb/s/{db}", get(dbweb::s_tables))
+        .route("/dbweb/s/{db}/query", post(dbweb::s_query))
+        .route("/dbweb/s/{db}/table/{table}", get(dbweb::s_browse))
+        .route("/dbweb/s/{db}/table/{table}/{op}", post(dbweb::s_row))
+        // MongoDB
+        .route("/mongo", get(mongo::list).post(mongo::create))
+        .route("/mongo/{id}", put(mongo::link).delete(mongo::delete))
+        .route("/mongo/{id}/password", post(mongo::password))
+        .route("/mongo/{id}/backups", post(mongo::backup_now))
+        .route("/mongo/{id}/users", post(mongo::user_create))
+        .route("/mongo/{id}/users/{uid}", delete(mongo::user_delete))
+        .route(
+            "/mongo/{id}/users/{uid}/password",
+            post(mongo::user_password),
         )
         .route("/redis-users", post(databases::redis_user_create))
         .route(
@@ -223,5 +258,69 @@ pub fn router(state: AppState) -> Router {
         app = app.fallback_service(ServeDir::new(dir).fallback(ServeFile::new(index)));
     }
 
-    app.layer(TraceLayer::new_for_http()).with_state(state)
+    app.layer(axum::middleware::map_response(static_cache_headers))
+        .layer(TraceLayer::new_for_http())
+        .with_state(state)
+}
+
+/// 화면 파일 캐시: index.html 등은 매번 확인(no-cache) → 업데이트 후 옛 화면이 남지 않음.
+/// 이름에 해시가 붙은 /assets/* 는 오래 캐시.
+async fn static_cache_headers(
+    uri: axum::http::Uri,
+    mut res: axum::response::Response,
+) -> axum::response::Response {
+    use axum::http::{header, HeaderValue};
+    let path = uri.path();
+    if path.starts_with("/api/") || res.headers().contains_key(header::CACHE_CONTROL) {
+        return res;
+    }
+    let v = if path.starts_with("/assets/") && res.status().is_success() {
+        "public, max-age=31536000, immutable"
+    } else {
+        "no-cache"
+    };
+    res.headers_mut()
+        .insert(header::CACHE_CONTROL, HeaderValue::from_static(v));
+    res
+}
+
+#[cfg(test)]
+mod cache_tests {
+    use axum::{body::Body, http::Request, Router};
+    use tower::ServiceExt;
+    use tower_http::services::{ServeDir, ServeFile};
+
+    #[tokio::test]
+    async fn static_cache_headers() {
+        let dir = std::env::temp_dir().join(format!("rpanel-static-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("assets")).unwrap();
+        std::fs::write(dir.join("index.html"), "<html></html>").unwrap();
+        std::fs::write(dir.join("assets/app-abc123.js"), "x").unwrap();
+        let app = Router::new()
+            .fallback_service(ServeDir::new(&dir).fallback(ServeFile::new(dir.join("index.html"))))
+            .layer(axum::middleware::map_response(super::static_cache_headers));
+        let get = |p: &'static str| {
+            let app = app.clone();
+            async move {
+                let res = app
+                    .oneshot(Request::get(p).body(Body::empty()).unwrap())
+                    .await
+                    .unwrap();
+                res.headers()
+                    .get("cache-control")
+                    .map(|v| v.to_str().unwrap().to_string())
+            }
+        };
+        assert_eq!(get("/").await.as_deref(), Some("no-cache"));
+        assert_eq!(
+            get("/apps/3").await.as_deref(),
+            Some("no-cache"),
+            "SPA route → index.html"
+        );
+        assert_eq!(
+            get("/assets/app-abc123.js").await.as_deref(),
+            Some("public, max-age=31536000, immutable")
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
 }

@@ -17,6 +17,15 @@ async fn main() -> anyhow::Result<()> {
     tracing::info!(mode = ?cfg.exec_mode, %bind, "starting rpanel {}", env!("CARGO_PKG_VERSION"));
 
     let state = rpanel::build_state(cfg).await?;
+    // MongoDB 로그 저장소 준비 (인덱스·기존 로그 옮기기). 실패해도 패널은 계속 동작
+    {
+        let st = state.clone();
+        tokio::spawn(async move {
+            if let Err(e) = rpanel::logstore::init(&st).await {
+                tracing::warn!(error = %e, "MongoDB log store init failed");
+            }
+        });
+    }
     deployments::recover_orphans(&state).await?;
     rpanel::backup::spawn_scheduler(state.clone());
     routes::system::spawn_sampler(state.clone());

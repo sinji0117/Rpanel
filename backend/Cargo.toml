@@ -1,6 +1,6 @@
 [package]
 name = "rpanel"
-version = "0.6.4"
+version = "0.7.0"
 edition = "2021"
 description = "Rpanel — self-hosted web panel for Rust services (sites, Git deploys, databases, SSL, backups)"
 license = "MIT"
@@ -17,6 +17,7 @@ jsonwebtoken = "9"
 libc = "0.2"
 once_cell = "1"
 rand = "0.8"
+mongodb = { version = "3", default-features = false, features = ["compat-3-0-0", "rustls-tls", "dns-resolver"] }
 redis = { version = "0.29", features = ["tokio-comp", "connection-manager", "aio"] }
 regex = "1"
 serde = { version = "1", features = ["derive"] }

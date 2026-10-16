@@ -4,7 +4,7 @@ import { useAuth } from '../context/AuthContext'
 import { LANGS, setLang, t, useLang } from '../i18n'
 import { getTheme, setTheme } from '../lib/prefs'
 import NotificationBell from './NotificationBell'
-import { VersionBadge } from './VersionInfo'
+import { StaleBundleBanner, VersionBadge } from './VersionInfo'
 
 const DB_ICON = 'M4 6c0-1.7 3.6-3 8-3s8 1.3 8 3-3.6 3-8 3-8-1.3-8-3zm0 0v12c0 1.7 3.6 3 8 3s8-1.3 8-3V6M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3'
 
@@ -14,6 +14,7 @@ const NAV = [
   { to: '/sites', label: '사이트', icon: 'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM3 12h18M12 3c2.5 2.7 2.5 15.3 0 18M12 3c-2.5 2.7-2.5 15.3 0 18' },
   { to: '/projects', label: '프로젝트', icon: 'M3 7h7l2 2h9v10H3z' },
   { to: '/mariadb', label: 'MariaDB', icon: DB_ICON },
+  { to: '/mongodb', label: 'MongoDB', icon: 'M12 2c3 3.5 5 7 5 11a5 5 0 0 1-10 0c0-4 2-7.5 5-11zM12 22v-6' },
   { to: '/redis', label: 'Redis', icon: 'M12 3 3 7.5 12 12l9-4.5L12 3zM3 12l9 4.5 9-4.5M3 16.5 12 21l9-4.5' },
   { to: '/backups', label: '백업', icon: 'M4 7h16v13H4zM4 7l2-3h12l2 3M9 12h6' },
   { to: '/logs', label: '로그', icon: 'M5 4h14v16H5zM8 8h8M8 12h8M8 16h5' },
@@ -165,6 +166,7 @@ export default function Layout() {
 
       <main className="min-w-0 px-4 py-6 md:px-8 md:py-8">
         <div className="mx-auto max-w-6xl">
+          <StaleBundleBanner />
           <Outlet />
         </div>
       </main>

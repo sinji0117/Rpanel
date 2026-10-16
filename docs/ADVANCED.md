@@ -9,6 +9,7 @@
 | 백엔드 | Rust + Axum 0.8 (Tokio) |
 | DB | SQLx (`mysql` 기능) + MariaDB 10.11 LTS |
 | 캐시·세션 | Redis 7.x |
+| 로그 저장소 | MongoDB 8 (선택, `MONGODB_URL`) — 없으면 MariaDB·Redis |
 | 프런트 | React 19 + Vite + Tailwind CSS 4 |
 | 인증 | JWT(액세스, 15분) + Redis 리프레시 세션(회전·재사용 탐지) |
 | 실시간 | Axum WebSocket — 서버 지표, 배포 로그 스트림 |
@@ -52,6 +53,7 @@
 | `--panel-domain=panel.example.com --email=you@example.com` | 패널을 도메인으로 접속 + Let's Encrypt 인증서 (standalone) |
 | `--no-firewall` / `--firewall` | ufw 를 건드리지 않음 / 다시 관리 |
 | `--no-ssh-password` / `--ssh-password` | 사이트 유저의 SSH/SFTP 비밀번호 로그인 끄기(공개키만) / 다시 켜기 |
+| `--no-mongodb` / `--mongodb` | MongoDB 설치 안 함 / 다시 설치 (CPU AVX 필요, 없으면 자동으로 건너뜀) |
 | `--dry-run-mode` | 실제 배포 명령 없이 둘러보기 |
 
 ## 설치 스크립트가 하는 일
@@ -61,6 +63,7 @@
 | Nginx | 기본 서버는 등록되지 않은 도메인·IP 직접 접속을 끊음(444 / TLS 거부), Let's Encrypt 확인 경로, 갱신 시 자동 reload |
 | MariaDB 10.11 | `127.0.0.1` 바인딩, 익명 계정·test DB·원격 root 제거, RAM 기준 튜닝(없을 때만), 패널 DB |
 | Redis 7 | `127.0.0.1` 바인딩, 비밀번호 생성(이미 있으면 유지), `maxmemory 1gb` |
+| MongoDB 8 | repo.mongodb.org, `bindIp 127.0.0.1`, 인증 필수, 관리자 `rpanel_admin` → `MONGODB_URL` (AVX 없으면 건너뜀) |
 | Node.js 22 / Rust / Python | NodeSource(패널 UI·React 정적 앱 빌드용), rustup (Rust 앱 빌드용), `python3` + `python3-venv`·`pip`·`dev` (Python 앱) |
 | 패널 | `rpanel`·`rpanel-app` 사용자, `rpanel-sites` 그룹, 빌드·설치, helper + sudoers, systemd, HTTPS :8443 |
 | SSH | `rpanel-sites` 그룹만 비밀번호 로그인 허용 (`Match Group`) |
@@ -121,6 +124,22 @@
 - 패널이 1분마다 지표(CPU·메모리·디스크·load)를 Redis 리스트(`<prefix>:metrics:history`, 최대 7일 = 10080개)에 쌓습니다. `GET /api/system/metrics?range=30m|1h|6h|24h|7d` 는 기간 안의 값을 최대 120개로 평균 내어 돌려줍니다.
 - 가동 시간은 `GET /api/system/info` 의 `boot_time`(부팅 시각)으로 화면에서 계산합니다 (실시간 연결이 끊겨도 표시).
 - `GET /api/logs/system?kind=panel|nginx|ssh|mariadb|redis&lines=` 는 helper `system-log` 로 정해진 로그만 읽습니다. `GET /api/logs/deployments` 는 전체 배포 기록.
+
+## 로그 저장소 (MongoDB)
+
+- `MONGODB_URL` 이 있으면 활동 기록·배포 로그·알림·모니터링 지표를 DB `rpanel_logs` 의 `audit` · `deployment_logs` · `notifications` · `metrics` 컬렉션에 저장합니다 (번호는 `counters` 의 `$inc`). 지표는 TTL 인덱스 + 1시간마다 7일 지난 것 삭제.
+- 처음 켤 때 MariaDB·Redis 에 있던 기록을 한 번 옮깁니다 (`panel_settings.logs_migrated_mongo`). MongoDB 에 접속하지 못하면 기존 MariaDB·Redis 저장소로 동작합니다.
+- 프로젝트용 MongoDB: 패널이 관리자 연결로 DB 마다 `createUser`(그 DB 의 `readWrite`/`read`) 하고 `MONGODB_URL=mongodb://user:pw@127.0.0.1:27017/db?authSource=db` 를 주입합니다. 백업은 helper `backup-mongo`/`restore-mongo`(mongodump·mongorestore, 접속 주소는 임시 설정 파일로).
+
+## DB 웹 관리
+
+- 관리자 입구 `/api/dbweb/admin/{db_id}/…`: 패널이 만든 DB 의 **기본 계정**으로 접속 (root 아님).
+- DB 계정 입구 `POST /api/dbweb/login` → 토큰(Redis, 2시간 유휴 만료) → 헤더 `X-DB-Token` 으로 `/api/dbweb/s/{db}/…`. 로그인은 IP·계정별 5분 10회 제한, `root`·`rpanel` 등은 거부, 시스템 DB 와 패널 DB 는 목록에서 뺍니다.
+- 질의는 `max_statement_time=30`, 결과 1000행. 화면의 행 수정·삭제는 기본 키로 `LIMIT 1`. prepared 로 안 되는 문장(오류 1295)은 텍스트 프로토콜로 다시 실행합니다.
+
+## 패널 도메인
+
+- 설정 → **패널 도메인**: helper `panel-domain-set <domain> <email>` 이 `/etc/nginx/sites-available/rpanel-panel-domain.conf` 를 직접 만들고(80: ACME → 발급 → 443 + 패널 프록시), Let's Encrypt `--cert-name rpanel-panel-domain`. 앱 도메인과 겹치면 거부. 해제는 `panel-domain-remove`. 기존 `:8443` 접속은 그대로입니다.
 
 ## 알림
 
@@ -248,6 +267,11 @@ npx playwright install chromium && npm run e2e # E2E (가짜 API, 백엔드 불�
 | GET | `/api/apps/{id}/nginx-logs`, `/api/system/info`, `/overview`, `/edge`, `/version`, `/api/audit` | 로그·시스템·버전 |
 | GET | `/api/system/metrics?range=`, `/api/logs/system?kind=&lines=`, `/api/logs/deployments` | 모니터링 기록·로그 |
 | GET/POST/PUT/DELETE | `/api/runtimes`, `/api/runtimes/{id}`, `/default`, PUT `/api/apps/{id}/runtime` | 언어 런타임 버전 |
+| GET/POST/PUT/DELETE | `/api/mongo`, `/api/mongo/{id}` (앱 연결), `/password`, `/backups`, `/users`, `/users/{uid}`, `/users/{uid}/password` | MongoDB |
+| GET/POST | `/api/dbweb/admin/{id}`, `/query`, `/table/{t}`, `/table/{t}/{insert,update,delete}` | DB 웹 관리 (관리자) |
+| POST/GET | `/api/dbweb/login`, `/logout`, `/me`, `/api/dbweb/s/{db}/…` (`X-DB-Token`) | DB 웹 관리 (DB 계정) |
+| GET/PUT/DELETE | `/api/system/panel-domain` | 패널 도메인 |
+| GET/DELETE/POST/PUT | `/api/notifications`, `/read`, `/settings`, `/test` | 알림 |
 | WS | `/api/ws/metrics?ticket=`, `/api/ws/deployments/{id}?ticket=` | 실시간 |
 
 인증된 요청은 `Authorization: Bearer <access>`, 쿠키 기반 엔드포인트(`/auth/refresh`, `/auth/logout`)는 `X-Requested-With: rpanel` 헤더가 필요합니다(CSRF 방지).

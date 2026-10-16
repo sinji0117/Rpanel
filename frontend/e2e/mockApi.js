@@ -1,5 +1,10 @@
 // Playwright용 가짜 백엔드. 실제 API와 같은 모양의 응답을 메모리에서 돌려줍니다.
 
+import { readFileSync } from 'node:fs'
+
+// 화면 묶음과 같은 버전 (다르면 화면이 새로 고침 안내를 띄움)
+export const PKG_VERSION = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version
+
 export function createMockBackend({ needsSetup = false } = {}) {
   const now = () => new Date().toISOString()
   const db = {
@@ -21,6 +26,17 @@ export function createMockBackend({ needsSetup = false } = {}) {
     ssl: {},
     accounts: [],
     admins: [],
+    mongos: [],
+    panelDomain: null,
+    dbweb: {
+      columns: ['id', 'name', 'price'],
+      rows: [
+        [1, '사과', '1200.00'],
+        [2, '배', null],
+      ],
+      next: 3,
+    },
+    dbSessions: {},
     notifications: [],
     notifySettings: {
       events: {
@@ -39,7 +55,7 @@ export function createMockBackend({ needsSetup = false } = {}) {
       mem_threshold: 90,
       channels: { discord_url: '', slack_url: '', telegram_token: '', telegram_chat_id: '', webhook_url: '' },
     },
-    version: { current: '0.4.0', latest: '0.5.0', update_available: true, repo_url: 'https://github.com/sinji0117/Rpanel', checked_at: now(), error: null },
+    version: { current: PKG_VERSION, latest: '9.9.9', update_available: true, repo_url: 'https://github.com/sinji0117/Rpanel', checked_at: now(), error: null },
     runtimes: [
       { id: 901, lang: 'rust', version: 'stable', status: 'ready', is_default: true, is_system: true, detail: '1.90.0', log: null, updated_at: now() },
       { id: 902, lang: 'python', version: 'system', status: 'ready', is_default: true, is_system: true, detail: '3.12.3', log: null, updated_at: now() },
@@ -86,7 +102,7 @@ export function createMockBackend({ needsSetup = false } = {}) {
       db.loggedIn = false
       return json(route, 204)
     }
-    if (!authed) return json(route, 401, { error: 'unauthorized', message: '인증이 필요합니다' })
+    if (!authed && !/^\/dbweb\/(login|logout|s\/)/.test(path)) return json(route, 401, { error: 'unauthorized', message: '인증이 필요합니다' })
     if (path === '/auth/ws-ticket') return json(route, 200, { ticket: 'a'.repeat(48), expires_in: 30 })
 
     // ── system ──
@@ -614,6 +630,8 @@ export function createMockBackend({ needsSetup = false } = {}) {
               app_name: a.name,
               app_slug: a.slug,
               kind: a.kind,
+              source: a.source ?? 'git',
+              site_user: a.site_user ?? null,
               app_status: a.status,
               project_id: a.project_id,
               http_status: i === 0 ? 200 : 502,
@@ -791,6 +809,92 @@ export function createMockBackend({ needsSetup = false } = {}) {
       }
       if (body?.delete_files) db.backups = db.backups.filter((b) => b.job_id !== j.id)
       db.jobs = db.jobs.filter((x) => x !== j)
+      return json(route, 204)
+    }
+    // ── MongoDB ──
+    const mongoUrl = (d) => `mongodb://${d.username}:pw@127.0.0.1:27017/${d.name}?authSource=${d.name}`
+    if (path === '/mongo' && method === 'GET')
+      return json(route, 200, {
+        configured: true,
+        available: true,
+        version: '8.0.4',
+        error: null,
+        databases: db.mongos.map((d) => ({ ...d, app_name: db.apps.find((a) => a.id === d.app_id)?.name ?? null, url: mongoUrl(d), size_bytes: 8192, users: [] })),
+      })
+    if (path === '/mongo' && method === 'POST') {
+      if (!/^[a-z][a-z0-9_]{1,62}$/.test(body.name || '')) return json(route, 400, { error: 'bad_request', message: 'DB 이름 형식 오류' })
+      if (db.mongos.some((d) => d.name === body.name)) return json(route, 409, { error: 'conflict', message: '이미 있는 이름입니다' })
+      const d = { id: id(), app_id: body.app_id ?? null, name: body.name, username: body.username || body.name, env_key: body.env_key || 'MONGODB_URL', created_at: now() }
+      db.mongos.push(d)
+      return json(route, 201, { database: d, url: mongoUrl(d), password: 'pw' })
+    }
+    m = path.match(/^\/mongo\/(\d+)$/)
+    if (m && method === 'DELETE') {
+      db.mongos = db.mongos.filter((d) => d.id !== Number(m[1]))
+      return json(route, 204)
+    }
+    // ── 패널 도메인 ──
+    if (path === '/system/panel-domain') {
+      if (method === 'PUT') {
+        if (!/^([a-z0-9-]+\.)+[a-z]{2,}$/.test(body.domain)) return json(route, 400, { error: 'bad_request', message: '도메인 형식이 올바르지 않습니다 (예: panel.example.com)' })
+        db.panelDomain = body.domain
+      }
+      if (method === 'DELETE') {
+        db.panelDomain = null
+        return json(route, 204)
+      }
+      return json(route, 200, { domain: db.panelDomain, email: null, url: db.panelDomain ? `https://${db.panelDomain}` : null })
+    }
+    // ── DB 웹 관리 ──
+    const w = db.dbweb
+    const dbwebTables = () => ({ database: 'beripick_api', user: 'beripick_api', tables: [{ name: 'orders', type: 'BASE TABLE', rows: w.rows.length, size: 16384 }] })
+    const dbwebBrowse = () => ({
+      table: 'orders',
+      columns: [
+        { name: 'id', type: 'int(10) unsigned', nullable: false, key: 'PRI', default: null, extra: 'auto_increment', comment: '' },
+        { name: 'name', type: 'varchar(40)', nullable: false, key: '', default: null, extra: '', comment: '' },
+        { name: 'price', type: 'decimal(10,2)', nullable: true, key: '', default: null, extra: '', comment: '' },
+      ],
+      primary_key: ['id'],
+      rows: w.rows,
+      total: w.rows.length,
+      page: 1,
+      size: 50,
+      order: 'id',
+      desc: false,
+    })
+    const dbwebRow = (op) => {
+      if (op === 'insert') w.rows.push([w.next++, body.values.name ?? '', body.values.price ?? null])
+      if (op === 'update') {
+        const r = w.rows.find((x) => x[0] === body.key.id)
+        if (r) Object.entries(body.values).forEach(([k, v]) => (r[w.columns.indexOf(k)] = v))
+      }
+      if (op === 'delete') w.rows = w.rows.filter((x) => x[0] !== body.key.id)
+      return { affected: 1, last_insert_id: w.next - 1 }
+    }
+    const dbwebQuery = () =>
+      /^select/i.test(body.sql.trim())
+        ? { columns: w.columns, rows: w.rows, affected: 0, truncated: false, elapsed_ms: 2 }
+        : /^(update|delete|insert)/i.test(body.sql.trim())
+          ? { columns: [], rows: [], affected: 1, truncated: false, elapsed_ms: 3 }
+          : { error: "You have an error in your SQL syntax; check the manual near 'oops'", elapsed_ms: 1 }
+    m = path.match(/^\/dbweb\/(?:admin\/\d+|s\/[\w]+)(?:\/(query)|\/table\/(\w+)(?:\/(insert|update|delete))?)?$/)
+    if (m && path.startsWith('/dbweb/s/') && !db.dbSessions[req.headers()['x-db-token']]) return json(route, 401, { error: 'unauthorized', message: '인증이 필요합니다' })
+    if (m) {
+      if (m[1]) return json(route, 200, dbwebQuery())
+      if (m[3]) return json(route, 200, dbwebRow(m[3]))
+      if (m[2]) return json(route, 200, dbwebBrowse())
+      return json(route, 200, dbwebTables())
+    }
+    if (path === '/dbweb/login') {
+      if (body.username !== 'beripick_api' || body.password !== 'secretpw')
+        return json(route, 400, { error: 'bad_request', message: '계정 이름 또는 비밀번호가 올바르지 않습니다' })
+      const tok = 'ab'.repeat(24)
+      db.dbSessions[tok] = true
+      return json(route, 200, { token: tok, username: body.username, databases: ['beripick_api'] })
+    }
+    if (path === '/dbweb/logout') {
+      delete db.dbSessions[req.headers()['x-db-token']]
       return json(route, 204)
     }
     m = path.match(/^\/deployments\/(\d+)$/)

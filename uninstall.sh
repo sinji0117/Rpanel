@@ -209,6 +209,17 @@ if [[ -f /etc/redis/rpanel-users.conf ]]; then
   sed -i '\#^include /etc/redis/rpanel-users.conf$#d' /etc/redis/redis.conf
   rm -f /etc/redis/rpanel-users.conf
 fi
+# MongoDB: 패널이 만든 데이터베이스·계정, 패널 로그, 관리자 계정
+MONGO_URL_U="$(grep -E '^MONGODB_URL=' "$ENVF" 2>/dev/null | tail -n1 | cut -d= -f2-)"
+if [[ -n "$MONGO_URL_U" ]] && command -v mongosh >/dev/null && [[ "$DB_NAME" =~ ^[a-zA-Z0-9_]+$ ]]; then
+  for mdb in $(mariadb -N -B "$DB_NAME" -e "SELECT name FROM mongo_databases" 2>/dev/null); do
+    [[ "$mdb" =~ ^[a-z][a-z0-9_]+$ ]] || continue
+    mongosh --quiet "$MONGO_URL_U" --eval "const d=db.getSiblingDB('$mdb'); d.dropAllUsersFromDatabase(); d.dropDatabase()" >/dev/null 2>&1 \
+      && info "MongoDB $mdb 삭제"
+  done
+  mongosh --quiet "$MONGO_URL_U" --eval "db.getSiblingDB('rpanel_logs').dropDatabase(); db.getSiblingDB('admin').dropUser('rpanel_admin')" >/dev/null 2>&1 \
+    && info "MongoDB 패널 로그·관리자 계정 삭제"
+fi
 if [[ "$DB_NAME" =~ ^[a-zA-Z0-9_]+$ ]]; then
   mariadb -e "DROP DATABASE IF EXISTS \`$DB_NAME\`; DROP USER IF EXISTS 'rpanel'@'localhost'; FLUSH PRIVILEGES;" 2>/dev/null \
     && info "패널 데이터베이스 $DB_NAME 삭제"

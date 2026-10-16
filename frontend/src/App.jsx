@@ -16,6 +16,8 @@ import AdminsPage from './pages/Admins'
 import RuntimesPage from './pages/Runtimes'
 import LogsPage from './pages/Logs'
 import NotificationsPage from './pages/Notifications'
+import MongoPage from './pages/MongoPage'
+import { DbWebAdminPage, DbWebStandalone } from './pages/DbWeb'
 import { BackupsPage, MariaDBPage, RedisPage } from './pages/DataPages'
 import { t, useLang } from './i18n'
 
@@ -48,7 +50,9 @@ function Gate() {
         <Route index element={<Dashboard />} />
         <Route path="sites" element={<Sites />} />
         <Route path="mariadb" element={<MariaDBPage />} />
+        <Route path="mariadb/:id/web" element={<DbWebAdminPage />} />
         <Route path="redis" element={<RedisPage />} />
+        <Route path="mongodb" element={<MongoPage />} />
         <Route path="databases" element={<Navigate to="/mariadb" replace />} />
         <Route path="admins" element={<AdminsPage />} />
         <Route path="runtimes" element={<RuntimesPage />} />
@@ -70,9 +74,18 @@ export default function App() {
   return (
     <BrowserRouter>
       <ToastProvider>
-        <AuthProvider>
-          <Gate />
-        </AuthProvider>
+        <Routes>
+          {/* DB 계정으로만 들어가는 화면 — 패널 로그인과 별개 */}
+          <Route path="/db/*" element={<DbWebStandalone />} />
+          <Route
+            path="*"
+            element={
+              <AuthProvider>
+                <Gate />
+              </AuthProvider>
+            }
+          />
+        </Routes>
         <DialogHost />
       </ToastProvider>
     </BrowserRouter>

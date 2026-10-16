@@ -118,6 +118,13 @@ pub async fn managed_env(state: &AppState, app: &App) -> AppResult<Vec<ManagedVa
             source: format!("MariaDB · {}", db.name),
         });
     }
+    for m in crate::routes::mongo::list_for_app(state, app.id).await? {
+        out.push(ManagedVar {
+            key: m.env_key.clone(),
+            value: crate::routes::mongo::url(state, &m),
+            source: format!("MongoDB · {}", m.name),
+        });
+    }
     if let Some(n) = app.redis_db {
         out.push(ManagedVar {
             key: "REDIS_URL".into(),

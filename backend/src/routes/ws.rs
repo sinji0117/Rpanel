@@ -102,12 +102,17 @@ pub async fn deployment_log(
 }
 
 async fn deploy_status(state: &AppState, id: u64) -> anyhow::Result<(String, Option<String>)> {
-    Ok(
-        sqlx::query_as("SELECT status, log FROM deployments WHERE id = ?")
-            .bind(id)
-            .fetch_one(&state.db)
-            .await?,
-    )
+    let status: String = sqlx::query_scalar("SELECT status FROM deployments WHERE id = ?")
+        .bind(id)
+        .fetch_one(&state.db)
+        .await?;
+    // 진행 중이면 로그는 Redis 에서 오므로 본문은 끝난 뒤에만 읽음
+    let log = if is_done(&status) {
+        crate::logstore::deploy_log_get(state, id).await?
+    } else {
+        None
+    };
+    Ok((status, log))
 }
 
 fn is_done(status: &str) -> bool {

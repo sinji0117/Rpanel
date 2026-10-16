@@ -31,6 +31,7 @@ pub async fn info(State(state): State<AppState>, _u: AuthUser) -> Json<serde_jso
         "host": host,
         "boot_time": metrics::boot_time(),
         "panel_started_at": *PANEL_STARTED,
+        "log_store": crate::logstore::backend_name(&state),
         "app_port_range": [state.cfg.app_port_min, state.cfg.app_port_max],
     }))
 }
@@ -38,10 +39,6 @@ pub async fn info(State(state): State<AppState>, _u: AuthUser) -> Json<serde_jso
 /// 패널 프로세스가 시작된 시각 (초)
 pub static PANEL_STARTED: once_cell::sync::Lazy<i64> =
     once_cell::sync::Lazy::new(|| chrono::Utc::now().timestamp());
-
-fn history_key(state: &AppState) -> String {
-    state.key(&["metrics", "history"])
-}
 
 /// 1분마다 지표를 Redis 에 쌓음 (최근 7일)
 pub fn spawn_sampler(state: AppState) {
@@ -71,21 +68,7 @@ pub fn spawn_sampler(state: AppState) {
 }
 
 pub async fn push_sample(state: &AppState, sample: &metrics::Sample) -> anyhow::Result<()> {
-    let key = history_key(state);
-    let mut r = state.redis.clone();
-    redis::pipe()
-        .cmd("LPUSH")
-        .arg(&key)
-        .arg(serde_json::to_string(sample)?)
-        .ignore()
-        .cmd("LTRIM")
-        .arg(&key)
-        .arg(0)
-        .arg(metrics::HISTORY_MAX - 1)
-        .ignore()
-        .query_async::<()>(&mut r)
-        .await?;
-    Ok(())
+    crate::logstore::metrics_push(state, sample).await
 }
 
 #[derive(Deserialize)]
@@ -103,19 +86,8 @@ pub async fn metrics_history(
     let secs = metrics::range_secs(&range).ok_or_else(|| {
         crate::error::AppError::bad("range 는 30m · 1h · 6h · 24h · 7d 중 하나입니다")
     })?;
-    let count = secs / metrics::SAMPLE_SECS as i64 + 5;
-    let mut r = state.redis.clone();
-    let raw: Vec<String> = redis::cmd("LRANGE")
-        .arg(history_key(&state))
-        .arg(0)
-        .arg(count - 1)
-        .query_async(&mut r)
-        .await?;
-    let samples: Vec<metrics::Sample> = raw
-        .iter()
-        .filter_map(|s| serde_json::from_str(s).ok())
-        .collect();
     let now = chrono::Utc::now().timestamp();
+    let samples = crate::logstore::metrics_since(&state, now - secs).await?;
     let points = metrics::downsample(samples, now - secs, 120);
     Ok(Json(json!({
         "range": range,
@@ -166,13 +138,7 @@ pub async fn audit(
     Query(q): Query<AuditQuery>,
 ) -> AppResult<Json<Vec<AuditLog>>> {
     user.require_admin()?;
-    let rows = sqlx::query_as::<_, AuditLog>(
-        "SELECT l.id, l.user_id, u.email, l.action, l.target, l.ip, l.created_at \
-         FROM audit_logs l LEFT JOIN users u ON u.id = l.user_id ORDER BY l.id DESC LIMIT ?",
-    )
-    .bind(q.limit.unwrap_or(100).clamp(1, 500))
-    .fetch_all(&state.db)
-    .await?;
+    let rows = crate::logstore::audit_list(&state, q.limit.unwrap_or(100).clamp(1, 500)).await?;
     Ok(Json(rows))
 }
 

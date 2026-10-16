@@ -9,8 +9,10 @@ pub mod config;
 pub mod deploy;
 pub mod error;
 pub mod files;
+pub mod logstore;
 pub mod metrics;
 pub mod models;
+pub mod mongo;
 pub mod notify;
 pub mod routes;
 pub mod runtimes;
@@ -102,10 +104,25 @@ pub async fn build_state(cfg: Config) -> anyhow::Result<AppState> {
         ExecMode::DryRun => Arc::new(DryRunExecutor),
     };
 
+    // MongoDB: 연결은 처음 쓸 때 맺어짐 (서버가 없어도 패널은 뜸)
+    let mongo = match cfg.mongodb_url.as_deref() {
+        Some(url) => {
+            let mut opts = mongodb::options::ClientOptions::parse(url)
+                .await
+                .context("MONGODB_URL 형식 오류")?;
+            opts.app_name = Some("rpanel".into());
+            opts.server_selection_timeout = Some(Duration::from_secs(3));
+            opts.connect_timeout = Some(Duration::from_secs(3));
+            Some(mongodb::Client::with_options(opts).context("MongoDB 클라이언트 생성 실패")?)
+        }
+        None => None,
+    };
+
     Ok(AppState {
         db,
         redis,
         redis_client,
+        mongo,
         build_slots: Arc::new(Semaphore::new(cfg.max_concurrent_builds.max(1))),
         cancels: Arc::new(Mutex::new(HashMap::new())),
         exec,

@@ -63,6 +63,22 @@ fatal: could not read Username for 'https://github.com': terminal prompts disabl
    - GitLab: 프로젝트 → **Settings → Repository → Deploy keys**
 4. 다시 **배포**를 누릅니다.
 
+## 프런트 · 백엔드 · 관리자 화면을 한 프로젝트로
+
+**프로젝트** 화면에 앱이 **프런트 · 백엔드 (API) · 관리자 프런트**로 나뉘어 보입니다.
+
+| 할 일 | 방법 |
+|---|---|
+| 백엔드 만들기 | **백엔드 (API)** 옆 `+ 추가` → Rust 또는 Python, 도메인은 비워 둬도 됩니다 (포트가 자동으로 정해집니다) |
+| 프런트 만들기 | **프런트** 옆 `+ 추가` → Static(React·Vite), 도메인 `example.com` |
+| 프런트 ↔ 백엔드 연결 | 프런트 카드의 **/api/ 연결**에서 백엔드를 고릅니다 → `example.com/api/…` 요청이 백엔드로 갑니다 |
+| 관리자 화면 | **관리자 프런트** 옆 `+ 추가` → Static, 도메인 `admin.example.com`, **/api/ 연결**도 같은 백엔드로 |
+| 한 번에 배포 | 위쪽 **전체 배포** (백엔드부터 배포합니다) |
+
+이름이나 도메인에 `admin` 이 들어간 Static 앱은 **관리자 프런트**로 묶입니다. 도메인마다 https 인증서는 각 앱의 **SSL** 탭에서 받습니다.
+
+> 프로젝트(Git)로 만든 앱은 **사이트 계정(SFTP)이 없습니다.** 코드가 Git 에서 오기 때문입니다. **사이트** 메뉴의 **계정** 칸에 `Git 배포`라고 나오고, 누르면 프로젝트 화면으로 갑니다. 파일을 직접 올려야 하면 **사이트** 메뉴에서 사이트로 만드세요.
+
 ## push 할 때 자동 배포 (웹훅)
 
 **GitHub**: 저장소 → **Settings → Webhooks → Add webhook**

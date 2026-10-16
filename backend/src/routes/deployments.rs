@@ -116,11 +116,13 @@ pub async fn detail(state: &AppState, id: u64) -> AppResult<DeploymentDetail> {
     .fetch_optional(&state.db)
     .await?
     .ok_or(AppError::NotFound)?;
-    let (log, app_name, app_slug): (Option<String>, String, String) =
-        sqlx::query_as("SELECT d.log, a.name, a.slug FROM deployments d JOIN apps a ON a.id = d.app_id WHERE d.id = ?")
-            .bind(id)
-            .fetch_one(&state.db)
-            .await?;
+    let (app_name, app_slug): (String, String) = sqlx::query_as(
+        "SELECT a.name, a.slug FROM deployments d JOIN apps a ON a.id = d.app_id WHERE d.id = ?",
+    )
+    .bind(id)
+    .fetch_one(&state.db)
+    .await?;
+    let log = crate::logstore::deploy_log_get(state, id).await?;
     Ok(DeploymentDetail {
         deployment: d,
         log,

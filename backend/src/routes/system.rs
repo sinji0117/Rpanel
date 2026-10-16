@@ -65,6 +65,7 @@ pub fn spawn_sampler(state: AppState) {
             if let Err(e) = push_sample(&state, &metrics::Sample::from(&snap)).await {
                 tracing::debug!(error = %e, "metrics sample not stored");
             }
+            crate::notify::check_resources(&state, &snap).await;
         }
     });
 }
@@ -246,7 +247,7 @@ pub async fn version(
 }
 
 /// GitHub 최신 릴리스 태그 → 없으면 main 브랜치 backend/Cargo.toml 의 version
-async fn fetch_latest(repo: &str) -> anyhow::Result<String> {
+pub async fn fetch_latest(repo: &str) -> anyhow::Result<String> {
     if !regex::Regex::new(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")?.is_match(repo) {
         anyhow::bail!("RPANEL_UPDATE_REPO 형식 오류");
     }

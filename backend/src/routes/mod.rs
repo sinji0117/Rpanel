@@ -4,6 +4,7 @@ pub mod cron;
 pub mod databases;
 pub mod deployments;
 pub mod files;
+pub mod notifications;
 pub mod projects;
 pub mod runtimes;
 pub mod site_accounts;
@@ -43,6 +44,17 @@ pub fn router(state: AppState) -> Router {
         .route("/system/version", get(system::version))
         .route("/system/metrics", get(system::metrics_history))
         .route("/logs/system", get(system::system_log))
+        // 알림
+        .route(
+            "/notifications",
+            get(notifications::list).delete(notifications::clear),
+        )
+        .route("/notifications/read", post(notifications::mark_read))
+        .route(
+            "/notifications/settings",
+            get(notifications::get_settings).put(notifications::put_settings),
+        )
+        .route("/notifications/test", post(notifications::test))
         .route("/logs/deployments", get(system::deployment_log))
         // 언어 런타임 버전
         .route("/runtimes", get(runtimes::list).post(runtimes::install))

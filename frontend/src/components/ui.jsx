@@ -92,13 +92,12 @@ export function PageHeader({ title, subtitle, help, actions, children }) {
   )
 }
 
+/** 빈 목록. 설명은 페이지 위쪽 ? (PageHeader help) 에 둡니다 */
 export function Empty({ title, children, action }) {
   return (
     <div className="card flex flex-col items-center px-6 py-14 text-center">
-      <p className="inline-flex items-center gap-2 font-medium">
-        {title}
-        <HelpTip align="center">{children}</HelpTip>
-      </p>
+      <p className="font-medium">{title}</p>
+      {children && <p className="mt-1.5 max-w-md text-sm text-ink-400">{children}</p>}
       {action && <div className="mt-5">{action}</div>}
     </div>
   )

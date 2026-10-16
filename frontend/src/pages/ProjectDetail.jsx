@@ -37,6 +37,10 @@ export default function ProjectDetail() {
       <PageHeader
         title={p.name}
         subtitle={p.description}
+        help={tx(
+          'Git 저장소에서 빌드하는 앱입니다. Rust(Axum) 백엔드는 {rust}, Flask·FastAPI·Django 는 {python}, React + Vite 프런트는 {static}으로 만들고, 프런트의 “/api/ 프록시 포트”에 백엔드 포트를 넣으면 한 도메인에서 프런트와 API 를 함께 서비스합니다. 빌드한 실행 파일·HTML 을 직접 올리는 사이트는 {sites} 메뉴에서 만드세요.',
+          { rust: <b>Rust</b>, python: <b>Python</b>, static: <b>Static</b>, sites: <b>{t('사이트')}</b> },
+        )}
         actions={
           <>
             <button className="btn-ghost" onClick={() => setEditing(true)}>
@@ -104,12 +108,7 @@ export default function ProjectDetail() {
               {t('앱 추가')}
             </button>
           }
-        >
-          {tx(
-            'Git 저장소에서 빌드하는 앱입니다. Rust(Axum) 백엔드는 {rust}, Flask·FastAPI·Django 는 {python}, React + Vite 프런트는 {static}으로 만들고, 프런트의 “/api/ 프록시 포트”에 백엔드 포트를 넣으면 한 도메인에서 프런트와 API 를 함께 서비스합니다. 빌드한 실행 파일·HTML 을 직접 올리는 사이트는 {sites} 메뉴에서 만드세요.',
-            { rust: <b>Rust</b>, python: <b>Python</b>, static: <b>Static</b>, sites: <b>{t('사이트')}</b> },
-          )}
-        </Empty>
+        />
       )}
 
       <Modal open={creating} onClose={() => setCreating(false)} title={t('새 앱')} wide>

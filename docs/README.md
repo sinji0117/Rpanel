@@ -21,6 +21,7 @@
 | [백업과 복원](backup.md) | 지금 백업, 백업 예약, 복원 |
 | [언어 버전 (런타임)](runtimes.md) | Rust · Python · Node.js 버전 설치 · 기본 버전 · 앱별 버전 |
 | [모니터링과 로그](monitoring-logs.md) | 대시보드 그래프, 가동 시간, 로그 메뉴 |
+| [알림](notifications.md) | 종 아이콘, 알림 받을 일, Discord · Slack · Telegram · 웹훅 |
 | [업데이트와 삭제](update-uninstall.md) | 패널 버전 확인, 업데이트, 삭제 |
 
 ## 도움말

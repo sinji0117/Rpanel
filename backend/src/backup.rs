@@ -205,6 +205,8 @@ async fn launch(
 
     let state = state.clone();
     tokio::spawn(async move {
+        let mut failed: Vec<String> = Vec::new();
+        let mut done = 0usize;
         for job_item in running {
             let log = LogSink::capture();
             let result = match job_item.kind {
@@ -234,6 +236,16 @@ async fn launch(
                     Some(format!("{e:#}").chars().take(1000).collect::<String>()),
                 ),
             };
+            if status == "success" {
+                done += 1;
+            } else {
+                failed.push(format!(
+                    "{} {}: {}",
+                    job_item.kind,
+                    job_item.target,
+                    err.as_deref().unwrap_or("")
+                ));
+            }
             let _ = sqlx::query(
                 "UPDATE backups SET status = ?, size_bytes = ?, error = ?, finished_at = CURRENT_TIMESTAMP(3) WHERE id = ?",
             )
@@ -244,6 +256,24 @@ async fn launch(
             .execute(&state.db)
             .await;
         }
+        let params = serde_json::json!({ "scope": scope, "n": done, "failed": failed.len() });
+        let ev = if failed.is_empty() {
+            crate::notify::Event::new(
+                "backup_success",
+                "success",
+                "백업 완료: {scope} ({n}개)",
+                params,
+            )
+        } else {
+            crate::notify::Event::new(
+                "backup_failed",
+                "error",
+                "백업 실패: {scope} ({failed}개 실패)",
+                params,
+            )
+            .body(failed.join("\n"))
+        };
+        crate::notify::emit(&state, ev.link("/backups")).await;
         if let Some((job_id, keep)) = job {
             if let Err(e) = prune_job(&state, job_id, keep).await {
                 tracing::warn!(error = %e, job_id, "backup prune failed");

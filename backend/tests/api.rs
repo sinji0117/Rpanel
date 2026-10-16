@@ -117,6 +117,8 @@ async fn full_flow() {
     let cfg = Config::for_tests(db_url, redis_url);
     let state = rpanel::build_state(cfg).await.expect("state");
     for t in [
+        "notifications",
+        "panel_settings",
         "runtimes",
         "redis_users",
         "db_users",
@@ -1379,6 +1381,174 @@ async fn full_flow() {
     let r = ctx.get("/api/logs/deployments?limit=5", &t).await;
     assert_eq!(r.status, StatusCode::OK);
     assert!(!r.body.as_array().unwrap().is_empty());
+
+    // ── 알림 ──
+    let r = ctx.get("/api/notifications/settings", &t).await;
+    assert_eq!(r.status, StatusCode::OK);
+    assert_eq!(r.body["settings"]["events"]["deploy_failed"], true);
+    assert_eq!(r.body["settings"]["events"]["deploy_success"], false);
+    assert_eq!(r.body["settings"]["disk_threshold"], 90);
+    assert!(r.body["events"].as_array().unwrap().len() >= 8);
+    let mut settings = r.body["settings"].clone();
+    for (field, bad) in [
+        ("discord_url", "https://evil.example/hook"),
+        ("slack_url", "http://hooks.slack.com/x"),
+        ("webhook_url", "file:///etc/passwd"),
+        ("telegram_token", "123:short"),
+    ] {
+        let mut s = settings.clone();
+        s["channels"][field] = json!(bad);
+        let r = ctx
+            .req(
+                Method::PUT,
+                "/api/notifications/settings",
+                Some(&t),
+                None,
+                Some(s),
+            )
+            .await;
+        assert_eq!(r.status, StatusCode::BAD_REQUEST, "{field}={bad}");
+    }
+    // 로컬 웹훅 수신기로 실제 전송 확인
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let hook_port = listener.local_addr().unwrap().port();
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+    tokio::spawn(async move {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        loop {
+            let Ok((mut sock, _)) = listener.accept().await else {
+                break;
+            };
+            let tx = tx.clone();
+            tokio::spawn(async move {
+                let mut buf = vec![0u8; 65536];
+                let mut got = Vec::new();
+                loop {
+                    let n = sock.read(&mut buf).await.unwrap_or(0);
+                    if n == 0 {
+                        break;
+                    }
+                    got.extend_from_slice(&buf[..n]);
+                    let text = String::from_utf8_lossy(&got);
+                    if let Some(i) = text.find("\r\n\r\n") {
+                        let len = text[..i]
+                            .lines()
+                            .find_map(|l| {
+                                l.to_ascii_lowercase()
+                                    .strip_prefix("content-length:")
+                                    .map(|v| v.trim().parse::<usize>().unwrap_or(0))
+                            })
+                            .unwrap_or(0);
+                        if got.len() >= i + 4 + len {
+                            break;
+                        }
+                    }
+                }
+                let _ = sock
+                    .write_all(b"HTTP/1.1 204 No Content\r\ncontent-length: 0\r\n\r\n")
+                    .await;
+                let _ = tx.send(String::from_utf8_lossy(&got).into_owned());
+            });
+        }
+    });
+    settings["events"]["deploy_success"] = json!(true);
+    settings["disk_threshold"] = json!(85);
+    settings["channels"]["webhook_url"] = json!(format!("  http://127.0.0.1:{hook_port}/hook  "));
+    let r = ctx
+        .req(
+            Method::PUT,
+            "/api/notifications/settings",
+            Some(&t),
+            None,
+            Some(settings.clone()),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+    assert_eq!(
+        r.body["settings"]["channels"]["webhook_url"],
+        format!("http://127.0.0.1:{hook_port}/hook")
+    );
+    assert_eq!(r.body["settings"]["disk_threshold"], 85);
+    let r = ctx.post("/api/notifications/test", &t, json!({})).await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+    assert_eq!(r.body["results"][0]["channel"], "webhook");
+    assert_eq!(r.body["results"][0]["ok"], true, "{:?}", r.body);
+    let got = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(got.starts_with("POST /hook"), "{got}");
+    assert!(got.contains("\"kind\":\"test\""), "{got}");
+    // 켠 이벤트(배포 성공)는 목록에 남고 웹훅으로도 감
+    let r = ctx
+        .post(&format!("/api/apps/{py_id}/deploy"), &t, json!({}))
+        .await;
+    let did = r.body["deployment_id"].as_u64().unwrap();
+    wait_deploy(&ctx, &t, did).await;
+    let got = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(got.contains("deploy_success"), "{got}");
+    let r = ctx.get("/api/notifications?limit=10", &t).await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+    let items = r.body["items"].as_array().unwrap();
+    let dep = items
+        .iter()
+        .find(|n| n["kind"] == "deploy_success")
+        .expect("deploy notification");
+    assert_eq!(dep["title"], "배포 성공: {app} #{id}");
+    assert_eq!(dep["params"]["id"], did);
+    assert_eq!(dep["link"], format!("/deployments/{did}"));
+    assert!(r.body["unread"].as_i64().unwrap() >= 2);
+    let r = ctx
+        .post("/api/notifications/read", &t, json!({ "ids": [dep["id"]] }))
+        .await;
+    let left = r.body["unread"].as_i64().unwrap();
+    let r = ctx.get("/api/notifications?unread=true", &t).await;
+    assert_eq!(r.body["items"].as_array().unwrap().len() as i64, left);
+    let r = ctx
+        .post("/api/notifications/read", &t, json!({ "all": true }))
+        .await;
+    assert_eq!(r.body["unread"], 0);
+    // 끈 이벤트는 기록하지 않음
+    settings["events"]["deploy_success"] = json!(false);
+    settings["channels"]["webhook_url"] = json!("");
+    ctx.req(
+        Method::PUT,
+        "/api/notifications/settings",
+        Some(&t),
+        None,
+        Some(settings),
+    )
+    .await;
+    let before = ctx.get("/api/notifications?limit=500", &t).await.body["items"]
+        .as_array()
+        .unwrap()
+        .len();
+    let r = ctx
+        .post(&format!("/api/apps/{py_id}/deploy"), &t, json!({}))
+        .await;
+    wait_deploy(&ctx, &t, r.body["deployment_id"].as_u64().unwrap()).await;
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert_eq!(
+        ctx.get("/api/notifications?limit=500", &t).await.body["items"]
+            .as_array()
+            .unwrap()
+            .len(),
+        before
+    );
+    let r = ctx
+        .req(Method::DELETE, "/api/notifications", Some(&t), None, None)
+        .await;
+    assert_eq!(r.status, StatusCode::NO_CONTENT);
+    assert_eq!(
+        ctx.get("/api/notifications", &t).await.body["items"]
+            .as_array()
+            .unwrap()
+            .len(),
+        0
+    );
 
     // 버전 확인 (테스트 설정은 GitHub 확인 끔)
     let r = ctx.get("/api/system/version", &t).await;

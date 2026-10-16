@@ -117,6 +117,13 @@
 - 가동 시간은 `GET /api/system/info` 의 `boot_time`(부팅 시각)으로 화면에서 계산합니다 (실시간 연결이 끊겨도 표시).
 - `GET /api/logs/system?kind=panel|nginx|ssh|mariadb|redis&lines=` 는 helper `system-log` 로 정해진 로그만 읽습니다. `GET /api/logs/deployments` 는 전체 배포 기록.
 
+## 알림
+
+- 테이블 `notifications`(제목은 한국어 템플릿 + `params` JSON → 화면에서 번역), 설정은 `panel_settings`(k=`notifications`, JSON).
+- 이벤트: 배포 결과(runner `finish`), 백업 결과(실행 단위로 한 번), 런타임 설치, 관리자 로그인, 1분 지표 샘플러의 디스크·메모리 기준(Redis 쿨다운), 5분 사이트 확인(상태가 바뀔 때만, real 모드), 6시간 GitHub 버전 확인(버전마다 한 번).
+- 외부 전송은 curl 로 JSON POST. 주소·토큰은 명령줄이 아니라 stdin 설정(`-K -`)으로 넘기고, 오류 메시지의 토큰은 가립니다. Discord·Slack 주소는 공식 도메인만, Telegram 토큰·chat id 는 형식 검사.
+- API: `GET/DELETE /api/notifications`, `POST /api/notifications/read`, `GET/PUT /api/notifications/settings`, `POST /api/notifications/test`.
+
 ## 관리자 · 화면 설정
 
 - 관리자는 모두 같은 권한입니다. 자기 자신과 마지막 관리자는 지울 수 없고, 비밀번호 변경·삭제 시 그 관리자의 세션을 모두 끊습니다. 로그인 시각은 `users.last_login_at`.

@@ -21,6 +21,24 @@ export function createMockBackend({ needsSetup = false } = {}) {
     ssl: {},
     accounts: [],
     admins: [],
+    notifications: [],
+    notifySettings: {
+      events: {
+        deploy_failed: true,
+        deploy_success: false,
+        backup_failed: true,
+        backup_success: false,
+        site_down: true,
+        disk_high: true,
+        mem_high: true,
+        update_available: true,
+        runtime_install: true,
+        admin_login: false,
+      },
+      disk_threshold: 90,
+      mem_threshold: 90,
+      channels: { discord_url: '', slack_url: '', telegram_token: '', telegram_chat_id: '', webhook_url: '' },
+    },
     version: { current: '0.4.0', latest: '0.5.0', update_available: true, repo_url: 'https://github.com/sinji0117/Rpanel', checked_at: now(), error: null },
     runtimes: [
       { id: 901, lang: 'rust', version: 'stable', status: 'ready', is_default: true, is_system: true, detail: '1.90.0', log: null, updated_at: now() },
@@ -90,6 +108,61 @@ export function createMockBackend({ needsSetup = false } = {}) {
       })
     if (path === '/audit') return json(route, 200, [])
     if (path === '/system/version') return json(route, 200, db.version)
+    // ── notifications ──
+    if (path === '/notifications' && method === 'GET') {
+      const unreadOnly = url.searchParams.get('unread') === 'true'
+      const items = [...db.notifications]
+        .reverse()
+        .filter((n) => !unreadOnly || !n.read_at)
+        .slice(0, Number(url.searchParams.get('limit') || 50))
+      return json(route, 200, { items, unread: db.notifications.filter((n) => !n.read_at).length })
+    }
+    if (path === '/notifications' && method === 'DELETE') {
+      db.notifications = []
+      return json(route, 204)
+    }
+    if (path === '/notifications/read') {
+      for (const n of db.notifications) if (body.all || body.ids?.includes(n.id)) n.read_at ??= now()
+      return json(route, 200, { unread: db.notifications.filter((n) => !n.read_at).length })
+    }
+    if (path === '/notifications/settings') {
+      const events = Object.keys(db.notifySettings.events).map((key) => ({
+        key,
+        label: {
+          deploy_failed: '배포·적용 실패',
+          deploy_success: '배포·적용 성공',
+          backup_failed: '백업 실패',
+          backup_success: '백업 완료',
+          site_down: '사이트 응답 없음 · 복구',
+          disk_high: '디스크 사용량 높음',
+          mem_high: '메모리 사용량 높음',
+          update_available: '새 버전 알림',
+          runtime_install: '런타임 설치 결과',
+          admin_login: '관리자 로그인',
+        }[key],
+        default: true,
+      }))
+      if (method === 'PUT') {
+        if (body.channels.discord_url && !body.channels.discord_url.startsWith('https://discord.com/api/webhooks/'))
+          return json(route, 400, { error: 'bad_request', message: 'Discord 웹훅 주소는 https://discord.com/api/webhooks/ 로 시작합니다' })
+        db.notifySettings = body
+      }
+      return json(route, 200, { settings: db.notifySettings, events })
+    }
+    if (path === '/notifications/test') {
+      db.notifications.push({
+        id: id(),
+        kind: 'test',
+        level: 'info',
+        title: '시험 알림입니다',
+        params: {},
+        body: 'Rpanel 알림이 잘 도착했습니다.',
+        link: null,
+        read_at: null,
+        created_at: now(),
+      })
+      return json(route, 200, { results: db.notifySettings.channels.discord_url ? [{ channel: 'discord', ok: true, error: null }] : [] })
+    }
     if (path === '/system/metrics') {
       const n = { '30m': 30, '1h': 60, '6h': 360, '24h': 1440, '7d': 10080 }[url.searchParams.get('range') || '30m']
       const nowS = Math.floor(Date.now() / 1000)

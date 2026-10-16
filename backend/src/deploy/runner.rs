@@ -121,6 +121,29 @@ async fn finish(
             .await;
     }
     log.status(status).await;
+
+    if status == "success" || status == "failed" {
+        let name: String = sqlx::query_scalar("SELECT name FROM apps WHERE id = ?")
+            .bind(app_id)
+            .fetch_optional(db)
+            .await
+            .ok()
+            .flatten()
+            .unwrap_or_else(|| format!("#{app_id}"));
+        let params = serde_json::json!({ "app": name, "id": deploy_id });
+        let ev = if status == "success" {
+            crate::notify::Event::new(
+                "deploy_success",
+                "success",
+                "배포 성공: {app} #{id}",
+                params,
+            )
+        } else {
+            crate::notify::Event::new("deploy_failed", "error", "배포 실패: {app} #{id}", params)
+                .body(error.clone().unwrap_or_default())
+        };
+        crate::notify::emit(state, ev.link(format!("/deployments/{deploy_id}"))).await;
+    }
 }
 
 fn short(sha: &str) -> &str {

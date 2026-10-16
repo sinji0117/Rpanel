@@ -20,6 +20,8 @@ async fn main() -> anyhow::Result<()> {
     deployments::recover_orphans(&state).await?;
     rpanel::backup::spawn_scheduler(state.clone());
     routes::system::spawn_sampler(state.clone());
+    rpanel::notify::spawn_site_monitor(state.clone());
+    rpanel::notify::spawn_update_watch(state.clone());
 
     let app = routes::router(state);
     let listener = tokio::net::TcpListener::bind(bind).await?;

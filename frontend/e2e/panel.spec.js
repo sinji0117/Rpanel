@@ -559,7 +559,7 @@ test('? 도움말 · 로그 메뉴 (종류별)', async ({ page }) => {
   const helpText = '서비스 단위로 앱(백엔드·프런트)을 묶어 관리합니다'
   await expect(page.getByText(helpText)).toHaveCount(0)
   await page.getByRole('button', { name: '프로젝트 도움말' }).click()
-  await expect(page.getByRole('tooltip')).toHaveText(helpText)
+  await expect(page.getByRole('tooltip')).toContainText(helpText)
   await page.keyboard.press('Escape')
   await expect(page.getByRole('tooltip')).toHaveCount(0)
 
@@ -579,4 +579,78 @@ test('? 도움말 · 로그 메뉴 (종류별)', async ({ page }) => {
   await page.getByRole('tab', { name: '사이트 접속 로그' }).click()
   await expect(page.getByLabel('사이트 선택')).toHaveValue('2')
   await expect(page.getByTestId('stat-2xx')).toHaveText('3')
+})
+
+test('알림: 종 아이콘 · 목록 · 설정 · 시험 알림, 메뉴 순서, 도움말 위치', async ({ page }) => {
+  const backend = seededBackend()
+  backend.db.notifications.push(
+    {
+      id: 501,
+      kind: 'deploy_failed',
+      level: 'error',
+      title: '배포 실패: {app} #{id}',
+      params: { app: 'Beripick API', id: 9 },
+      body: 'cargo build 실패',
+      link: '/apps/2',
+      read_at: null,
+      created_at: new Date().toISOString(),
+    },
+    {
+      id: 502,
+      kind: 'disk_high',
+      level: 'warning',
+      title: '디스크 사용량 {pct}% ({mount})',
+      params: { pct: 93, mount: '/' },
+      body: null,
+      link: '/',
+      read_at: null,
+      created_at: new Date().toISOString(),
+    },
+  )
+  await backend.install(page)
+  page.on('dialog', (d) => d.accept())
+  await page.goto('/')
+
+  // 메뉴 순서: … 로그 · 런타임 · 설정 · 관리자
+  const labels = await page.locator('aside nav a').allTextContents()
+  expect(labels.slice(-4)).toEqual(['로그', '런타임', '설정', '관리자'])
+
+  // 종 아이콘: 안 읽은 2개 → 펼치면 번역된 제목 → 누르면 링크로 이동하고 읽음
+  await expect(page.getByTestId('notification-count').first()).toHaveText('2')
+  await page.getByRole('button', { name: '알림 2개 안 읽음' }).first().click()
+  const pop = page.getByRole('dialog', { name: '알림' })
+  await expect(pop.getByText('디스크 사용량 93% (/)')).toBeVisible()
+  await pop.getByText('배포 실패: Beripick API #9').click()
+  await expect(page).toHaveURL(/\/apps\/2$/)
+  await expect(page.getByTestId('notification-count').first()).toHaveText('1')
+
+  // 설정: 잘못된 주소 거부 → 고친 뒤 저장 → 시험 알림
+  await page.goto('/notifications?tab=settings')
+  await page.getByLabel('배포·적용 성공').check()
+  await page.getByLabel('Discord 웹훅 주소').fill('https://evil.example/hook')
+  await page.getByRole('button', { name: '저장', exact: true }).click()
+  await expect(page.getByRole('alert')).toContainText('discord.com/api/webhooks')
+  await page.getByLabel('Discord 웹훅 주소').fill('https://discord.com/api/webhooks/1/abc')
+  await page.getByRole('button', { name: '저장', exact: true }).click()
+  await expect(page.getByText('알림 설정을 저장했습니다')).toBeVisible()
+  expect(backend.db.notifySettings.events.deploy_success).toBe(true)
+  await page.getByRole('button', { name: '시험 알림 보내기' }).click()
+  await expect(page.getByRole('list', { name: '시험 결과' })).toContainText('discord: 성공')
+
+  // 목록: 모두 읽음 → 모두 지우기
+  await page.getByRole('tab', { name: '알림 목록' }).click()
+  const list = page.getByRole('list', { name: '알림 목록' })
+  await expect(list.getByText('시험 알림입니다')).toBeVisible()
+  await page.getByRole('button', { name: '모두 읽음' }).click()
+  await expect(page.getByTestId('notification-count')).toHaveCount(0)
+  await page.getByRole('button', { name: '모두 지우기' }).click()
+  await expect(list.getByText('알림이 없습니다')).toBeVisible()
+
+  // 빈 화면의 도움말은 위쪽 버튼 옆 ? 에
+  await page.goto('/projects/1')
+  backend.db.apps = []
+  await page.reload()
+  await expect(page.getByText('앱이 없습니다')).toBeVisible()
+  await page.getByRole('button', { name: 'Beripick 도움말' }).click()
+  await expect(page.getByRole('tooltip')).toContainText('Git 저장소에서 빌드하는 앱입니다')
 })

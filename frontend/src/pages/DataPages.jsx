@@ -557,7 +557,13 @@ export function MariaDBPage() {
     <>
       <PageHeader
         title="MariaDB"
-        help={t('데이터베이스와 계정을 만들고 지웁니다. 앱에 연결한 DB 는 배포(적용) 때 접속 주소가 환경변수로 들어갑니다.')}
+        help={
+          <>
+            {t('데이터베이스와 계정을 만들고 지웁니다. 앱에 연결한 DB 는 배포(적용) 때 접속 주소가 환경변수로 들어갑니다.')}
+            <br />
+            {t('“+ 데이터베이스”로 만들거나, 앱의 데이터베이스 탭에서 만드세요.')}
+          </>
+        }
         actions={
           <button className="btn-primary" onClick={() => setCreating(true)}>
             {t('+ 데이터베이스')}
@@ -569,7 +575,7 @@ export function MariaDBPage() {
         desc={t('DB마다 기본 계정이 하나 있고, 필요하면 계정을 더 만들 수 있습니다 (예: 백업·통계용 읽기 전용 계정). 계정은 그 DB에만 권한이 있습니다.')}
       >
         {databases.length === 0 ? (
-          <Empty title={t('데이터베이스가 없습니다')}>{t('“+ 데이터베이스”로 만들거나, 앱의 데이터베이스 탭에서 만드세요.')}</Empty>
+          <Empty title={t('데이터베이스가 없습니다')} />
         ) : (
           <ul className="divide-y divide-ink-800">
             {databases.map((db) => (
@@ -644,12 +650,21 @@ export function BackupsPage() {
   useInterval(() => list.reload(true), 3000, !!list.data?.some((b) => b.status === 'running'))
   return (
     <>
-      <PageHeader title={t('백업')} help={t('백업 예약을 추가·수정·삭제하고, 만들어진 백업 파일을 내려받거나 복원합니다 (/var/lib/rpanel/backups).')} />
+      <PageHeader
+        title={t('백업')}
+        help={
+          <>
+            {t('백업 예약을 추가·수정·삭제하고, 만들어진 백업 파일을 내려받거나 복원합니다 (/var/lib/rpanel/backups).')}
+            <br />
+            {t('예약의 “지금 실행”이나 앱·데이터베이스 화면의 “지금 백업”을 누르면 여기에 나타납니다.')}
+          </>
+        }
+      />
       <div className="space-y-4">
         <BackupJobs onRan={() => setTimeout(() => list.reload(true), 500)} />
         <ErrorBox error={list.error} />
         {!list.loading && !list.data?.length ? (
-          <Empty title={t('백업 파일이 없습니다')}>{t('예약의 “지금 실행”이나 앱·데이터베이스 화면의 “지금 백업”을 누르면 여기에 나타납니다.')}</Empty>
+          <Empty title={t('백업 파일이 없습니다')} />
         ) : (
           <BackupTable rows={list.data} loading={list.loading} onChanged={() => list.reload(true)} showApp />
         )}

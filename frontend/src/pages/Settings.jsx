@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Link } from 'react-router'
 import { ErrorBox, Field, PageHeader, Section } from '../components/ui'
 import { useAuth } from '../context/AuthContext'
 import { useToast } from '../context/ToastContext'
@@ -68,6 +69,18 @@ export default function Settings() {
               <ChoiceCards name={t('언어')} value={lang} options={LANGS} onChange={setLang} />
             </div>
           </div>
+        </Section>
+
+        <Section
+          title={t('알림')}
+          desc={t('배포·백업 실패, 사이트 응답 없음, 디스크·메모리 부족 등을 알려 줍니다. Discord · Slack · Telegram · 웹훅으로도 보낼 수 있습니다.')}
+          actions={
+            <Link to="/notifications?tab=settings" className="btn-ghost">
+              {t('알림 설정')}
+            </Link>
+          }
+        >
+          <p className="text-sm text-ink-400">{t('어떤 일을 알릴지와 보낼 곳을 정합니다.')}</p>
         </Section>
 
         <Section title={t('내 비밀번호 변경')} desc={t('변경하면 모든 기기의 세션이 로그아웃됩니다. 다른 관리자는 관리자 메뉴에서 관리합니다.')}>

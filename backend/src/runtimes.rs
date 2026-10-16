@@ -359,6 +359,33 @@ pub async fn install(state: AppState, id: u64, lang: Lang, version: String, make
     if status == "ready" && make_default {
         let _ = set_default(&state, id).await;
     }
+    let params = serde_json::json!({ "lang": lang.label(), "version": version });
+    let ev = if status == "ready" {
+        crate::notify::Event::new(
+            "runtime_install",
+            "success",
+            "{lang} {version} 설치 완료",
+            params,
+        )
+    } else {
+        crate::notify::Event::new(
+            "runtime_install",
+            "error",
+            "{lang} {version} 설치 실패",
+            params,
+        )
+        .body(
+            text.lines()
+                .rev()
+                .take(3)
+                .collect::<Vec<_>>()
+                .into_iter()
+                .rev()
+                .collect::<Vec<_>>()
+                .join("\n"),
+        )
+    };
+    crate::notify::emit(&state, ev.link("/runtimes")).await;
 }
 
 async fn do_install(

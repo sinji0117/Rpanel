@@ -11,6 +11,7 @@ pub mod error;
 pub mod files;
 pub mod metrics;
 pub mod models;
+pub mod notify;
 pub mod routes;
 pub mod runtimes;
 pub mod state;

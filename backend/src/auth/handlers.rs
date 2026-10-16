@@ -195,6 +195,18 @@ pub async fn login(
         .execute(&state.db)
         .await;
     audit::log(&state, Some(user.id), "auth.login", &email, &ip).await;
+    crate::notify::emit(
+        &state,
+        crate::notify::Event::new(
+            "admin_login",
+            "info",
+            "관리자 로그인: {email}",
+            serde_json::json!({ "email": email }),
+        )
+        .body(format!("IP {ip}"))
+        .link("/logs?tab=audit"),
+    )
+    .await;
     issue_tokens(&state, jar, user).await
 }
 

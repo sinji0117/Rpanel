@@ -61,7 +61,13 @@ export default function Projects() {
     <>
       <PageHeader
         title={t('프로젝트')}
-        help={t('서비스 단위로 앱(백엔드·프런트)을 묶어 관리합니다')}
+        help={
+          <>
+            {t('서비스 단위로 앱(백엔드·프런트)을 묶어 관리합니다')}
+            <br />
+            {tx('예: {name} 프로젝트 안에 Rust·Python API 앱과 React 프런트 앱을 둡니다.', { name: <span className="kbd">beripick</span> })}
+          </>
+        }
         actions={
           <button className="btn-primary" onClick={() => setOpen(true)}>
             {t('+ 새 프로젝트')}
@@ -91,9 +97,7 @@ export default function Projects() {
               {t('첫 프로젝트 만들기')}
             </button>
           }
-        >
-          {tx('예: {name} 프로젝트 안에 Rust·Python API 앱과 React 프런트 앱을 둡니다.', { name: <span className="kbd">beripick</span> })}
-        </Empty>
+        />
       )}
       {open && <ProjectFormModal open onClose={() => setOpen(false)} onSaved={create} />}
     </>

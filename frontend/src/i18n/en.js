@@ -891,4 +891,20 @@ export default {
   '멈추는 중': 'Stopping',
   멈춤: 'Stopped',
   '#{id} 로그 보기': 'View log #{id}',
+  입력: 'Input',
+  '정말 할까요?': 'Are you sure?',
+  '확인을 위해 {text} 를 입력하세요': 'Type {text} to confirm',
+  '자동 복사가 안 됩니다. 아래 내용을 선택해서 복사하세요 (Ctrl+C).': "Automatic copy isn't available. Select the text below and copy it (Ctrl+C).",
+  '앱 {slug} 을(를) 삭제합니다. 서비스·Nginx 설정·빌드 파일·배포 기록이 모두 지워지며 되돌릴 수 없습니다.':
+    "Deletes app {slug}. Its service, Nginx config, build files and deployment history are removed. This can't be undone.",
+  '데이터베이스 {name} 와(과) 모든 데이터가 삭제됩니다. 되돌릴 수 없습니다.': "Database {name} and all its data will be deleted. This can't be undone.",
+  '데이터베이스 삭제': 'Delete database',
+  '이 예약이 만든 백업 파일 {backup_count}개도 함께 지울까요?': 'Also delete the {backup_count} backup files this schedule created?',
+  '백업 파일': 'Backup files',
+  '파일도 지우기': 'Delete files too',
+  '파일은 남기기': 'Keep files',
+  '데이터베이스 {name} 와(과) 모든 데이터, 이 DB의 계정이 모두 삭제됩니다. 되돌릴 수 없습니다.':
+    "Database {name}, all its data and its accounts will be deleted. This can't be undone.",
+  '사이트 {slug} 을(를) 삭제합니다. Nginx 설정·인증서·사이트 파일이 지워지며 되돌릴 수 없습니다 (백업 파일은 남습니다).':
+    "Deletes site {slug}. Its Nginx config, certificates and site files are removed and can't be restored (backup files are kept).",
 }

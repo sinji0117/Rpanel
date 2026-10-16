@@ -96,7 +96,7 @@ export function createMockBackend({ needsSetup = false } = {}) {
         exec_mode: 'dry-run',
         host: { hostname: 'app-server', os: 'Linux 24.04 Ubuntu 24.04.3 LTS', kernel: '6.8.0', cpu_brand: 'Intel Xeon E5-2690', cpu_count: 8 },
         app_port_range: [8100, 8999],
-        boot_time: Math.floor(Date.now() / 1000) - (3 * 86400 + 4 * 3600 + 5 * 60),
+        boot_time: Math.floor(Date.now() / 1000) - (3 * 86400 + 4 * 3600 + 5 * 60 + 30),
         panel_started_at: Math.floor(Date.now() / 1000) - 7200,
       })
     if (path === '/system/overview')

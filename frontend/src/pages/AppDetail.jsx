@@ -13,6 +13,7 @@ import { AccountsTab } from './SiteAccounts'
 import { AppRuntimePicker } from './Runtimes'
 import { FileManager, SiteSettings, SslTab } from './SiteTabs'
 import { t, tx } from '../i18n'
+import { confirmDialog } from '../components/Dialog'
 
 export default function AppDetail() {
   const { id } = useParams()
@@ -305,7 +306,7 @@ function DeploymentsTab({ app, selected, onSelect, onChanged }) {
                       className="btn-ghost px-2.5 py-1 text-xs"
                       onClick={async (e) => {
                         e.stopPropagation()
-                        if (!window.confirm(t('#{id} 릴리스로 되돌릴까요?', { id: d.id }))) return
+                        if (!(await confirmDialog(t('#{id} 릴리스로 되돌릴까요?', { id: d.id })))) return
                         try {
                           await post(`/deployments/${d.id}/rollback`)
                           toast.push(t('#{id} 로 롤백했습니다', { id: d.id }), 'success')
@@ -585,7 +586,7 @@ function GitTab({ app, onSaved }) {
           className="btn-ghost mt-4 text-xs"
           disabled={busy}
           onClick={async () => {
-            if (key.data?.public_key && !window.confirm(t('키를 새로 만들면 저장소(GitHub·GitLab)에 다시 등록해야 합니다. 계속할까요?'))) return
+            if (key.data?.public_key && !(await confirmDialog(t('키를 새로 만들면 저장소(GitHub·GitLab)에 다시 등록해야 합니다. 계속할까요?')))) return
             setBusy(true)
             try {
               const r = await post(`/apps/${app.id}/deploy-key`)
@@ -644,7 +645,7 @@ function GitTab({ app, onSaved }) {
             <button
               className="btn-ghost text-xs"
               onClick={async () => {
-                if (!window.confirm(t('토큰을 바꾸면 GitHub·GitLab 웹훅 설정도 바꿔야 합니다. 계속할까요?'))) return
+                if (!(await confirmDialog(t('토큰을 바꾸면 GitHub·GitLab 웹훅 설정도 바꿔야 합니다. 계속할까요?')))) return
                 try {
                   hook.setData(await post(`/apps/${app.id}/webhook`))
                   toast.push(t('토큰을 교체했습니다'), 'success')
@@ -702,8 +703,12 @@ function SettingsTab({ app, onSaved }) {
         <button
           className="btn-danger mt-4"
           onClick={async () => {
-            const typed = window.prompt(t('삭제하려면 slug를 입력하세요: {slug}', { slug: app.slug }))
-            if (typed !== app.slug) return
+            const ok = await confirmDialog(t('앱 {slug} 을(를) 삭제합니다. 서비스·Nginx 설정·빌드 파일·배포 기록이 모두 지워지며 되돌릴 수 없습니다.', { slug: app.slug }), {
+              title: t('앱 삭제'),
+              requireText: app.slug,
+              danger: true,
+            })
+            if (!ok) return
             try {
               await del(`/apps/${app.id}`)
               toast.push(t('{slug} 삭제됨', { slug: app.slug }), 'success')

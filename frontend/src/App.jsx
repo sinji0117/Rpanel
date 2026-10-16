@@ -1,4 +1,5 @@
 import { BrowserRouter, Link, Navigate, Route, Routes } from 'react-router'
+import { DialogHost } from './components/Dialog'
 import Layout from './components/Layout'
 import { Spinner } from './components/ui'
 import { AuthProvider, useAuth } from './context/AuthContext'
@@ -72,6 +73,7 @@ export default function App() {
         <AuthProvider>
           <Gate />
         </AuthProvider>
+        <DialogHost />
       </ToastProvider>
     </BrowserRouter>
   )

@@ -7,6 +7,7 @@ import { t } from '../i18n'
 import { del, get, post, put } from '../lib/api'
 import { dateTime } from '../lib/format'
 import { useFetch } from '../lib/useFetch'
+import { confirmDialog } from '../components/Dialog'
 
 function NotificationList() {
   const toast = useToast()
@@ -36,7 +37,7 @@ function NotificationList() {
           <button
             className="btn-ghost px-2.5 py-1 text-xs text-red-300"
             disabled={!list.data?.items.length}
-            onClick={() => window.confirm(t('알림을 모두 지울까요?')) && run(() => del('/notifications'), t('알림을 지웠습니다'))}
+            onClick={async () => (await confirmDialog(t('알림을 모두 지울까요?'))) && run(() => del('/notifications'), t('알림을 지웠습니다'))}
           >
             {t('모두 지우기')}
           </button>

@@ -5,6 +5,7 @@ import { api, get, post, put } from '../lib/api'
 import { ago, dateTime } from '../lib/format'
 import { useFetch } from '../lib/useFetch'
 import { t } from '../i18n'
+import { confirmDialog } from '../components/Dialog'
 
 export const WEEKDAYS = ['일요일', '월요일', '화요일', '수요일', '목요일', '금요일', '토요일']
 const pad = (n) => String(n).padStart(2, '0')
@@ -277,11 +278,16 @@ export function BackupJobs({ appId, onRan }) {
                 <button
                   className="btn-danger px-2.5 py-1 text-xs"
                   disabled={busy}
-                  onClick={() => {
-                    if (!window.confirm(t('"{name}" 예약을 삭제할까요?', { name: j.name }))) return
+                  onClick={async () => {
+                    if (!(await confirmDialog(t('"{name}" 예약을 삭제할까요?', { name: j.name })))) return
                     const files =
                       j.backup_count > 0 &&
-                      window.confirm(t('이 예약이 만든 백업 파일 {backup_count}개도 함께 지울까요?\n(취소를 누르면 파일은 남겨 둡니다)', { backup_count: j.backup_count }))
+                      (await confirmDialog(t('이 예약이 만든 백업 파일 {backup_count}개도 함께 지울까요?', { backup_count: j.backup_count }), {
+                        title: t('백업 파일'),
+                        confirmText: t('파일도 지우기'),
+                        cancelText: t('파일은 남기기'),
+                        danger: true,
+                      }))
                     act(() => api(`/backup-jobs/${j.id}`, { method: 'DELETE', body: { delete_files: files } }), t('예약을 삭제했습니다'))
                   }}
                 >

@@ -7,6 +7,7 @@ import { del, download, get, post, put, uploadFile } from '../lib/api'
 import { bytes, dateTime } from '../lib/format'
 import { useFetch } from '../lib/useFetch'
 import { t, tx } from '../i18n'
+import { confirmDialog, promptDialog } from '../components/Dialog'
 
 /** /home/<user>/htdocs/<domain> → htdocs/<domain> */
 export function relRoot(app) {
@@ -138,8 +139,8 @@ export function FileManager({ app }) {
         </nav>
         <button
           className="btn-ghost px-2.5 py-1 text-xs"
-          onClick={() => {
-            const n = window.prompt(t('새 폴더 이름'))
+          onClick={async () => {
+            const n = await promptDialog(t('새 폴더 이름'))
             if (n) op({ op: 'mkdir', path: joinPath(cwd, n) })
           }}
         >
@@ -147,8 +148,8 @@ export function FileManager({ app }) {
         </button>
         <button
           className="btn-ghost px-2.5 py-1 text-xs"
-          onClick={() => {
-            const n = window.prompt(t('새 파일 이름 (예: index.html, config.toml)'))
+          onClick={async () => {
+            const n = await promptDialog(t('새 파일 이름 (예: index.html, config.toml)'))
             if (n) setEditing({ path: joinPath(cwd, n), content: '', original: null })
           }}
         >
@@ -235,8 +236,8 @@ export function FileManager({ app }) {
                         <button
                           className="font-mono text-xs text-ink-400 hover:text-ink-100"
                           title={t('권한 변경')}
-                          onClick={() => {
-                            const m = window.prompt(t('{name} 권한 (예: 644, 755)', { name: e.name }), e.mode.slice(1))
+                          onClick={async () => {
+                            const m = await promptDialog(t('{name} 권한 (예: 644, 755)', { name: e.name }), e.mode.slice(1))
                             if (m) op({ op: 'chmod', path, mode: m })
                           }}
                         >
@@ -249,8 +250,8 @@ export function FileManager({ app }) {
                           {e.kind === 'file' && ARCHIVE.test(e.name) && (
                             <button
                               className="btn-ghost px-2 py-0.5 text-xs"
-                              onClick={() =>
-                                window.confirm(t('{name} 를 이 폴더에 풀까요? (같은 이름은 덮어씁니다)', { name: e.name })) &&
+                              onClick={async () =>
+                                (await confirmDialog(t('{name} 를 이 폴더에 풀까요? (같은 이름은 덮어씁니다)', { name: e.name }))) &&
                                 op({ op: 'extract', path, to: cwd }, t('압축을 풀었습니다'))
                               }
                             >
@@ -267,8 +268,8 @@ export function FileManager({ app }) {
                           )}
                           <button
                             className="btn-ghost px-2 py-0.5 text-xs"
-                            onClick={() => {
-                              const n = window.prompt(t('새 이름'), e.name)
+                            onClick={async () => {
+                              const n = await promptDialog(t('새 이름'), e.name)
                               if (n && n !== e.name) op({ op: 'mv', path, to: joinPath(cwd, n) })
                             }}
                           >
@@ -277,8 +278,8 @@ export function FileManager({ app }) {
                           <button
                             className="btn-ghost px-2 py-0.5 text-xs text-fail"
                             aria-label={t('{name} 삭제', { name: e.name })}
-                            onClick={() =>
-                              window.confirm(t('{name}{v}을(를) 삭제할까요?', { name: e.name, v: e.kind === 'dir' ? t(' 폴더와 안의 모든 파일') : '' })) &&
+                            onClick={async () =>
+                              (await confirmDialog(t('{name}{v}을(를) 삭제할까요?', { name: e.name, v: e.kind === 'dir' ? t(' 폴더와 안의 모든 파일') : '' }))) &&
                               op({ op: 'rm', path }, t('삭제했습니다'))
                             }
                           >
@@ -303,7 +304,7 @@ export function FileManager({ app }) {
 
       <Modal
         open={!!editing}
-        onClose={() => (editing?.content === editing?.original || window.confirm(t('저장하지 않은 변경이 있습니다. 닫을까요?'))) && setEditing(null)}
+        onClose={async () => (editing?.content === editing?.original || (await confirmDialog(t('저장하지 않은 변경이 있습니다. 닫을까요?')))) && setEditing(null)}
         title={editing?.path || ''}
         wide
       >
@@ -412,7 +413,7 @@ export function SslTab({ app, onChanged }) {
               <button
                 className="btn-danger px-2.5 py-1 text-xs"
                 disabled={busy}
-                onClick={() => window.confirm(t('HTTPS 를 끄고 인증서를 삭제할까요?')) && run(() => del(`/apps/${app.id}/ssl`), t('HTTPS 를 껐습니다'))}
+                onClick={async () => (await confirmDialog(t('HTTPS 를 끄고 인증서를 삭제할까요?'))) && run(() => del(`/apps/${app.id}/ssl`), t('HTTPS 를 껐습니다'))}
               >
                 {t('인증서 삭제')}
               </button>
@@ -621,8 +622,15 @@ export function SiteSettings({ app, onSaved }) {
         <button
           className="btn-danger mt-4"
           onClick={async () => {
-            const typed = window.prompt(t('삭제하려면 slug 를 입력하세요: {slug}', { slug: app.slug }))
-            if (typed !== app.slug) return
+            const ok = await confirmDialog(
+              t('사이트 {slug} 을(를) 삭제합니다. Nginx 설정·인증서·사이트 파일이 지워지며 되돌릴 수 없습니다 (백업 파일은 남습니다).', { slug: app.slug }),
+              {
+                title: t('사이트 삭제'),
+                requireText: app.slug,
+                danger: true,
+              },
+            )
+            if (!ok) return
             try {
               await del(`/apps/${app.id}`)
               toast.push(t('{slug} 삭제됨', { slug: app.slug }), 'success')

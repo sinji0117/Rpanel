@@ -6,6 +6,7 @@ import { t } from '../i18n'
 import { del, get, post, put } from '../lib/api'
 import { dateTime } from '../lib/format'
 import { useFetch } from '../lib/useFetch'
+import { confirmDialog, promptDialog } from '../components/Dialog'
 
 const ACCESS = {
   ssh: { label: 'SSH + SFTP', desc: '터미널 접속과 파일 전송 모두' },
@@ -288,7 +289,7 @@ export function AccountsTab({ app }) {
                         className="btn-ghost mr-1.5 px-2.5 py-1 text-xs"
                         disabled={busy}
                         onClick={async () => {
-                          const custom = window.prompt(t('{user} 의 새 비밀번호 (비우면 자동 생성)', { user: a.username }), '')
+                          const custom = await promptDialog(t('{user} 의 새 비밀번호 (비우면 자동 생성)', { user: a.username }), '')
                           if (custom === null) return
                           const r = await act(() => post(`/apps/${app.id}/accounts/${a.id}/password`, { password: custom || undefined }), t('비밀번호를 바꿨습니다'))
                           if (r?.password) setInfo({ username: a.username, access: a.access, password: r.password })
@@ -301,8 +302,8 @@ export function AccountsTab({ app }) {
                           className="btn-ghost px-2.5 py-1 text-xs text-red-300"
                           disabled={busy}
                           aria-label={t('{user} 계정 삭제', { user: a.username })}
-                          onClick={() =>
-                            window.confirm(t('계정 {user} 을(를) 삭제할까요? 그 계정의 홈 폴더도 지워집니다 (사이트 파일은 그대로).', { user: a.username })) &&
+                          onClick={async () =>
+                            (await confirmDialog(t('계정 {user} 을(를) 삭제할까요? 그 계정의 홈 폴더도 지워집니다 (사이트 파일은 그대로).', { user: a.username }))) &&
                             act(() => del(`/apps/${app.id}/accounts/${a.id}`), t('삭제했습니다'))
                           }
                         >

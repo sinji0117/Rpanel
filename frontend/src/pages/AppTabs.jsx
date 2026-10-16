@@ -7,6 +7,7 @@ import { api, del, download, get, post, put } from '../lib/api'
 import { ago, bytes, CRON_PRESETS, dateTime } from '../lib/format'
 import { useFetch, useInterval } from '../lib/useFetch'
 import { t } from '../i18n'
+import { confirmDialog } from '../components/Dialog'
 
 export function Secret({ value }) {
   const [show, setShow] = useState(false)
@@ -164,8 +165,8 @@ export function DatabaseTab({ app, onChanged }) {
                     <button
                       className="btn-ghost px-2.5 py-1 text-xs"
                       disabled={busy}
-                      onClick={() =>
-                        window.confirm(t('비밀번호를 바꾸면 재배포 전까지 앱이 DB에 접속하지 못할 수 있습니다. 계속할까요?')) &&
+                      onClick={async () =>
+                        (await confirmDialog(t('비밀번호를 바꾸면 재배포 전까지 앱이 DB에 접속하지 못할 수 있습니다. 계속할까요?'))) &&
                         act(() => post(`/apps/${app.id}/databases/${db.id}/password`), t('비밀번호 교체됨 — 재배포하세요'))
                       }
                     >
@@ -174,9 +175,13 @@ export function DatabaseTab({ app, onChanged }) {
                     <button
                       className="btn-danger px-2.5 py-1 text-xs"
                       disabled={busy}
-                      onClick={() => {
-                        const typed = window.prompt(t('DB와 모든 데이터가 삭제됩니다. 삭제하려면 DB 이름을 입력하세요: {name}', { name: db.name }))
-                        if (typed === db.name) act(() => del(`/apps/${app.id}/databases/${db.id}`), t('{name} 삭제됨', { name: db.name }))
+                      onClick={async () => {
+                        const ok = await confirmDialog(t('데이터베이스 {name} 와(과) 모든 데이터가 삭제됩니다. 되돌릴 수 없습니다.', { name: db.name }), {
+                          title: t('데이터베이스 삭제'),
+                          requireText: db.name,
+                          danger: true,
+                        })
+                        if (ok) act(() => del(`/apps/${app.id}/databases/${db.id}`), t('{name} 삭제됨', { name: db.name }))
                       }}
                     >
                       {t('삭제')}
@@ -213,15 +218,18 @@ export function DatabaseTab({ app, onChanged }) {
                 <button
                   className="btn-ghost px-2.5 py-1 text-xs"
                   disabled={busy}
-                  onClick={() => window.confirm(t('DB {db} 의 키를 모두 지울까요?', { db: d.redis.db })) && act(() => post(`/apps/${app.id}/redis/flush`), t('비웠습니다'))}
+                  onClick={async () =>
+                    (await confirmDialog(t('DB {db} 의 키를 모두 지울까요?', { db: d.redis.db }))) && act(() => post(`/apps/${app.id}/redis/flush`), t('비웠습니다'))
+                  }
                 >
                   {t('비우기 (FLUSHDB)')}
                 </button>
                 <button
                   className="btn-danger px-2.5 py-1 text-xs"
                   disabled={busy}
-                  onClick={() =>
-                    window.confirm(t('배정을 해제하고 키도 지울까요?')) && act(() => api(`/apps/${app.id}/redis`, { method: 'DELETE', body: { flush: true } }), t('해제했습니다'))
+                  onClick={async () =>
+                    (await confirmDialog(t('배정을 해제하고 키도 지울까요?'))) &&
+                    act(() => api(`/apps/${app.id}/redis`, { method: 'DELETE', body: { flush: true } }), t('해제했습니다'))
                   }
                 >
                   {t('해제')}
@@ -345,7 +353,7 @@ export function BackupTable({ rows, loading, onChanged, showApp = false }) {
                             : b.kind === 'files'
                               ? t('사이트 파일(htdocs)을 이 백업으로 통째로 교체합니다')
                               : t('data 디렉토리를 이 백업으로 교체합니다 (서비스 잠시 중지)')
-                        if (!window.confirm(t('{what}. 계속할까요?', { what }))) return
+                        if (!(await confirmDialog(t('{what}. 계속할까요?', { what })))) return
                         try {
                           await post(`/backups/${b.id}/restore`)
                           toast.push(t('복원했습니다'), 'success')
@@ -363,7 +371,7 @@ export function BackupTable({ rows, loading, onChanged, showApp = false }) {
                     className="btn-ghost px-2.5 py-1 text-xs"
                     aria-label={t('백업 삭제')}
                     onClick={async () => {
-                      if (!window.confirm(t('이 백업 파일을 삭제할까요?'))) return
+                      if (!(await confirmDialog(t('이 백업 파일을 삭제할까요?')))) return
                       try {
                         await del(`/backups/${b.id}`)
                         onChanged()
@@ -585,7 +593,7 @@ export function CronTab({ app }) {
                         className="btn-ghost px-2.5 py-1 text-xs"
                         aria-label={t('{name} 삭제', { name: j.name })}
                         onClick={async () => {
-                          if (!window.confirm(t("'{name}' 작업을 삭제할까요?", { name: j.name }))) return
+                          if (!(await confirmDialog(t("'{name}' 작업을 삭제할까요?", { name: j.name })))) return
                           try {
                             await del(`/cron/${j.id}`)
                             jobs.reload(true)

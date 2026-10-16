@@ -5,6 +5,7 @@ import { useToast } from '../context/ToastContext'
 import { t } from '../i18n'
 import { del, get, post, put } from '../lib/api'
 import { useFetch, useInterval } from '../lib/useFetch'
+import { confirmDialog } from '../components/Dialog'
 
 // label·desc 는 한국어 원문 (화면에는 t() 로 번역)
 export const LANGS = [
@@ -171,8 +172,9 @@ function LangSection({ lang, rows, candidates, usage, onChanged }) {
                       className="btn-ghost px-2.5 py-1 text-xs text-red-300"
                       disabled={busy}
                       aria-label={t('{lang} {v} 삭제', { lang: lang.label, v: r.version })}
-                      onClick={() =>
-                        window.confirm(t('{lang} {v} 을(를) 서버에서 지울까요?', { lang: lang.label, v: r.version })) && run(() => del(`/runtimes/${r.id}`), t('삭제했습니다'))
+                      onClick={async () =>
+                        (await confirmDialog(t('{lang} {v} 을(를) 서버에서 지울까요?', { lang: lang.label, v: r.version }))) &&
+                        run(() => del(`/runtimes/${r.id}`), t('삭제했습니다'))
                       }
                     >
                       {t('삭제')}

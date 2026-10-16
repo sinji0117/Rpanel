@@ -8,6 +8,7 @@ import { shortSha } from '../lib/format'
 import { useFetch, useInterval } from '../lib/useFetch'
 import { ProjectFormModal } from './Projects'
 import { t, tx } from '../i18n'
+import { confirmDialog } from '../components/Dialog'
 
 export default function ProjectDetail() {
   const { id } = useParams()
@@ -49,7 +50,7 @@ export default function ProjectDetail() {
             <button
               className="btn-ghost"
               onClick={async () => {
-                if (!window.confirm(t("프로젝트 '{name}' 를 삭제할까요?", { name: p.name }))) return
+                if (!(await confirmDialog(t("프로젝트 '{name}' 를 삭제할까요?", { name: p.name })))) return
                 try {
                   await del(`/projects/${id}`)
                   toast.push(t('프로젝트 삭제됨'), 'success')

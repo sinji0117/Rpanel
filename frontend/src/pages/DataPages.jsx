@@ -8,6 +8,7 @@ import { useFetch, useInterval } from '../lib/useFetch'
 import { BackupTable, DbCredentials, Secret } from './AppTabs'
 import { BackupJobs } from './BackupJobs'
 import { t, tx } from '../i18n'
+import { confirmDialog } from '../components/Dialog'
 
 const PRIV = { all: '읽기·쓰기', read: '읽기 전용' }
 
@@ -270,9 +271,13 @@ function DatabaseCard({ db, apps, reload, showCred }) {
           <button
             className="btn-danger px-2.5 py-1 text-xs"
             disabled={busy}
-            onClick={() => {
-              const typed = window.prompt(t('DB와 모든 데이터, 이 DB의 계정이 모두 삭제됩니다. 삭제하려면 DB 이름을 입력하세요: {name}', { name: db.name }))
-              if (typed === db.name) act(() => del(`/databases/${db.id}`), t('{name} 삭제됨', { name: db.name }))
+            onClick={async () => {
+              const ok = await confirmDialog(t('데이터베이스 {name} 와(과) 모든 데이터, 이 DB의 계정이 모두 삭제됩니다. 되돌릴 수 없습니다.', { name: db.name }), {
+                title: t('데이터베이스 삭제'),
+                requireText: db.name,
+                danger: true,
+              })
+              if (ok) act(() => del(`/databases/${db.id}`), t('{name} 삭제됨', { name: db.name }))
             }}
           >
             {t('삭제')}
@@ -304,7 +309,7 @@ function DatabaseCard({ db, apps, reload, showCred }) {
                   className="btn-ghost mr-1.5 px-2.5 py-1 text-xs"
                   disabled={busy}
                   onClick={async () => {
-                    if (!window.confirm(t('{username} 의 비밀번호를 새로 만들까요? 이 계정을 쓰는 프로그램 설정도 바꿔야 합니다.', { username: u.username }))) return
+                    if (!(await confirmDialog(t('{username} 의 비밀번호를 새로 만들까요? 이 계정을 쓰는 프로그램 설정도 바꿔야 합니다.', { username: u.username })))) return
                     const r = await act(() => (u.primary ? post(`/databases/${db.id}/password`) : post(`/databases/${db.id}/users/${u.id}/password`)), t('비밀번호를 바꿨습니다'))
                     if (r?.url)
                       showCred({
@@ -321,8 +326,8 @@ function DatabaseCard({ db, apps, reload, showCred }) {
                     className="btn-ghost px-2.5 py-1 text-xs text-red-300"
                     disabled={busy}
                     aria-label={t('{username} 계정 삭제', { username: u.username })}
-                    onClick={() =>
-                      window.confirm(t('계정 {username} 을(를) 삭제할까요?', { username: u.username })) &&
+                    onClick={async () =>
+                      (await confirmDialog(t('계정 {username} 을(를) 삭제할까요?', { username: u.username }))) &&
                       act(() => del(`/databases/${db.id}/users/${u.id}`), t('{username} 삭제됨', { username: u.username }))
                     }
                   >
@@ -492,7 +497,7 @@ function RedisUsers({ users, reload, showCred }) {
                     className="btn-ghost mr-1.5 px-2.5 py-1 text-xs"
                     disabled={busy}
                     onClick={async () => {
-                      if (!window.confirm(t('{username} 의 비밀번호를 새로 만들까요?', { username: u.username }))) return
+                      if (!(await confirmDialog(t('{username} 의 비밀번호를 새로 만들까요?', { username: u.username })))) return
                       const r = await act(() => post(`/redis-users/${u.id}/password`), t('비밀번호를 바꿨습니다'))
                       if (r?.url)
                         showCred({
@@ -508,8 +513,8 @@ function RedisUsers({ users, reload, showCred }) {
                     className="btn-ghost px-2.5 py-1 text-xs text-red-300"
                     disabled={busy}
                     aria-label={t('Redis 계정 {username} 삭제', { username: u.username })}
-                    onClick={() =>
-                      window.confirm(t('Redis 계정 {username} 을(를) 삭제할까요? (저장된 키는 남습니다)', { username: u.username })) &&
+                    onClick={async () =>
+                      (await confirmDialog(t('Redis 계정 {username} 을(를) 삭제할까요? (저장된 키는 남습니다)', { username: u.username }))) &&
                       act(() => del(`/redis-users/${u.id}`), t('{username} 삭제됨', { username: u.username }))
                     }
                   >

@@ -7,6 +7,7 @@ import { t } from '../i18n'
 import { del, get, post, put } from '../lib/api'
 import { ago, dateTime } from '../lib/format'
 import { useFetch } from '../lib/useFetch'
+import { confirmDialog } from '../components/Dialog'
 
 function AdminModal({ initial, onClose, onSaved }) {
   const editing = !!initial
@@ -118,7 +119,7 @@ export default function AdminsPage() {
                           className="btn-ghost px-2.5 py-1 text-xs text-red-300"
                           aria-label={t('{email} 삭제', { email: u.email })}
                           onClick={async () => {
-                            if (!window.confirm(t('관리자 {email} 을(를) 삭제할까요? 바로 로그아웃됩니다.', { email: u.email }))) return
+                            if (!(await confirmDialog(t('관리자 {email} 을(를) 삭제할까요? 바로 로그아웃됩니다.', { email: u.email })))) return
                             try {
                               await del(`/users/${u.id}`)
                               toast.push(t('삭제했습니다'), 'success')

@@ -1,6 +1,23 @@
 import { expect, test } from '@playwright/test'
 import { createMockBackend } from './mockApi'
 
+/** 패널의 확인·입력 팝업에 자동으로 "확인" (이름 입력이 필요한 삭제는 그 이름을 넣음) */
+async function acceptPopups(page, promptValue = '') {
+  await page.addLocatorHandler(
+    page.getByRole('alertdialog'),
+    async (dlg) => {
+      const req = dlg.locator('#dlg-require')
+      if (await req.count()) await req.fill((await req.getAttribute('placeholder')) ?? '')
+      else {
+        const input = dlg.locator('input')
+        if ((await input.count()) && !(await input.inputValue())) await input.fill(promptValue)
+      }
+      await dlg.locator('button[type=submit]').click()
+    },
+    { noWaitAfter: true, times: 50 },
+  )
+}
+
 test('최초 설정 → 대시보드 실시간 지표', async ({ page }) => {
   const backend = createMockBackend({ needsSetup: true })
   await backend.install(page)
@@ -314,7 +331,7 @@ test('Rust 사이트 만들기 → 접속 정보 → 실행 파일 업로드·�
   await expect(page.getByText('Jan 14 00:00:00 2027 GMT')).toBeVisible()
 
   // 사이트 계정: 기본 계정 + 추가 계정 만들기 → 잠금 → 비밀번호 → 삭제
-  page.on('dialog', (d) => d.accept(d.type() === 'prompt' ? '' : undefined))
+  await acceptPopups(page)
   await page.getByRole('tab', { name: '사이트 계정' }).click()
   const accounts = page.getByRole('table', { name: '사이트 계정 목록' })
   await expect(accounts.getByText('shop', { exact: true })).toBeVisible()
@@ -349,7 +366,7 @@ test('Rust 사이트 만들기 → 접속 정보 → 실행 파일 업로드·�
 test('DB·Redis 계정 추가·삭제, 백업 예약 추가·수정·실행·삭제', async ({ page }) => {
   const backend = seededBackend()
   await backend.install(page)
-  page.on('dialog', (d) => d.accept(d.type() === 'prompt' ? 'shop' : undefined))
+  await acceptPopups(page)
   await page.goto('/mariadb')
 
   // 앱에 연결하지 않은 DB 만들기 → 접속 정보 창
@@ -456,7 +473,7 @@ test('관리자 추가·수정·삭제', async ({ page }) => {
   const backend = createMockBackend()
   backend.db.loggedIn = true
   await backend.install(page)
-  page.on('dialog', (d) => d.accept())
+  await acceptPopups(page)
   await page.goto('/')
   await page.getByRole('link', { name: '관리자' }).click()
   const list = page.getByRole('table', { name: '관리자 목록' })
@@ -516,7 +533,7 @@ test('테마 낮·밤 전환과 영어 전환', async ({ page }) => {
 test('버전 표시 (지금 · GitHub) 와 런타임 버전 설치·기본 변경·앱별 선택', async ({ page }) => {
   const backend = seededBackend()
   await backend.install(page)
-  page.on('dialog', (d) => d.accept())
+  await acceptPopups(page)
   await page.goto('/')
   await expect(page.getByTestId('update-badge')).toHaveText('새 버전 v0.5.0')
   await expect(page.getByTestId('version-current')).toHaveText('v0.4.0')
@@ -629,7 +646,7 @@ test('알림: 종 아이콘 · 목록 · 설정 · 시험 알림, 메뉴 순서,
     },
   )
   await backend.install(page)
-  page.on('dialog', (d) => d.accept())
+  await acceptPopups(page)
   await page.goto('/')
 
   // 메뉴 순서: … 로그 · 런타임 · 설정 · 관리자
@@ -686,4 +703,32 @@ test('https Git 주소 → SSH 주소로 바꾸기 안내', async ({ page }) => 
   await expect(page.getByText('Git 주소를 git@github.com:sinji0117/bandiuri.git 로 바꿨습니다')).toBeVisible()
   await expect(page.getByTestId('https-warning')).toHaveCount(0)
   expect(backend.db.apps.find((a) => a.id === 2).git_url).toBe('git@github.com:sinji0117/bandiuri.git')
+})
+
+test('MariaDB 삭제: 이름을 입력해야 삭제되는 팝업 (브라우저 alert 없음)', async ({ page }) => {
+  const backend = seededBackend()
+  backend.db.dbs.push({ id: 30, app_id: null, name: 'shopdb', username: 'shopdb', env_key: 'DATABASE_URL', created_at: '' })
+  await backend.install(page)
+  let nativeDialogs = 0
+  page.on('dialog', (d) => (nativeDialogs++, d.dismiss()))
+  await page.goto('/mariadb')
+  const card = page.getByTestId('db-shopdb')
+  await card.getByRole('button', { name: '삭제', exact: true }).click()
+  const dlg = page.getByRole('alertdialog', { name: '데이터베이스 삭제' })
+  await expect(dlg).toContainText('shopdb')
+  const ok = dlg.getByRole('button', { name: '삭제', exact: true })
+  await expect(ok).toBeDisabled()
+  // 취소하면 그대로
+  await dlg.getByRole('button', { name: '취소' }).click()
+  await expect(dlg).toHaveCount(0)
+  await expect(card).toBeVisible()
+  // 이름을 정확히 넣어야 삭제 버튼이 켜짐
+  await card.getByRole('button', { name: '삭제', exact: true }).click()
+  await dlg.getByLabel('확인을 위해 shopdb 를 입력하세요').fill('shop')
+  await expect(ok).toBeDisabled()
+  await dlg.getByLabel('확인을 위해 shopdb 를 입력하세요').fill('shopdb')
+  await ok.click()
+  await expect(page.getByText('shopdb 삭제됨')).toBeVisible()
+  await expect(page.getByTestId('db-shopdb')).toHaveCount(0)
+  expect(nativeDialogs).toBe(0)
 })

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { t } from '../i18n'
+import { promptDialog } from './Dialog'
 
 const STATUS = {
   running: { label: '실행 중', cls: 'text-signal bg-signal/10 border-signal/30', dot: 'bg-signal' },
@@ -194,7 +195,12 @@ export function CopyButton({ text, label = t('복사') }) {
           setTimeout(() => setDone(false), 1500)
         } catch {
           // http(비보안 컨텍스트)에서는 clipboard API가 막힐 수 있음
-          window.prompt(t('복사하세요'), text)
+          promptDialog(t('자동 복사가 안 됩니다. 아래 내용을 선택해서 복사하세요 (Ctrl+C).'), {
+            title: t('복사하세요'),
+            defaultValue: text,
+            readOnly: true,
+            confirmText: t('닫기'),
+          })
         }
       }}
     >

@@ -68,6 +68,49 @@ info() { printf '  %s\n' "$*"; }
 warn() { printf '\033[1;33m! %s\033[0m\n' "$*"; }
 die()  { printf '\033[1;31m✘ %s\033[0m\n' "$*" >&2; exit 1; }
 
+# ── 진행 표시: 단계 번호 + 진행 바, 오래 걸리는 명령은 경과 시간 표시 ──
+# (터미널 글꼴에 따라 깨지지 않도록 ASCII 문자만 사용)
+STEP=0
+STEP_TOTAL="${STEP_TOTAL:-8}"
+STEP_LABEL="${RPANEL_STEP_LABEL:-}"
+TTY=0; [[ -t 1 ]] && TTY=1
+bar() { # bar <현재> <전체> <폭>
+  local n="$1" total="$2" w="${3:-30}" fill
+  fill=$(( n * w / total ))
+  printf '[%s%s] %3d%%' "$(printf '%*s' "$fill" '' | tr ' ' '#')" "$(printf '%*s' "$(( w - fill ))" '' | tr ' ' '-')" $(( n * 100 / total ))
+}
+step() { # step <제목> — 다음 단계로
+  STEP=$(( STEP + 1 ))
+  printf '\n\033[1;32m%s%s %d/%d  %s\033[0m\n' "$STEP_LABEL" "$(bar "$STEP" "$STEP_TOTAL")" "$STEP" "$STEP_TOTAL" "$*"
+}
+# spin <설명> <명령…> — 명령 출력은 로그 파일로, 화면에는 경과 시간. 실패하면 로그 끝부분을 보여 주고 실패 반환
+SPIN_LOG="${SPIN_LOG:-/var/log/rpanel-install.log}"
+spin() {
+  local msg="$1"; shift
+  local start=$SECONDS pid rc i=0 el frames='|/-\'
+  printf '\n==== %s: %s\n' "$(date '+%F %T')" "$msg" >> "$SPIN_LOG" 2>/dev/null || SPIN_LOG=/dev/null
+  local from=0; [[ "$SPIN_LOG" != /dev/null ]] && from=$(wc -l < "$SPIN_LOG")
+  "$@" >> "$SPIN_LOG" 2>&1 &
+  pid=$!
+  if (( TTY )); then
+    while kill -0 "$pid" 2>/dev/null; do
+      el=$(( SECONDS - start ))
+      printf '\r  %s %s  %d분 %02d초 ' "${frames:i++%4:1}" "$msg" $(( el / 60 )) $(( el % 60 ))
+      sleep 0.5
+    done
+  fi
+  if wait "$pid"; then rc=0; else rc=$?; fi
+  el=$(( SECONDS - start ))
+  if (( TTY )); then printf '\r\033[K'; fi
+  if (( rc == 0 )); then
+    printf '  %s (%d분 %02d초)\n' "$msg" $(( el / 60 )) $(( el % 60 ))
+  else
+    printf '\033[1;31m  %s — 실패 (로그: %s)\033[0m\n' "$msg" "$SPIN_LOG"
+    if [[ "$SPIN_LOG" != /dev/null ]]; then tail -n +"$(( from + 1 ))" "$SPIN_LOG" | tail -n 30 | sed 's/^/    /'; fi
+  fi
+  return "$rc"
+}
+
 [[ $EUID -eq 0 ]] || die "root 로 실행하세요: sudo $0"
 . /etc/os-release
 [[ "${ID:-}" == "ubuntu" ]] || warn "Ubuntu 24.04 기준 스크립트입니다 — 현재: ${PRETTY_NAME:-unknown}"
@@ -95,11 +138,12 @@ fi
 info "설치 모드: $EDGE${PROXY_IP:+ (앞단 프록시 $PROXY_IP)}"
 
 # ───────────────────────── 1. 기본 ─────────────────────────
-say "1/8 기본 패키지"
-apt-get update -q >/dev/null
-apt-get install -y -q curl ca-certificates gnupg git rsync openssl sudo build-essential pkg-config libssl-dev \
+STEP_TOTAL=$(( 8 + MONGO ))
+step "기본 패키지"
+spin "패키지 목록 받기 (apt-get update)" apt-get update -q || die "apt-get update 실패"
+spin "기본 패키지 설치 (Nginx · MariaDB · Redis · Python …)" apt-get install -y -q curl ca-certificates gnupg git rsync openssl sudo build-essential pkg-config libssl-dev \
   openssh-client openssh-server nginx mariadb-server mariadb-client redis-server ufw certbot unzip zip \
-  python3 python3-venv python3-pip python3-dev acl xz-utils >/dev/null
+  python3 python3-venv python3-pip python3-dev acl xz-utils || die "기본 패키지 설치 실패"
 # 가상머신이면 게스트 에이전트 (없어도 무관)
 apt-get install -y -q qemu-guest-agent >/dev/null 2>&1 || true
 # 시간대가 UTC 기본값이면 서울로 (이미 정했다면 유지)
@@ -109,7 +153,7 @@ systemctl enable --now qemu-guest-agent >/dev/null 2>&1 || true
 info "$(nginx -v 2>&1) · $(mariadb --version | awk '{print $5}' | tr -d ,) · $(redis-server --version | awk '{print $3}')"
 
 # ───────────────────────── 2. MariaDB ─────────────────────────
-say "2/8 MariaDB"
+step "MariaDB"
 systemctl enable --now mariadb >/dev/null 2>&1 || true
 # 다른 설정 파일보다 나중에 읽히도록 z- 접두어 (bind-address 를 덮어쓰는 설정이 있어도 확실히 적용)
 cat > /etc/mysql/mariadb.conf.d/z-rpanel-bind.cnf <<'EOF'
@@ -169,7 +213,7 @@ else
 fi
 
 # ───────────────────────── 3. Redis ─────────────────────────
-say "3/8 Redis"
+step "Redis"
 RCONF=/etc/redis/redis.conf
 [[ -f $RCONF ]] || die "$RCONF 가 없습니다"
 redis_set() { # 활성 줄만 지우고 끝에 다시 씀 (주석 예시는 보존)
@@ -208,7 +252,7 @@ fi
 # 패널 로그 저장 + 프로젝트용 MongoDB. 127.0.0.1 에서만, 인증 필수. root 권한 관리자 계정을 패널에 넘김.
 MONGO_URL_V="$(envget MONGODB_URL)"
 if (( MONGO )); then
-  say "3-1 MongoDB"
+  step "MongoDB"
   ARCH="$(dpkg --print-architecture)"
   if [[ "$ARCH" == amd64 ]] && ! grep -qw avx /proc/cpuinfo; then
     warn "이 CPU(가상머신)에 AVX 기능이 없어 MongoDB 5 이상을 실행할 수 없습니다 — MongoDB 설치를 건너뜁니다"
@@ -220,8 +264,8 @@ if (( MONGO )); then
         || die "MongoDB 저장소 키를 받지 못했습니다 (인터넷 연결 확인, 또는 --no-mongodb)"
       echo "deb [ arch=amd64,arm64 signed-by=/usr/share/keyrings/mongodb-server-8.0.gpg ] https://repo.mongodb.org/apt/ubuntu noble/mongodb-org/8.0 multiverse" \
         > /etc/apt/sources.list.d/mongodb-org-8.0.list
-      apt-get update -q >/dev/null
-      apt-get install -y -q mongodb-org >/dev/null || die "MongoDB 설치 실패 (--no-mongodb 로 건너뛸 수 있습니다)"
+      spin "MongoDB 저장소 갱신" apt-get update -q || die "apt-get update 실패"
+      spin "MongoDB 설치" apt-get install -y -q mongodb-org || die "MongoDB 설치 실패 (--no-mongodb 로 건너뛸 수 있습니다)"
     fi
     MCONF=/etc/mongod.conf
     # 바인드는 127.0.0.1 만
@@ -251,19 +295,19 @@ else
 fi
 
 # ───────────────────────── 4. Node.js ─────────────────────────
-say "4/8 Node.js 22"
+step "Node.js 22"
 node_ok() {
   command -v node >/dev/null && command -v npm >/dev/null && node -e 'const [a,b]=process.versions.node.split(".").map(Number); process.exit((a>22||(a===22&&b>=12)||(a===20&&b>=19))?0:1)'
 }
 if ! node_ok; then
-  curl -fsSL https://deb.nodesource.com/setup_22.x | bash - >/dev/null
-  apt-get install -y -q nodejs >/dev/null
+  spin "Node.js 저장소 추가" bash -c "curl -fsSL https://deb.nodesource.com/setup_22.x | bash -" || die "Node.js 저장소 추가 실패"
+  spin "Node.js 설치" apt-get install -y -q nodejs || die "Node.js 설치 실패"
 fi
 node_ok || die "Node.js 20.19+/22.12+ 설치 실패 (현재: $(node -v 2>/dev/null || echo 없음))"
 info "node $(node -v) · npm $(npm -v)"
 
 # ───────────────────────── 5. 사용자 · 빌드 ─────────────────────────
-say "5/8 사용자 · Rust · 빌드"
+step "사용자 · Rust · 빌드"
 id rpanel >/dev/null 2>&1 || useradd --system --home-dir /var/lib/rpanel --create-home --shell /usr/sbin/nologin rpanel
 id rpanel-app >/dev/null 2>&1 || useradd --system --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin rpanel-app
 install -d -o rpanel -g rpanel -m 0755 /var/lib/rpanel /var/lib/rpanel/builds /var/lib/rpanel/apps /var/lib/rpanel/www
@@ -291,7 +335,7 @@ if [[ ! -x $CARGO ]]; then
   curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs -o "$RUSTUP_INIT" \
     || die "Rust 설치 파일을 받지 못했습니다 — 인터넷 연결(https://sh.rustup.rs)을 확인하세요"
   chmod 0644 "$RUSTUP_INIT"
-  as_rpanel sh "$RUSTUP_INIT" -y --profile minimal --no-modify-path >/dev/null \
+  spin "Rust 설치 (rustup)" as_rpanel sh "$RUSTUP_INIT" -y --profile minimal --no-modify-path \
     || { rm -f "$RUSTUP_INIT"; die "Rust 설치에 실패했습니다 — 인터넷 연결을 확인하고 다시 실행하세요"; }
   rm -f "$RUSTUP_INIT"
 fi
@@ -304,11 +348,12 @@ if [[ $BUILD -eq 1 ]]; then
   install -d -o rpanel -g rpanel -m 0755 "$SRC"
   rsync -a --delete --exclude .git --exclude target --exclude node_modules --exclude dist "$REPO/" "$SRC/"
   chown -R rpanel:rpanel "$SRC"
-  info "백엔드 빌드 (cargo build --release) — 처음엔 5~10분 걸립니다"
-  as_rpanel bash -c "cd '$SRC/backend' && '$CARGO' build --release --locked --quiet --bins" \
+  info "처음 빌드는 5~10분, 다음부터는 바뀐 부분만 빌드합니다"
+  spin "백엔드 빌드 (cargo build --release)" as_rpanel bash -c "cd '$SRC/backend' && '$CARGO' build --release --locked --quiet --bins" \
     || die "백엔드 빌드에 실패했습니다 (위 오류 참고)"
-  info "프런트 빌드 (React 19 + Vite + Tailwind 4)"
-  as_rpanel bash -c "cd '$SRC/frontend' && npm ci --no-audit --no-fund --loglevel=error >/dev/null && npm run build >/dev/null" \
+  spin "화면 패키지 설치 (npm ci)" as_rpanel bash -c "cd '$SRC/frontend' && npm ci --no-audit --no-fund --loglevel=error" \
+    || die "화면 패키지 설치에 실패했습니다 (위 오류 참고)"
+  spin "화면 빌드 (npm run build)" as_rpanel bash -c "cd '$SRC/frontend' && npm run build" \
     || die "화면(프런트) 빌드에 실패했습니다 (위 오류 참고)"
 elif [[ -x "$REPO/backend/target/release/rpanel" && -f "$REPO/frontend/dist/index.html" ]]; then
   SRC="$REPO"
@@ -318,7 +363,7 @@ fi
 [[ -f "$SRC/frontend/dist/index.html" ]] || die "프런트 빌드 결과가 없습니다: $SRC/frontend/dist"
 
 # ───────────────────────── 6. 설치 ─────────────────────────
-say "6/8 패널 설치"
+step "패널 설치"
 install -m 0755 -o root -g root "$SRC/backend/target/release/rpanel" /usr/local/bin/rpanel
 install -d -m 0755 /usr/share/rpanel/www
 rsync -a --delete "$SRC/frontend/dist/" /usr/share/rpanel/www/
@@ -522,7 +567,7 @@ EOF
 fi
 
 # ───────────────────────── 7. 시작 ─────────────────────────
-say "7/8 패널 시작"
+step "패널 시작"
 systemctl restart rpanel
 ok=0
 for _ in $(seq 1 30); do
@@ -533,7 +578,7 @@ done
 info "패널 동작 확인 (db·redis ok)"
 
 # ───────────────────────── 8. 방화벽 ─────────────────────────
-say "8/8 방화벽 (ufw)"
+step "방화벽 (ufw)"
 if [[ $FIREWALL -eq 1 ]]; then
   # 지금 SSH 로 접속해 있는 주소는 잠기지 않도록 허용 (sudo·파이프 실행에서도 동작하도록 소켓에서 직접 읽음)
   SSH_FROM="$(ss -Htn state established '( sport = :22 )' 2>/dev/null | awk '{print $4}' | sed -E 's/:[0-9]+$//; s/^\[//; s/\]$//; s/^::ffff://' | sort -u | tr '\n' ' ')"

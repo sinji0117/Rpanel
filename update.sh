@@ -26,6 +26,15 @@ say()  { printf '\n\033[1;32m▶ %s\033[0m\n' "$*"; }
 info() { printf '  %s\n' "$*"; }
 warn() { printf '\033[1;33m! %s\033[0m\n' "$*"; }
 die()  { printf '\033[1;31m✘ %s\033[0m\n' "$*" >&2; exit 1; }
+# 업데이트 단계 표시 (진행 바) — 설치 단계는 install.sh 가 따로 표시
+USTEP=0
+# 새 소스로 다시 실행된 두 번째 단계는 '새 버전 확인' 다음부터
+if [[ "${RPANEL_UPDATE_STAGE:-1}" == 2 ]]; then USTEP=1; fi
+ustep() {
+  USTEP=$(( USTEP + 1 ))
+  local w=30 fill=$(( USTEP * 30 / 3 ))
+  printf '\n\033[1;36m업데이트 [%s%s] %d/3  %s\033[0m\n' "$(printf '%*s' "$fill" '' | tr ' ' '#')" "$(printf '%*s' "$(( w - fill ))" '' | tr ' ' '-')" "$USTEP" "$*"
+}
 
 CHECK=0
 FORCE=0
@@ -45,7 +54,7 @@ done
 
 # ── 1. 최신 소스 받기 (두 번째 실행 단계에서는 생략) ──
 if [[ "${RPANEL_UPDATE_STAGE:-1}" != 2 ]]; then
-  say "새 버전 확인"
+  ustep "새 버전 확인"
   command -v git >/dev/null || { apt-get update -q >/dev/null; apt-get install -y -q git >/dev/null; }
   if [[ -d "$SRC/.git" ]]; then
     git -C "$SRC" remote set-url origin "$REPO_URL"
@@ -74,7 +83,7 @@ fi
 [[ -f "$SRC/deploy/install.sh" ]] || die "소스가 올바르지 않습니다: $SRC"
 
 # ── 2. 백업 ──
-say "업데이트 전 백업"
+ustep "업데이트 전 백업"
 STAMP="$(date +%Y%m%d-%H%M%S)"
 install -d -o root -g root -m 0700 "$KEEP"
 DB_NAME="$(grep -E '^DATABASE_URL=' "$ENVF" | sed -E 's#.*/([^/?]+)(\?.*)?$#\1#')"
@@ -123,7 +132,7 @@ rollback() {
 }
 
 # ── 3. 빌드·설치 (설치할 때 고른 옵션은 /etc/rpanel/rpanel.env 에서 그대로 읽음) ──
-say "새 버전 설치"
-if ! RPANEL_DONE_WORD=업데이트 bash "$SRC/deploy/install.sh" "${PASS[@]}"; then
+ustep "새 버전 설치"
+if ! RPANEL_DONE_WORD=업데이트 RPANEL_STEP_LABEL="  설치 " bash "$SRC/deploy/install.sh" "${PASS[@]}"; then
   rollback
 fi

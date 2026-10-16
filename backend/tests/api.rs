@@ -419,8 +419,8 @@ async fn full_flow() {
         .req(Method::PUT, &format!("/api/apps/{admin_id}"), Some(&t), None, Some(json!({"name":"Back Office","git_url":"https://github.com/a/admin.git","app_role":"front"})))
         .await;
     assert_eq!(r.body["app_role"], "front", "{:?}", r.body);
-    assert_eq!(
-        ctx.req(
+    assert!(ctx
+        .req(
             Method::DELETE,
             &format!("/api/apps/{admin_id}"),
             Some(&t),
@@ -429,9 +429,7 @@ async fn full_flow() {
         )
         .await
         .status
-        .is_success(),
-        true
-    );
+        .is_success());
 
     let r = ctx
         .post(

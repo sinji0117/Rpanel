@@ -1,12 +1,11 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { Link, useNavigate } from 'react-router'
-import { get, post } from '../lib/api'
+import { post } from '../lib/api'
 import { CopyButton, ErrorBox, Field, Modal } from './ui'
 
 export const SITE_TYPES = [
-  { id: 'php', label: 'PHP', desc: 'WordPress · Laravel · 그누보드 등 — PHP-FPM' },
+  { id: 'rust', label: 'Rust', desc: '빌드한 실행 파일을 올리면 서비스로 실행' },
   { id: 'html', label: 'HTML', desc: '정적 사이트 — 파일을 올리면 바로 서비스' },
-  { id: 'node', label: 'Node.js', desc: '파일을 올리고 시작 명령으로 실행' },
   { id: 'proxy', label: '리버스 프록시', desc: '다른 주소(내부 서버·포트)로 연결' },
 ]
 
@@ -30,23 +29,13 @@ export function genPassword(len = 16) {
 
 export default function CreateSiteModal({ open, onClose }) {
   const nav = useNavigate()
-  const [type, setType] = useState('php')
-  const [v, setV] = useState({ domains: '', site_user: '', password: '', php_version: '', start_cmd: 'node server.js', proxy_target: '' })
+  const [type, setType] = useState('rust')
+  const [v, setV] = useState({ domains: '', site_user: '', password: '', start_cmd: './app', proxy_target: '' })
   const [userTouched, setUserTouched] = useState(false)
-  const [php, setPhp] = useState([])
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
   const [done, setDone] = useState(null)
 
-  useEffect(() => {
-    if (!open) return
-    get('/system/php')
-      .then((r) => {
-        setPhp(r.versions)
-        setV((s) => ({ ...s, php_version: s.php_version || r.versions[r.versions.length - 1] || '' }))
-      })
-      .catch(() => setPhp([]))
-  }, [open])
 
   const set = (k) => (e) => {
     const val = e.target.value
@@ -67,8 +56,7 @@ export default function CreateSiteModal({ open, onClose }) {
         if (v.site_user) body.site_user = v.site_user
         if (v.password) body.password = v.password
       }
-      if (type === 'php') body.php_version = v.php_version
-      if (type === 'node') body.start_cmd = v.start_cmd
+      if (type === 'rust') body.start_cmd = v.start_cmd
       if (type === 'proxy') body.proxy_target = v.proxy_target
       const r = await post('/sites', body)
       setDone(r)
@@ -93,6 +81,14 @@ export default function CreateSiteModal({ open, onClose }) {
           <p>
             <b className="font-mono">{done.app.domains.split(' ')[0]}</b> 설정을 적용하고 있습니다.
           </p>
+          {done.app.kind === 'rust' && (
+            <p className="rounded-lg border border-signal/30 bg-signal/5 p-3 text-xs leading-relaxed text-ink-300" data-testid="rust-next">
+              다음 단계: 내 컴퓨터에서 <span className="kbd">cargo build --release</span> → <span className="font-mono">target/release/</span> 의 실행 파일을{' '}
+              <b>파일</b> 탭(또는 SFTP)으로 <span className="font-mono">{done.app.start_cmd?.split(' ')[0]?.replace('./', '') || 'app'}</span> 이름으로 올리고 <b>적용</b>을 누르세요.
+              <br />
+              서버와 같은 리눅스용(보통 x86_64)으로 빌드해야 합니다 — Mac·Windows 에서는 <span className="font-mono">cross</span> 또는 <span className="font-mono">--target x86_64-unknown-linux-gnu</span> 를 쓰세요.
+            </p>
+          )}
           {done.site_user && (
             <div className="rounded-lg border border-ink-700 bg-ink-950 p-4">
               <p className="mb-2 text-xs text-ink-400">SSH · SFTP 접속 정보 (파일 업로드용)</p>
@@ -162,7 +158,7 @@ export default function CreateSiteModal({ open, onClose }) {
             ))}
           </div>
           <p className="mt-2 text-xs text-ink-400">
-            Git 저장소에서 빌드하는 앱(Rust·React 등)은{' '}
+            Git 저장소에서 서버가 직접 빌드하게 하려면(cargo build · npm run build){' '}
             <Link to="/projects" className="text-signal hover:underline" onClick={close}>
               프로젝트
             </Link>
@@ -200,19 +196,8 @@ export default function CreateSiteModal({ open, onClose }) {
           </div>
         )}
 
-        {type === 'php' && (
-          <Field label="PHP 버전" htmlFor="site-php" hint={php.length ? '나중에 PHP 탭에서 바꿀 수 있습니다' : '설치된 PHP-FPM 이 없습니다 — install.sh --php=8.3'}>
-            <select id="site-php" className="input" value={v.php_version} onChange={set('php_version')}>
-              {php.map((x) => (
-                <option key={x} value={x}>
-                  PHP {x}
-                </option>
-              ))}
-            </select>
-          </Field>
-        )}
-        {type === 'node' && (
-          <Field label="시작 명령" htmlFor="site-start" hint="PORT 환경변수로 받은 포트에서 실행하세요 (예시 server.js 가 만들어집니다)">
+        {type === 'rust' && (
+          <Field label="시작 명령" htmlFor="site-start" hint="문서 루트에 올린 실행 파일 — 예: ./app (PORT 환경변수의 포트로 127.0.0.1 에서 열어야 합니다)">
             <input id="site-start" className="input font-mono" required value={v.start_cmd} onChange={set('start_cmd')} />
           </Field>
         )}

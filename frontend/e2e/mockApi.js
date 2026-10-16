@@ -115,7 +115,6 @@ export function createMockBackend({ needsSetup = false } = {}) {
       return json(route, 201, a)
     }
 
-    if (path === '/system/php') return json(route, 200, { versions: ['8.2', '8.3'] })
     if (path === '/system/edge') return json(route, 200, { edge_mode: 'direct', trusted_proxy: '', ssl_available: true })
     if (path === '/sites' && method === 'POST') {
       const domains = body.domains.trim().toLowerCase().split(/[\s,]+/)
@@ -127,14 +126,13 @@ export function createMockBackend({ needsSetup = false } = {}) {
         id: id(), project_id: null, name: domains[0], slug: domains[0].replace(/\./g, '-'), kind,
         source: body.type === 'proxy' ? 'none' : 'files', git_url: null, git_branch: 'main', domains: domains.join(' '),
         site_user: user, site_root: user ? `/home/${user}/htdocs/${domains[0]}` : null, web_root: '',
-        php_version: body.php_version || null, php_memory_mb: 256, php_upload_mb: 64, php_max_exec: 60, php_max_children: 10,
         proxy_target: body.proxy_target || null, start_cmd: body.start_cmd || null, build_cmd: null, health_path: '/',
-        port: kind === 'node' ? 8150 : null, status: 'running', ssl_mode: 'none', force_https: false, client_max_body_mb: 64,
+        port: kind === 'rust' ? 8150 : null, status: kind === 'rust' ? 'idle' : 'running', ssl_mode: 'none', force_https: false, client_max_body_mb: 64,
         current_release: 1, redis_db: null, backup_schedule: 'off', backup_keep: 7,
       }
       db.apps.push(a)
       db.env[a.id] = []
-      db.files[a.id] = { [`htdocs/${domains[0]}`]: { 'index.php': '<?php echo "hi";' } }
+      db.files[a.id] = { [`htdocs/${domains[0]}`]: kind === 'rust' ? { 'README.txt': 'cargo build --release' } : { 'index.html': '<h1>hi</h1>' } }
       return json(route, 201, { app: a, deployment_id: null, site_user: user, generated_password: body.password ? null : 'Gen3ratedPassw0rd' })
     }
 

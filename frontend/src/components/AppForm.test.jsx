@@ -44,9 +44,9 @@ describe('AppForm', () => {
   })
 
   it('edit mode locks slug and hides kind picker', () => {
-    render(<AppForm mode="edit" initial={{ name: 'A', slug: 'a', kind: 'node', start_cmd: 'npm start', git_url: 'x' }} onSubmit={() => {}} />)
+    render(<AppForm mode="edit" initial={{ name: 'A', slug: 'a', kind: 'rust', binary_name: 'a-api', git_url: 'x' }} onSubmit={() => {}} />)
     expect(screen.getByLabelText('Slug')).toBeDisabled()
     expect(screen.queryByRole('radiogroup')).not.toBeInTheDocument()
-    expect(screen.getByLabelText('시작 명령')).toHaveValue('npm start')
+    expect(screen.getByLabelText('바이너리 이름')).toHaveValue('a-api')
   })
 })

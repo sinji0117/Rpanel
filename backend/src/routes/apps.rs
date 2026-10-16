@@ -100,11 +100,6 @@ fn clean(input: &AppInput, kind: AppKind) -> AppResult<Clean> {
     if let Some(c) = &start_cmd {
         validate::command(c).map_err(bad)?;
     }
-    if kind == AppKind::Node && start_cmd.is_none() {
-        return Err(AppError::bad(
-            "Node 앱은 시작 명령이 필요합니다 (예: npm start, node dist/server.js)",
-        ));
-    }
     let binary_name = opt(&input.binary_name);
     if let Some(b) = &binary_name {
         validate::binary_name(b).map_err(bad)?;
@@ -130,11 +125,7 @@ fn clean(input: &AppInput, kind: AppKind) -> AppResult<Clean> {
         git_branch,
         root_dir,
         build_cmd,
-        start_cmd: if kind == AppKind::Node {
-            start_cmd
-        } else {
-            None
-        },
+        start_cmd: None,
         binary_name: if kind == AppKind::Rust {
             binary_name
         } else {
@@ -246,9 +237,9 @@ pub async fn create(
         .kind
         .as_deref()
         .and_then(AppKind::parse)
-        .filter(|k| matches!(k, AppKind::Rust | AppKind::Static | AppKind::Node))
+        .filter(|k| matches!(k, AppKind::Rust | AppKind::Static))
         .ok_or_else(|| {
-            AppError::bad("Git 앱의 kind 는 rust / static / node 중 하나입니다 (PHP·HTML·프록시는 사이트 만들기에서)")
+            AppError::bad("Git 앱의 kind 는 rust / static 중 하나입니다 (업로드형 사이트·프록시는 사이트 만들기에서)")
         })?;
     let c = clean(&input, kind)?;
     let slug = match opt(&input.slug) {
@@ -387,7 +378,7 @@ async fn update_site(
         validate::command(c).map_err(bad)?;
     }
     let start_cmd = match app.kind() {
-        AppKind::Node => {
+        AppKind::Rust => {
             let c = opt(&input.start_cmd).ok_or_else(|| AppError::bad("시작 명령이 필요합니다"))?;
             validate::command(&c).map_err(bad)?;
             Some(c)
@@ -795,13 +786,10 @@ mod tests {
     }
 
     #[test]
-    fn clean_static_and_node_rules() {
+    fn clean_static_rules() {
         let c = clean(&input(), AppKind::Static).unwrap();
         assert_eq!(c.api_proxy_port, Some(8080));
         assert_eq!(c.binary_name, None);
-        let mut i = input();
-        i.start_cmd = None;
-        assert!(clean(&i, AppKind::Node).is_err());
         let mut i = input();
         i.git_url = Some("file:///etc".into());
         assert!(clean(&i, AppKind::Rust).is_err());

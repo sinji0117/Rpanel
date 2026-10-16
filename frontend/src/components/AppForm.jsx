@@ -4,7 +4,6 @@ import { Field } from './ui'
 export const KINDS = [
   { id: 'rust', label: 'Rust', desc: 'cargo build → systemd 서비스 (Axum 등)' },
   { id: 'static', label: 'Static', desc: 'npm run build → Nginx 정적 (React·Vite)' },
-  { id: 'node', label: 'Node', desc: 'npm ci → systemd 서비스' },
 ]
 
 export function slugify(name) {
@@ -47,7 +46,6 @@ export function toPayload(v) {
 const BUILD_PLACEHOLDER = {
   rust: 'cargo build --release',
   static: 'npm run build',
-  node: '(선택) npm run build',
 }
 
 export default function AppForm({ initial, mode = 'create', onSubmit, submitting }) {
@@ -141,11 +139,6 @@ export default function AppForm({ initial, mode = 'create', onSubmit, submitting
       {v.kind === 'rust' && (
         <Field label="바이너리 이름" htmlFor="app-bin" hint="target/release/<이름> — Cargo.toml의 package name (비우면 slug)">
           <input id="app-bin" className="input font-mono" value={v.binary_name ?? ''} onChange={set('binary_name')} placeholder={v.slug || 'hello-api'} />
-        </Field>
-      )}
-      {v.kind === 'node' && (
-        <Field label="시작 명령" htmlFor="app-start" hint="PORT / BIND_ADDR 환경변수가 자동으로 주입됩니다">
-          <input id="app-start" className="input font-mono" required value={v.start_cmd ?? ''} onChange={set('start_cmd')} placeholder="node dist/server.js" />
         </Field>
       )}
       {v.kind === 'static' && (

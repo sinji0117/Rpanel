@@ -194,38 +194,44 @@ test('백업 → 목록, 크론 등록(잘못된 일정 거부), 사이트·Ngin
 })
 
 
-test('CloudPanel 방식 PHP 사이트 만들기 → 접속 정보 → 파일 편집·업로드 → SSL 인증서', async ({ page }) => {
+test('Rust 사이트 만들기 → 접속 정보 → 실행 파일 업로드·편집 → SSL 인증서', async ({ page }) => {
   const backend = createMockBackend()
   backend.db.loggedIn = true
   await backend.install(page)
   await page.goto('/sites')
   await page.getByRole('button', { name: '첫 사이트 만들기' }).click()
   const dialog = page.getByRole('dialog', { name: '사이트 추가' })
-  await expect(dialog.getByRole('radio', { name: /PHP/ })).toHaveAttribute('aria-checked', 'true')
+  await expect(dialog.getByRole('radio', { name: /Rust/ })).toHaveAttribute('aria-checked', 'true')
+  await expect(dialog.getByRole('radio', { name: /PHP/ })).toHaveCount(0)
   await dialog.getByLabel('도메인').fill('Shop.example.com www.shop.example.com')
   await expect(dialog.getByLabel('사이트 유저')).toHaveValue('shop')
-  await expect(dialog.getByLabel('PHP 버전')).toHaveValue('8.3')
+  await expect(dialog.getByLabel('시작 명령')).toHaveValue('./app')
+  await expect(dialog.getByRole('radio', { name: /Node/ })).toHaveCount(0)
   await dialog.getByRole('button', { name: '사이트 만들기' }).click()
 
   const done = page.getByRole('dialog', { name: '사이트를 만들었습니다' })
   await expect(done.getByTestId('generated-password')).toHaveText('Gen3ratedPassw0rd')
   await expect(done.getByText('/home/shop/htdocs/shop.example.com')).toBeVisible()
+  await expect(done.getByTestId('rust-next')).toContainText('cargo build --release')
   await done.getByRole('button', { name: '사이트로 이동' }).click()
 
   // 파일 관리자가 기본 탭
   await expect(page.getByRole('tab', { name: '파일' })).toHaveAttribute('aria-selected', 'true')
   await expect(page.getByRole('button', { name: '적용', exact: true })).toBeVisible()
-  await page.getByRole('button', { name: '· index.php', exact: true }).click()
+  await expect(page.getByRole('tab', { name: '서비스 로그' })).toBeVisible()
+  await expect(page.getByRole('tab', { name: 'PHP', exact: true })).toHaveCount(0)
+  await page.getByRole('button', { name: '· README.txt', exact: true }).click()
   const editor = page.getByLabel('파일 내용')
-  await expect(editor).toHaveValue('<?php echo "hi";')
-  await editor.fill('<?php echo "hello";')
+  await expect(editor).toHaveValue('cargo build --release')
+  await editor.fill('PORT 로 실행')
   await editor.press('Control+s')
   await expect(page.getByText('저장했습니다')).toBeVisible()
-  expect(backend.db.files[Object.keys(backend.db.files)[0]]['htdocs/shop.example.com']['index.php']).toBe('<?php echo "hello";')
+  expect(backend.db.files[Object.keys(backend.db.files)[0]]['htdocs/shop.example.com']['README.txt']).toBe('PORT 로 실행')
   await page.getByRole('button', { name: '닫기' }).click()
 
-  await page.getByLabel('파일 업로드').setInputFiles({ name: 'about.html', mimeType: 'text/html', buffer: Buffer.from('<h1>about</h1>') })
-  await expect(page.getByRole('button', { name: '· about.html', exact: true })).toBeVisible()
+  // 빌드한 실행 파일 업로드
+  await page.getByLabel('파일 업로드').setInputFiles({ name: 'app', mimeType: 'application/octet-stream', buffer: Buffer.from([0x7f, 0x45, 0x4c, 0x46]) })
+  await expect(page.getByRole('button', { name: '· app', exact: true })).toBeVisible()
 
   // SSL: 잘못된 PEM → 오류, 올바른 PEM → 상태 표시
   await page.getByRole('tab', { name: 'SSL' }).click()
@@ -244,7 +250,7 @@ test('CloudPanel 방식 PHP 사이트 만들기 → 접속 정보 → 파일 편
   await page.getByRole('button', { name: '비밀번호 변경' }).click()
   await expect(page.getByText('비밀번호를 바꿨습니다')).toBeVisible()
 
-  // PHP 탭
-  await page.getByRole('tab', { name: 'PHP', exact: true }).click()
-  await expect(page.getByLabel('버전')).toHaveValue('8.3')
+  // 설정: 시작 명령
+  await page.getByRole('tab', { name: '설정' }).click()
+  await expect(page.getByLabel('시작 명령')).toHaveValue('./app')
 })

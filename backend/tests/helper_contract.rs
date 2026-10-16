@@ -45,11 +45,6 @@ fn app(kind: &str) -> App {
         site_user: None,
         site_root: None,
         web_root: "".into(),
-        php_version: None,
-        php_memory_mb: 256,
-        php_upload_mb: 64,
-        php_max_exec: 60,
-        php_max_children: 10,
         proxy_target: None,
         ssl_mode: "none".into(),
         force_https: false,
@@ -119,15 +114,13 @@ fn site(kind: &str) -> String {
 
 #[test]
 fn generated_units_pass() {
-    for kind in ["rust", "node"] {
-        let (ok, err) = validate("validate_unit", &unit(kind), "beripick-api");
-        assert!(ok, "{kind} unit rejected: {err}");
-    }
+    let (ok, err) = validate("validate_unit", &unit("rust"), "beripick-api");
+    assert!(ok, "rust unit rejected: {err}");
 }
 
 #[test]
 fn generated_sites_pass() {
-    for kind in ["rust", "node", "static"] {
+    for kind in ["rust", "static"] {
         let (ok, err) = validate("validate_site", &site(kind), "beripick-api");
         assert!(ok, "{kind} site rejected: {err}\n{}", site(kind));
     }
@@ -366,7 +359,7 @@ fn helper_rejects_bad_db_and_backup_args() {
     assert!(!run(&["run-cron", "app", "1;id"]).status.success());
 }
 
-// ───────────── 파일 사이트 · SSL · PHP 풀 ─────────────
+// ───────────── 파일 사이트 · SSL ─────────────
 
 fn files_app(kind: &str) -> App {
     let mut a = app(kind);
@@ -374,7 +367,6 @@ fn files_app(kind: &str) -> App {
     a.git_url = None;
     a.site_user = Some("beripick".into());
     a.site_root = Some("/home/beripick/htdocs/beripick.com".into());
-    a.php_version = Some("8.3".into());
     a
 }
 
@@ -425,12 +417,12 @@ fn site_of(a: &App) -> String {
 
 #[test]
 fn file_sites_pass() {
-    for kind in ["php", "static", "node"] {
+    for kind in ["rust", "static"] {
         for (ssl, force) in [("none", false), ("letsencrypt", true), ("custom", false)] {
             let mut a = files_app(kind);
             a.ssl_mode = ssl.into();
             a.force_https = force;
-            a.web_root = if kind == "php" {
+            a.web_root = if kind == "static" {
                 "public".into()
             } else {
                 "".into()
@@ -449,7 +441,7 @@ fn file_sites_pass() {
 
 #[test]
 fn dangerous_file_sites_rejected() {
-    let mut a = files_app("php");
+    let mut a = files_app("static");
     a.ssl_mode = "letsencrypt".into();
     let base = site_of(&a);
     let cases = [
@@ -463,17 +455,12 @@ fn dangerous_file_sites_rejected() {
             "root /home/beripick/htdocs/beripick.com/../../..;",
         ),
         base.replace(
-            "fastcgi_pass unix:/run/php/rpanel-beripick-api.sock;",
-            "fastcgi_pass 127.0.0.1:9000;",
+            "try_files $uri $uri/ =404;",
+            "try_files $uri $uri/ =404;\n        include /etc/passwd;",
         ),
         base.replace(
-            "fastcgi_pass unix:/run/php/rpanel-beripick-api.sock;",
-            "fastcgi_pass unix:/run/php/rpanel-other.sock;",
-        ),
-        base.replace("include fastcgi_params;", "include /etc/passwd;"),
-        base.replace(
-            "fastcgi_param HTTPS $rpanel_https if_not_empty;",
-            "fastcgi_param PHP_VALUE \"auto_prepend_file=/tmp/x\";",
+            "try_files $uri $uri/ =404;",
+            "try_files $uri $uri/ =404;\n        fastcgi_pass 127.0.0.1:9000;",
         ),
         base.replace(
             "ssl_certificate /etc/letsencrypt/live/rpanel-beripick-api/fullchain.pem;",
@@ -497,57 +484,31 @@ fn dangerous_file_sites_rejected() {
 }
 
 #[test]
-fn php_pool_contract() {
-    use rpanel::{deploy::templates::php_pool, models::EnvVar};
-    let a = files_app("php");
-    let vars = vec![EnvVar {
-        key: "DB_HOST".into(),
-        value: "127.0.0.1".into(),
-    }];
-    let (pool, _) = php_pool(&a, &vars).unwrap();
-    let (ok, err) = validate_site_reg("validate_pool", &pool, "beripick-api beripick");
-    assert!(ok, "pool rejected: {err}\n{pool}");
-    for bad in [
-        pool.replace("user = beripick", "user = root"),
-        pool.replace(
-            "listen = /run/php/rpanel-beripick-api.sock",
-            "listen = 0.0.0.0:9000",
-        ),
-        format!("{pool}php_admin_value[auto_prepend_file] = /tmp/x.php\n"),
-        format!("{pool}php_admin_value[disable_functions] = \n"),
-        format!("{pool}env[X] = \"$(id)\"\n"),
-        format!("{pool}[other-pool]\nuser = root\n"),
-        format!("{pool}include = /etc/passwd\n"),
-    ] {
-        let (ok, _) = validate_site_reg("validate_pool", &bad, "beripick-api beripick");
-        assert!(!ok, "dangerous pool accepted:\n{bad}");
-    }
-}
-
-#[test]
 fn site_units_contract() {
-    let a = files_app("node");
-    let p = AppPaths::new(Path::new(DATA), &a.slug);
-    let u = systemd_unit(&UnitInput {
-        app: &a,
-        paths: &p,
-        run_user: "rpanel-app",
-        path_env: "/usr/bin:/bin",
-    })
-    .unwrap();
-    let (ok, err) = validate_site_reg("validate_unit", &u, "beripick-api");
-    assert!(ok, "site unit rejected: {err}\n{u}");
-    for bad in [
-        u.replace("User=beripick", "User=root"),
-        u.replace("User=beripick", "User=rpanel-app"),
-        u.replace("ReadWritePaths=/home/beripick", "ReadWritePaths=/"),
-        u.replace(
-            "WorkingDirectory=/home/beripick/htdocs/beripick.com",
-            "WorkingDirectory=/root",
-        ),
-    ] {
-        let (ok, _) = validate_site_reg("validate_unit", &bad, "beripick-api");
-        assert!(!ok, "dangerous site unit accepted:\n{bad}");
+    {
+        let a = files_app("rust");
+        let p = AppPaths::new(Path::new(DATA), &a.slug);
+        let u = systemd_unit(&UnitInput {
+            app: &a,
+            paths: &p,
+            run_user: "rpanel-app",
+            path_env: "/usr/bin:/bin",
+        })
+        .unwrap();
+        let (ok, err) = validate_site_reg("validate_unit", &u, "beripick-api");
+        assert!(ok, "site unit rejected: {err}\n{u}");
+        for bad in [
+            u.replace("User=beripick", "User=root"),
+            u.replace("User=beripick", "User=rpanel-app"),
+            u.replace("ReadWritePaths=/home/beripick", "ReadWritePaths=/"),
+            u.replace(
+                "WorkingDirectory=/home/beripick/htdocs/beripick.com",
+                "WorkingDirectory=/root",
+            ),
+        ] {
+            let (ok, _) = validate_site_reg("validate_unit", &bad, "beripick-api");
+            assert!(!ok, "dangerous site unit accepted:\n{bad}");
+        }
     }
 }
 
@@ -569,7 +530,7 @@ fn helper_rejects_bad_site_args() {
         ("x;id", "a.com"),
     ] {
         assert!(
-            !run(&["site-create", "app", user, domain, "php"])
+            !run(&["site-create", "app", user, domain, "rust"])
                 .status
                 .success(),
             "site-create {user} {domain}"
@@ -578,8 +539,9 @@ fn helper_rejects_bad_site_args() {
     assert!(!run(&["site-create", "app", "okuser", "a.com", "shell"])
         .status
         .success());
-    assert!(!run(&["install-php-pool", "app", "8.3;id"]).status.success());
-    assert!(!run(&["install-php-pool", "app", "9.9"]).status.success());
+    assert!(!run(&["site-create", "app", "okuser", "a.com", "php"])
+        .status
+        .success());
     assert!(!run(&["ssl-issue", "app", "not-an-email", "a.com"])
         .status
         .success());

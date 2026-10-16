@@ -22,7 +22,7 @@ export function parentPath(p) {
   return i < 0 ? '' : p.slice(0, i)
 }
 
-const TEXT_EXT = /\.(php|html?|css|js|mjs|cjs|jsx|ts|tsx|json|md|txt|xml|svg|ya?ml|ini|conf|env|htaccess|sql|sh|py|rb|vue|twig|blade\.php|lock|log|csv|map)$|^\.[a-z]+$/i
+const TEXT_EXT = /\.(rs|toml|html?|css|js|mjs|cjs|jsx|ts|tsx|json|md|txt|xml|svg|ya?ml|ini|conf|env|htaccess|sql|sh|py|rb|vue|lock|log|csv|map)$|^\.[a-z]+$/i
 const ARCHIVE = /\.(zip|tar\.gz|tgz|tar)$/i
 
 // ───────────────────────── 파일 관리자 ─────────────────────────
@@ -149,7 +149,7 @@ export function FileManager({ app }) {
         <button
           className="btn-ghost px-2.5 py-1 text-xs"
           onClick={() => {
-            const n = window.prompt('새 파일 이름 (예: .htaccess, index.php)')
+            const n = window.prompt('새 파일 이름 (예: index.html, config.toml)')
             if (n) setEditing({ path: joinPath(cwd, n), content: '', original: null })
           }}
         >
@@ -471,108 +471,6 @@ export function SslTab({ app, onChanged }) {
   )
 }
 
-// ───────────────────────── PHP ─────────────────────────
-
-export function PhpTab({ app, onSaved }) {
-  const toast = useToast()
-  const versions = useFetch(() => get('/system/php'), [])
-  const [v, setV] = useState({
-    version: app.php_version,
-    memory_mb: app.php_memory_mb,
-    upload_mb: app.php_upload_mb,
-    max_exec: app.php_max_exec,
-    max_children: app.php_max_children,
-  })
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState(null)
-  const [log, setLog] = useState(null)
-  const num = (k) => (e) => setV({ ...v, [k]: Number(e.target.value) })
-
-  return (
-    <div className="space-y-4">
-      <section className="card p-5">
-        <h3 className="font-medium">PHP 설정</h3>
-        <p className="mt-1 text-sm text-ink-400">
-          이 사이트 전용 PHP-FPM 풀(사이트 유저 권한, 요청이 있을 때만 프로세스 실행)에 적용됩니다.
-        </p>
-        <form
-          className="mt-4 grid gap-4 sm:grid-cols-5"
-          onSubmit={async (e) => {
-            e.preventDefault()
-            setBusy(true)
-            setError(null)
-            try {
-              const n = await put(`/apps/${app.id}/php`, v)
-              onSaved(n)
-              toast.push(`PHP ${v.version} 설정을 적용했습니다`, 'success')
-            } catch (err) {
-              setError(err)
-            } finally {
-              setBusy(false)
-            }
-          }}
-        >
-          <Field label="버전" htmlFor="php-v">
-            <select id="php-v" className="input" value={v.version || ''} onChange={(e) => setV({ ...v, version: e.target.value })}>
-              {(versions.data?.versions || [v.version]).map((x) => (
-                <option key={x} value={x}>
-                  PHP {x}
-                </option>
-              ))}
-            </select>
-          </Field>
-          <Field label="memory_limit (MB)" htmlFor="php-mem">
-            <input id="php-mem" type="number" min="32" max="8192" className="input" value={v.memory_mb} onChange={num('memory_mb')} />
-          </Field>
-          <Field label="업로드 최대 (MB)" htmlFor="php-up">
-            <input id="php-up" type="number" min="1" max="10240" className="input" value={v.upload_mb} onChange={num('upload_mb')} />
-          </Field>
-          <Field label="실행 시간 (초)" htmlFor="php-exec">
-            <input id="php-exec" type="number" min="10" max="3600" className="input" value={v.max_exec} onChange={num('max_exec')} />
-          </Field>
-          <Field label="최대 프로세스" htmlFor="php-children">
-            <input id="php-children" type="number" min="1" max="200" className="input" value={v.max_children} onChange={num('max_children')} />
-          </Field>
-          <div className="flex justify-end sm:col-span-5">
-            <button className="btn-primary" disabled={busy}>
-              {busy ? '적용 중…' : '적용'}
-            </button>
-          </div>
-        </form>
-        {error && (
-          <div className="mt-3">
-            <ErrorBox error={error} />
-          </div>
-        )}
-      </section>
-      <section className="card p-5">
-        <div className="flex items-center justify-between">
-          <h3 className="font-medium">PHP 에러 로그</h3>
-          <button
-            className="btn-ghost px-2.5 py-1 text-xs"
-            onClick={async () => {
-              try {
-                const r = await get(`/apps/${app.id}/files/content?path=${encodeURIComponent('logs/php-error.log')}`)
-                setLog(r.content.split('\n').slice(-300).map((text, i) => ({ seq: i + 1, text })))
-              } catch {
-                setLog([])
-              }
-            }}
-          >
-            {log ? '새로고침' : '보기'}
-          </button>
-        </div>
-        <p className="mt-1 font-mono text-xs text-ink-400">~/logs/php-error.log</p>
-        {log && (
-          <div className="mt-3">
-            <LogViewer lines={log} height="h-72" emptyText="에러가 없습니다" />
-          </div>
-        )}
-      </section>
-    </div>
-  )
-}
-
 // ───────────────────────── SSH · SFTP ─────────────────────────
 
 export function SshTab({ app }) {
@@ -716,14 +614,14 @@ export function SiteSettings({ app, onSaved }) {
         <Field label="도메인" htmlFor="s-domains" hint="공백으로 구분. 대표 도메인(폴더 이름)은 바뀌지 않습니다">
           <input id="s-domains" className="input font-mono" required value={v.domains} onChange={set('domains')} />
         </Field>
-        {(app.kind === 'php' || app.kind === 'static') && (
-          <Field label="웹 루트 (하위 폴더)" htmlFor="s-webroot" hint={`${app.site_root}/ 아래에서 서비스할 폴더 — Laravel 은 public`}>
+        {app.kind === 'static' && (
+          <Field label="웹 루트 (하위 폴더)" htmlFor="s-webroot" hint={`${app.site_root}/ 아래에서 서비스할 폴더 — 예: dist, public`}>
             <input id="s-webroot" className="input font-mono" value={v.web_root} onChange={set('web_root')} placeholder="(문서 루트 그대로)" />
           </Field>
         )}
-        {app.kind === 'node' && (
+        {app.kind === 'rust' && (
           <div className="grid gap-4 sm:grid-cols-[1fr_180px]">
-            <Field label="시작 명령" htmlFor="s-start" hint="PORT·BIND_ADDR 가 자동 주입됩니다">
+            <Field label="시작 명령" htmlFor="s-start" hint="문서 루트에 올린 실행 파일 — 예: ./app · PORT·BIND_ADDR 가 자동 주입됩니다">
               <input id="s-start" className="input font-mono" required value={v.start_cmd} onChange={set('start_cmd')} />
             </Field>
             <Field label="헬스체크 경로" htmlFor="s-health">
@@ -731,7 +629,7 @@ export function SiteSettings({ app, onSaved }) {
             </Field>
           </div>
         )}
-        {(app.kind === 'node' || app.kind === 'static') && (
+        {app.kind === 'static' && (
           <Field label="적용 전 실행할 명령 (선택)" htmlFor="s-build" hint="사이트 유저 권한으로 문서 루트에서 실행 — 예: npm ci && npm run build">
             <input id="s-build" className="input font-mono" value={v.build_cmd} onChange={set('build_cmd')} />
           </Field>

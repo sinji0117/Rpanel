@@ -8,7 +8,7 @@ import { del, get, post, put } from '../lib/api'
 import { ago, duration, mergeEnv, parseDotenv, shortSha } from '../lib/format'
 import { useFetch, useInterval } from '../lib/useFetch'
 import { BackupTab, CronTab, DatabaseTab, NginxLogTab } from './AppTabs'
-import { FileManager, PhpTab, SiteSettings, SshTab, SslTab } from './SiteTabs'
+import { FileManager, SiteSettings, SshTab, SslTab } from './SiteTabs'
 
 export default function AppDetail() {
   const { id } = useParams()
@@ -23,7 +23,7 @@ export default function AppDetail() {
   if (app.loading) return <Spinner className="text-ink-400" />
   if (app.error) return <ErrorBox error={app.error} />
   const a = app.data
-  const isService = a.kind === 'rust' || a.kind === 'node'
+  const isService = a.kind === 'rust'
   const isGit = a.source === 'git'
   const isFiles = a.source === 'files'
   const tab = tabState ?? (isGit ? 'deployments' : isFiles ? 'files' : 'settings')
@@ -55,13 +55,12 @@ export default function AppDetail() {
       ? [
           { id: 'files', label: '파일' },
           { id: 'ssl', label: 'SSL' },
-          ...(a.kind === 'php' ? [{ id: 'php', label: 'PHP' }] : []),
           { id: 'ssh', label: 'SSH · SFTP' },
           { id: 'db', label: '데이터베이스' },
           { id: 'backups', label: '백업' },
           { id: 'cron', label: '크론' },
           ...(a.kind !== 'static' ? [{ id: 'env', label: '환경변수' }] : []),
-          ...(a.kind === 'node' ? [{ id: 'logs', label: '서비스 로그' }] : []),
+          ...(isService ? [{ id: 'logs', label: '서비스 로그' }] : []),
           { id: 'nginx', label: 'Nginx 로그' },
           { id: 'deployments', label: '적용 기록' },
           { id: 'settings', label: '설정' },
@@ -102,7 +101,7 @@ export default function AppDetail() {
         actions={
           <>
             {isService && <ServiceButtons app={a} onDone={() => app.reload(true)} />}
-            <button className="btn-primary" onClick={deploy} disabled={deploying || a.status === 'deploying'} title={isGit ? '' : '설정(Nginx·PHP·서비스)을 다시 적용합니다'}>
+            <button className="btn-primary" onClick={deploy} disabled={deploying || a.status === 'deploying'} title={isGit ? '' : '설정(Nginx·서비스)을 다시 적용합니다'}>
               {a.status === 'deploying' ? (isGit ? '배포 중…' : '적용 중…') : isGit ? '배포' : '적용'}
             </button>
           </>
@@ -125,12 +124,6 @@ export default function AppDetail() {
             <div>
               <dt className="inline">사이트 유저 </dt>
               <dd className="inline font-mono text-ink-300">{a.site_user}</dd>
-            </div>
-          )}
-          {a.php_version && a.kind === 'php' && (
-            <div>
-              <dt className="inline">PHP </dt>
-              <dd className="inline font-mono text-ink-300">{a.php_version}</dd>
             </div>
           )}
           {a.proxy_target && (
@@ -165,7 +158,6 @@ export default function AppDetail() {
       {tab === 'git' && <GitTab app={a} />}
       {tab === 'files' && <FileManager app={a} />}
       {tab === 'ssl' && <SslTab app={a} onChanged={() => app.reload(true)} />}
-      {tab === 'php' && <PhpTab app={a} onSaved={(n) => app.setData(n)} />}
       {tab === 'ssh' && <SshTab app={a} />}
       {tab === 'settings' && (isGit ? <SettingsTab app={a} onSaved={(n) => app.setData(n)} /> : <SiteSettings app={a} onSaved={(n) => app.setData(n)} />)}
     </>

@@ -1,4 +1,4 @@
--- CloudPanel/Dokploy 수준 기능: DB·Redis 관리, 백업, 크론
+-- 호스팅 기능: DB·Redis 관리, 백업, 크론
 
 ALTER TABLE apps
     ADD COLUMN redis_db              INT UNSIGNED NULL,

@@ -163,23 +163,18 @@ pub fn systemd_unit(i: &UnitInput) -> anyhow::Result<String> {
             let bin = app.binary_name.as_deref().unwrap_or(&app.slug);
             i.paths.current.join(bin).display().to_string()
         }
-        (AppKind::Node, _) => {
+        (AppKind::Rust, _) => {
             let cmd = app
                 .start_cmd
                 .as_deref()
                 .filter(|s| !s.trim().is_empty())
-                .unwrap_or("npm start");
+                .unwrap_or("./app");
             format!("/bin/bash -c {}", systemd_quote(cmd))
         }
         _ => anyhow::bail!("{} 앱은 systemd 유닛이 없습니다", kind.as_str()),
     };
     let (user, cwd, rw, protect_home) = unit_identity(app, i.paths, i.run_user);
-    // Node(V8 JIT)는 W^X 제한과 충돌
-    let mdwe = if kind == AppKind::Rust {
-        "MemoryDenyWriteExecute=true\n"
-    } else {
-        ""
-    };
+    let mdwe = "MemoryDenyWriteExecute=true\n";
     Ok(format!(
         "{MANAGED_MARKER} (app {slug}) — 직접 수정하지 마세요. 패널에서 재배포 시 덮어씁니다.
 [Unit]
@@ -291,10 +286,6 @@ pub struct SiteInput<'a> {
 
 pub const ACME_WEBROOT: &str = "/var/lib/rpanel/acme";
 
-pub fn php_socket(slug: &str) -> String {
-    format!("/run/php/rpanel-{slug}.sock")
-}
-
 /// (인증서, 개인키) 경로
 pub fn ssl_paths(app: &App) -> Option<(String, String)> {
     match app.ssl_mode.as_str() {
@@ -372,7 +363,7 @@ fn site_body(i: &SiteInput) -> String {
     let app = i.app;
     let mut s = String::new();
     match (app.kind(), app.source()) {
-        (AppKind::Rust | AppKind::Node, _) => {
+        (AppKind::Rust, _) => {
             let port = app.port.unwrap_or(0);
             s.push_str(&format!(
                 "
@@ -445,32 +436,6 @@ fn site_body(i: &SiteInput) -> String {
     }
 ",
             );
-        }
-        (AppKind::Php, _) => {
-            s.push_str(&format!(
-                "
-    root {root};
-    index index.php index.html;
-{STATIC_ASSETS}{DENY_HIDDEN}
-    location / {{
-        try_files $uri $uri/ /index.php?$args;
-    }}
-
-    location ~ \\.php$ {{
-        try_files $uri =404;
-        fastcgi_split_path_info ^(.+\\.php)(/.+)$;
-        fastcgi_pass unix:{sock};
-        fastcgi_index index.php;
-        include fastcgi_params;
-        fastcgi_param SCRIPT_FILENAME $realpath_root$fastcgi_script_name;
-        fastcgi_param HTTPS $rpanel_https if_not_empty;
-        fastcgi_read_timeout {timeout}s;
-    }}
-",
-                root = app.document_root().unwrap_or_default(),
-                sock = php_socket(&app.slug),
-                timeout = app.php_max_exec.clamp(10, 3600) + 10,
-            ));
         }
     }
     s.push_str(
@@ -552,58 +517,6 @@ server {{
     Some(s)
 }
 
-/// PHP-FPM 풀 (사이트 유저로 실행, ondemand). 환경변수는 PHP INI 에 안전한 값만 넣습니다.
-pub fn php_pool(app: &App, vars: &[EnvVar]) -> anyhow::Result<(String, Vec<String>)> {
-    let user = app
-        .site_user
-        .as_deref()
-        .ok_or_else(|| anyhow::anyhow!("사이트 유저가 없습니다"))?;
-    let mut skipped = Vec::new();
-    let mut env = String::new();
-    for v in vars {
-        let safe = v
-            .value
-            .chars()
-            .all(|c| !c.is_control() && !matches!(c, '"' | '\\' | '$' | '`'));
-        if safe {
-            env.push_str(&format!("env[{}] = \"{}\"\n", v.key, v.value));
-        } else {
-            skipped.push(v.key.clone());
-        }
-    }
-    let up = app.php_upload_mb.clamp(1, 10240);
-    let exec = app.php_max_exec.clamp(10, 3600);
-    Ok((
-        format!(
-            "; managed by rpanel (php {slug}) — 패널의 PHP 탭에서 관리합니다.
-[rpanel-{slug}]
-user = {user}
-group = {user}
-listen = {sock}
-listen.owner = www-data
-listen.group = www-data
-listen.mode = 0660
-pm = ondemand
-pm.max_children = {children}
-pm.process_idle_timeout = 10s
-pm.max_requests = 500
-php_admin_value[memory_limit] = {mem}M
-php_admin_value[upload_max_filesize] = {up}M
-php_admin_value[post_max_size] = {up}M
-php_admin_value[max_execution_time] = {exec}
-php_admin_value[max_input_time] = {exec}
-php_admin_flag[log_errors] = on
-php_admin_value[error_log] = /home/{user}/logs/php-error.log
-{env}",
-            slug = app.slug,
-            sock = php_socket(&app.slug),
-            children = app.php_max_children.clamp(1, 200),
-            mem = app.php_memory_mb.clamp(32, 8192),
-        ),
-        skipped,
-    ))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -620,7 +533,7 @@ mod tests {
             git_branch: "main".into(),
             root_dir: "".into(),
             build_cmd: None,
-            start_cmd: Some("node server.js --name \"x\" $HOME 100%".into()),
+            start_cmd: Some("./app --name \"x\" $HOME 100%".into()),
             binary_name: Some("hello-api".into()),
             output_dir: "dist".into(),
             port: Some(8101),
@@ -639,11 +552,6 @@ mod tests {
             site_user: None,
             site_root: None,
             web_root: "".into(),
-            php_version: None,
-            php_memory_mb: 256,
-            php_upload_mb: 64,
-            php_max_exec: 60,
-            php_max_children: 10,
             proxy_target: None,
             ssl_mode: "none".into(),
             force_https: false,
@@ -690,8 +598,8 @@ mod tests {
     }
 
     #[test]
-    fn node_unit_quotes_command() {
-        let a = app("node");
+    fn files_rust_unit_quotes_command() {
+        let a = files_app("rust");
         let p = AppPaths::new(Path::new("/var/lib/rpanel"), &a.slug);
         let u = systemd_unit(&UnitInput {
             app: &a,
@@ -700,8 +608,7 @@ mod tests {
             path_env: "/usr/bin",
         })
         .unwrap();
-        assert!(u.contains(r#"ExecStart=/bin/bash -c "node server.js --name \"x\" $$HOME 100%%""#));
-        assert!(!u.contains("MemoryDenyWriteExecute"));
+        assert!(u.contains(r#"ExecStart=/bin/bash -c "./app --name \"x\" $$HOME 100%%""#));
         assert!(systemd_unit(&UnitInput {
             app: &app("static"),
             paths: &p,
@@ -807,10 +714,22 @@ mod tests {
     }
 
     #[test]
-    fn php_site_and_pool() {
-        let mut a = files_app("php");
-        a.web_root = "public".into();
+    fn rust_files_site_runs_uploaded_binary_as_site_user() {
+        let mut a = files_app("rust");
+        a.start_cmd = Some("./app --port $PORT".into());
         let p = AppPaths::new(Path::new("/var/lib/rpanel"), &a.slug);
+        let unit = systemd_unit(&UnitInput {
+            app: &a,
+            paths: &p,
+            run_user: "rpanel",
+            path_env: "/usr/bin:/bin",
+        })
+        .unwrap();
+        assert!(unit.contains("User=beripick\n"));
+        assert!(unit.contains("WorkingDirectory=/home/beripick/htdocs/beripick.com\n"));
+        assert!(unit.contains("ExecStart=/bin/bash -c "));
+        assert!(unit.contains("./app --port $$PORT"), "{unit}");
+        assert!(unit.contains("MemoryDenyWriteExecute=true"));
         let s = nginx_site(&SiteInput {
             app: &a,
             paths: &p,
@@ -818,29 +737,12 @@ mod tests {
             ipv6: true,
         })
         .unwrap();
-        assert!(s.contains("root /home/beripick/htdocs/beripick.com/public;"));
-        assert!(s.contains("fastcgi_pass unix:/run/php/rpanel-beripick-api.sock;"));
-        assert!(s.contains("try_files $uri $uri/ /index.php?$args;"));
-        assert!(!s.contains("set_real_ip_from"), "no proxy configured");
+        assert!(s.contains("proxy_pass http://127.0.0.1:8101;"), "{s}");
+        assert!(
+            !s.contains("root /home"),
+            "service sites are proxied, not served from disk"
+        );
         assert_eq!(s.matches('{').count(), s.matches('}').count());
-
-        let vars = vec![
-            EnvVar {
-                key: "DB_HOST".into(),
-                value: "127.0.0.1".into(),
-            },
-            EnvVar {
-                key: "BAD".into(),
-                value: "a\"b".into(),
-            },
-        ];
-        let (pool, skipped) = php_pool(&a, &vars).unwrap();
-        assert!(pool.starts_with("; managed by rpanel"));
-        assert!(pool.contains("[rpanel-beripick-api]\nuser = beripick\ngroup = beripick\n"));
-        assert!(pool.contains("listen = /run/php/rpanel-beripick-api.sock"));
-        assert!(pool.contains("pm = ondemand"));
-        assert!(pool.contains("env[DB_HOST] = \"127.0.0.1\""));
-        assert_eq!(skipped, vec!["BAD".to_string()]);
     }
 
     #[test]
@@ -884,7 +786,7 @@ mod tests {
     }
 
     #[test]
-    fn proxy_site_and_files_node_unit() {
+    fn proxy_site_and_files_rust_unit() {
         let mut a = app("proxy");
         a.source = "none".into();
         a.proxy_target = Some("https://10.0.0.11:8443".into());
@@ -900,7 +802,7 @@ mod tests {
         assert!(s.contains("proxy_ssl_server_name on;"));
         assert!(s.contains("set_real_ip_from 10.0.0.10;"));
 
-        let n = files_app("node");
+        let n = files_app("rust");
         let u = systemd_unit(&UnitInput {
             app: &n,
             paths: &p,

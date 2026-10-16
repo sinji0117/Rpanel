@@ -343,7 +343,7 @@ async fn run(
     let release_dir: PathBuf;
 
     match kind {
-        AppKind::Php | AppKind::Proxy => {
+        AppKind::Proxy => {
             bail!("Git 배포는 rust / static / node 만 지원합니다")
         }
         AppKind::Rust => {
@@ -374,7 +374,7 @@ async fn run(
             )
             .await?;
         }
-        AppKind::Node | AppKind::Static => {
+        AppKind::Static => {
             let has_lock = exec.is_dry_run() || work.join("package-lock.json").is_file();
             let install = if has_lock {
                 "npm ci --no-audit --no-fund"
@@ -382,11 +382,7 @@ async fn run(
                 "npm install --no-audit --no-fund"
             };
             run_ok(exec, bash(install).timeout(1800), log).await?;
-            let default_build = if kind == AppKind::Static {
-                Some("npm run build".to_string())
-            } else {
-                None
-            };
+            let default_build = Some("npm run build".to_string());
             if let Some(cmd) = app
                 .build_cmd
                 .clone()
@@ -623,36 +619,6 @@ pub async fn apply_nginx(state: &AppState, app: &App, log: &LogSink) -> anyhow::
     Ok(())
 }
 
-/// PHP-FPM 풀 생성 → helper 가 검증·설치하고 php-fpm reload
-pub async fn apply_php(
-    state: &AppState,
-    app: &App,
-    vars: &[EnvVar],
-    log: &LogSink,
-) -> anyhow::Result<()> {
-    let version = app
-        .php_version
-        .clone()
-        .ok_or_else(|| anyhow!("PHP 버전이 지정되지 않았습니다"))?;
-    log.step(&format!("PHP {version} FPM 풀")).await;
-    let (pool, skipped) = templates::php_pool(app, vars)?;
-    if !skipped.is_empty() {
-        log.line(format!(
-            "※ PHP 환경변수에 넣을 수 없는 문자(\" \\ $ `)가 있어 건너뛴 변수: {}",
-            skipped.join(", ")
-        ))
-        .await;
-    }
-    let path = state
-        .cfg
-        .data_dir
-        .join("staging")
-        .join(format!("{}.php.conf", app.slug));
-    state.exec.write_file(&path, &pool, 0o644, log).await?;
-    helper::call(state, &["install-php-pool", &app.slug, &version], log).await?;
-    Ok(())
-}
-
 /// 파일 기반 사이트 · 리버스 프록시: 빌드 없이 설정만 적용
 async fn apply_site(
     state: &AppState,
@@ -692,34 +658,54 @@ async fn apply_site(
         }
     }
 
-    match kind {
-        AppKind::Php => apply_php(state, app, vars, log).await?,
-        AppKind::Node => {
-            log.step("서비스").await;
-            let unit = templates::systemd_unit(&templates::UnitInput {
-                app,
-                paths,
-                run_user: RUN_USER,
-                path_env: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
-            })?;
-            exec.write_file(&paths.staging_unit, &unit, 0o644, log)
-                .await?;
-            helper::call(state, &["install-unit", &app.slug], log).await?;
-            helper::call(state, &["svc", "restart", &app.slug], log).await?;
-            log.step("헬스체크").await;
-            if let Err(e) = health_check(state, app, log).await {
-                if let Ok(j) = helper::call_quiet(state, &["journal", &app.slug, "30"]).await {
-                    log.line("── 최근 서비스 로그 (journalctl) ──").await;
-                    for l in j.stdout.lines() {
-                        log.line(l).await;
-                    }
-                }
-                return Err(
-                    e.context("서비스가 응답하지 않습니다. 시작 명령과 PORT 사용을 확인하세요")
-                );
+    // 업로드형 Rust 사이트: 실행 파일이 아직 없으면 서비스는 띄우지 않고 기다림
+    if kind == AppKind::Rust && app.source() == Source::Files {
+        match uploaded_binary(state, app).await? {
+            BinaryState::Missing(bin) => {
+                // 이전 실행 파일로 돌던 서비스가 있으면 멈춤 (상태와 실제가 어긋나지 않게)
+                let _ = helper::call_quiet(state, &["svc", "stop", &app.slug]).await;
+                apply_nginx(state, app, log).await?;
+                log.line(format!(
+                    "※ 실행 파일 {bin} 이 아직 없습니다. 파일 탭에서 빌드한 실행 파일을 올린 뒤 '적용'을 누르면 시작됩니다"
+                ))
+                .await;
+                sqlx::query("UPDATE apps SET status = 'idle', current_release = NULL WHERE id = ?")
+                    .bind(app.id)
+                    .execute(&state.db)
+                    .await?;
+                return Ok(String::new());
             }
+            BinaryState::Present(bin) => {
+                // 업로드한 파일은 실행 권한이 없을 수 있음
+                crate::files::run_command(state, app, &format!("chmod u+x -- {bin}"), &[], log)
+                    .await?;
+            }
+            BinaryState::Unknown => {}
         }
-        _ => {}
+    }
+
+    if kind == AppKind::Rust {
+        log.step("서비스").await;
+        let unit = templates::systemd_unit(&templates::UnitInput {
+            app,
+            paths,
+            run_user: RUN_USER,
+            path_env: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+        })?;
+        exec.write_file(&paths.staging_unit, &unit, 0o644, log)
+            .await?;
+        helper::call(state, &["install-unit", &app.slug], log).await?;
+        helper::call(state, &["svc", "restart", &app.slug], log).await?;
+        log.step("헬스체크").await;
+        if let Err(e) = health_check(state, app, log).await {
+            if let Ok(j) = helper::call_quiet(state, &["journal", &app.slug, "30"]).await {
+                log.line("── 최근 서비스 로그 (journalctl) ──").await;
+                for l in j.stdout.lines() {
+                    log.line(l).await;
+                }
+            }
+            return Err(e.context("서비스가 응답하지 않습니다. 시작 명령과 PORT 사용을 확인하세요"));
+        }
     }
 
     apply_nginx(state, app, log).await?;
@@ -732,6 +718,42 @@ async fn apply_site(
     .execute(&state.db)
     .await?;
     Ok(String::new())
+}
+
+enum BinaryState {
+    Missing(String),
+    Present(String),
+    /// 시작 명령이 ./파일 형태가 아님 (확인하지 않음)
+    Unknown,
+}
+
+/// 시작 명령의 첫 단어가 `./이름` 이면 그 파일이 문서 루트에 있는지 확인
+fn start_binary(app: &App) -> Option<String> {
+    let cmd = app.start_cmd.as_deref().unwrap_or("./app");
+    let first = cmd.split_whitespace().next()?;
+    let name = first.strip_prefix("./")?;
+    let ok = !name.is_empty()
+        && !name.contains("..")
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '/'));
+    ok.then(|| first.to_string())
+}
+
+async fn uploaded_binary(state: &AppState, app: &App) -> anyhow::Result<BinaryState> {
+    let Some(bin) = start_binary(app) else {
+        return Ok(BinaryState::Unknown);
+    };
+    if state.exec.is_dry_run() {
+        return Ok(BinaryState::Present(bin));
+    }
+    let rel = format!("{}/{}", crate::files::rel_root(app), &bin[2..]);
+    Ok(
+        match crate::files::json(state, app, &["stat", &rel]).await {
+            Ok(_) => BinaryState::Present(bin),
+            Err(_) => BinaryState::Missing(bin),
+        },
+    )
 }
 
 async fn health_check(state: &AppState, app: &App, log: &LogSink) -> anyhow::Result<()> {

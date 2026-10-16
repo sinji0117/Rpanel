@@ -83,9 +83,8 @@ pub fn router(state: AppState) -> Router {
             post(databases::redis_assign).delete(databases::redis_release),
         )
         .route("/apps/{id}/redis/flush", post(databases::redis_flush))
-        // 사이트 (CloudPanel 방식)
+        // 사이트 (사이트 유저 · SSL · 파일)
         .route("/sites", get(sites::list).post(site_admin::create))
-        .route("/system/php", get(site_admin::php_list))
         .route("/system/edge", get(site_admin::edge))
         .route(
             "/apps/{id}/site-user/password",
@@ -101,7 +100,6 @@ pub fn router(state: AppState) -> Router {
         )
         .route("/apps/{id}/ssl/custom", post(site_admin::ssl_custom))
         .route("/apps/{id}/ssl/force", put(site_admin::ssl_force))
-        .route("/apps/{id}/php", put(site_admin::php_update))
         // 파일 관리자
         .route("/apps/{id}/files", get(files::list))
         .route(

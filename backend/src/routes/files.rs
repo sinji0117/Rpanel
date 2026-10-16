@@ -290,7 +290,7 @@ mod tests {
 
     #[test]
     fn paths() {
-        assert!(check_path("htdocs/a.com/index.php").is_ok());
+        assert!(check_path("htdocs/a.com/app").is_ok());
         assert!(check_path("").is_ok());
         assert!(check_path("/etc/passwd").is_err());
         assert!(check_path("htdocs/../../etc").is_err());

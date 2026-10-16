@@ -1,4 +1,4 @@
-//! MariaDB 데이터베이스 / Redis DB 번호 관리 (CloudPanel의 Databases)
+//! MariaDB 데이터베이스 / Redis DB 번호 관리
 //!
 //! - DB·계정 생성/삭제/비밀번호 교체는 `rpanel-helper db-*` 가 root(unix_socket)로 수행합니다.
 //!   helper는 자신이 만든 DB 목록(/etc/rpanel/managed-dbs)에 있는 것만 지우거나 덤프합니다.

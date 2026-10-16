@@ -1,4 +1,4 @@
-//! CloudPanel 방식 사이트: 만들기(HTML·PHP·Node·리버스 프록시), 사이트 유저, SSL, PHP 설정
+//! 사이트: 만들기(Rust 실행 파일·HTML·리버스 프록시), 사이트 유저, SSL
 
 use axum::{
     extract::{Path, State},
@@ -11,7 +11,7 @@ use serde_json::json;
 use crate::{
     audit,
     auth::{session::random_token, AuthUser, ClientIp},
-    config::{EdgeMode, ExecMode},
+    config::EdgeMode,
     deploy::{helper, logsink::LogSink, runner},
     error::{AppError, AppResult},
     models::{App, AppKind, Source},
@@ -161,30 +161,6 @@ async fn unique_slug(state: &AppState, base: &str) -> AppResult<String> {
     Err(AppError::Conflict("slug 를 만들 수 없습니다".into()))
 }
 
-/// 설치된 PHP-FPM 버전 (낮은 → 높은)
-pub async fn php_versions(state: &AppState) -> Vec<String> {
-    if state.cfg.exec_mode == ExecMode::DryRun {
-        return vec!["8.3".into()];
-    }
-    let mut v: Vec<String> = std::fs::read_dir("/etc/php")
-        .map(|rd| {
-            rd.filter_map(|e| e.ok())
-                .filter(|e| e.path().join("fpm/pool.d").is_dir())
-                .filter_map(|e| e.file_name().to_str().map(str::to_string))
-                .collect()
-        })
-        .unwrap_or_default();
-    v.sort_by(|a, b| {
-        let p = |s: &str| {
-            s.split('.')
-                .map(|x| x.parse::<u32>().unwrap_or(0))
-                .collect::<Vec<_>>()
-        };
-        p(a).cmp(&p(b))
-    });
-    v
-}
-
 /// URL 검증 (리버스 프록시 대상)
 pub fn valid_proxy_target(s: &str) -> Result<(), String> {
     static RE: once_cell::sync::Lazy<regex::Regex> = once_cell::sync::Lazy::new(|| {
@@ -199,7 +175,7 @@ pub fn valid_proxy_target(s: &str) -> Result<(), String> {
 
 #[derive(Deserialize)]
 pub struct CreateSite {
-    /// html | php | node | proxy
+    /// rust | html | node | proxy
     #[serde(rename = "type")]
     pub site_type: String,
     pub domains: String,
@@ -209,8 +185,6 @@ pub struct CreateSite {
     pub site_user: Option<String>,
     #[serde(default)]
     pub password: Option<String>,
-    #[serde(default)]
-    pub php_version: Option<String>,
     #[serde(default)]
     pub start_cmd: Option<String>,
     #[serde(default)]
@@ -235,14 +209,9 @@ pub async fn create(
     user.require_admin()?;
     let (kind, source) = match b.site_type.as_str() {
         "html" | "static" => (AppKind::Static, Source::Files),
-        "php" => (AppKind::Php, Source::Files),
-        "node" => (AppKind::Node, Source::Files),
+        "rust" => (AppKind::Rust, Source::Files),
         "proxy" => (AppKind::Proxy, Source::None),
-        _ => {
-            return Err(AppError::bad(
-                "type 은 html / php / node / proxy 중 하나입니다",
-            ))
-        }
+        _ => return Err(AppError::bad("type 은 rust / html / proxy 중 하나입니다")),
     };
     let domains = validate::domains(&b.domains).map_err(AppError::BadRequest)?;
     let primary = domains
@@ -257,25 +226,8 @@ pub async fn create(
     let name = opt(&b.name).unwrap_or_else(|| primary.clone());
     validate::name(&name).map_err(AppError::BadRequest)?;
 
-    let php_version = if kind == AppKind::Php {
-        let installed = php_versions(&state).await;
-        let v = opt(&b.php_version)
-            .or_else(|| installed.last().cloned())
-            .ok_or_else(|| {
-                AppError::bad("설치된 PHP-FPM 이 없습니다 (install.sh --php=8.3 으로 설치)")
-            })?;
-        if !installed.contains(&v) {
-            return Err(AppError::bad(format!(
-                "PHP {v} 가 설치되어 있지 않습니다 (설치된 버전: {})",
-                installed.join(", ")
-            )));
-        }
-        Some(v)
-    } else {
-        None
-    };
-    let start_cmd = if kind == AppKind::Node {
-        let c = opt(&b.start_cmd).unwrap_or_else(|| "node server.js".into());
+    let start_cmd = if kind.is_service() {
+        let c = opt(&b.start_cmd).unwrap_or_else(|| "./app".into());
         validate::command(&c).map_err(AppError::BadRequest)?;
         Some(c)
     } else {
@@ -327,8 +279,8 @@ pub async fn create(
         let port = if kind.is_service() { Some(apps::allocate_port(&state).await?) } else { None };
         let res = sqlx::query(
             "INSERT INTO apps (project_id, name, slug, kind, source, git_url, git_branch, start_cmd, port, domains, \
-             health_path, webhook_token, site_user, site_root, php_version, proxy_target) \
-             VALUES (?, ?, ?, ?, ?, NULL, 'main', ?, ?, ?, '/', ?, ?, ?, ?, ?)",
+             health_path, webhook_token, site_user, site_root, proxy_target) \
+             VALUES (?, ?, ?, ?, ?, NULL, 'main', ?, ?, ?, '/', ?, ?, ?, ?)",
         )
         .bind(b.project_id)
         .bind(&name)
@@ -341,7 +293,6 @@ pub async fn create(
         .bind(random_token(24))
         .bind(&site_user)
         .bind(&site_root)
-        .bind(&php_version)
         .bind(&proxy_target)
         .execute(&state.db)
         .await?;
@@ -351,8 +302,7 @@ pub async fn create(
         if let Some(u) = &site_user {
             let log = LogSink::capture();
             let helper_kind = match kind {
-                AppKind::Php => "php",
-                AppKind::Node => "node",
+                AppKind::Rust => "rust",
                 _ => "static",
             };
             if let Err(e) = helper::call(&state, &["site-create", &slug, u, &primary, helper_kind], &log).await {
@@ -660,84 +610,6 @@ pub async fn ssl_force(
     )
     .await;
     Ok(Json(json!({ "ok": true })))
-}
-
-// ───────────── PHP ─────────────
-
-/// GET /api/system/php
-pub async fn php_list(State(state): State<AppState>, _u: AuthUser) -> Json<serde_json::Value> {
-    Json(json!({ "versions": php_versions(&state).await }))
-}
-
-#[derive(Deserialize)]
-pub struct PhpBody {
-    pub version: String,
-    pub memory_mb: u32,
-    pub upload_mb: u32,
-    pub max_exec: u32,
-    pub max_children: u32,
-}
-
-/// PUT /api/apps/{id}/php
-pub async fn php_update(
-    State(state): State<AppState>,
-    user: AuthUser,
-    ClientIp(ip): ClientIp,
-    Path(id): Path<u64>,
-    Json(b): Json<PhpBody>,
-) -> AppResult<Json<App>> {
-    user.require_admin()?;
-    let app = apps::fetch(&state, id).await?;
-    if app.kind() != AppKind::Php {
-        return Err(AppError::bad("PHP 사이트가 아닙니다"));
-    }
-    let installed = php_versions(&state).await;
-    if !installed.contains(&b.version) {
-        return Err(AppError::bad(format!(
-            "PHP {} 가 설치되어 있지 않습니다",
-            b.version
-        )));
-    }
-    if !(32..=8192).contains(&b.memory_mb)
-        || !(1..=10240).contains(&b.upload_mb)
-        || !(10..=3600).contains(&b.max_exec)
-        || !(1..=200).contains(&b.max_children)
-    {
-        return Err(AppError::bad(
-            "값 범위: 메모리 32~8192MB, 업로드 1~10240MB, 실행시간 10~3600초, 프로세스 1~200",
-        ));
-    }
-    sqlx::query(
-        "UPDATE apps SET php_version = ?, php_memory_mb = ?, php_upload_mb = ?, php_max_exec = ?, php_max_children = ?, \
-         client_max_body_mb = GREATEST(client_max_body_mb, ?) WHERE id = ?",
-    )
-    .bind(&b.version)
-    .bind(b.memory_mb)
-    .bind(b.upload_mb)
-    .bind(b.max_exec)
-    .bind(b.max_children)
-    .bind(b.upload_mb)
-    .bind(id)
-    .execute(&state.db)
-    .await?;
-    let app = apps::fetch(&state, id).await?;
-    let vars = runner::effective_env(&state, &app).await?;
-    let log = LogSink::capture();
-    runner::apply_php(&state, &app, &vars, &log)
-        .await
-        .map_err(|e| AppError::BadRequest(format!("{e:#}")))?;
-    runner::apply_nginx(&state, &app, &log)
-        .await
-        .map_err(|e| AppError::BadRequest(format!("{e:#}")))?;
-    audit::log(
-        &state,
-        Some(user.id),
-        "php.update",
-        &format!("{} {}", app.slug, b.version),
-        &ip,
-    )
-    .await;
-    Ok(Json(app))
 }
 
 /// GET /api/system/edge — 설치 모드 안내용

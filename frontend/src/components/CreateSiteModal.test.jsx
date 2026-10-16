@@ -22,7 +22,7 @@ describe('site helpers', () => {
   it('paths', () => {
     expect(relRoot({ site_user: 'shop', site_root: '/home/shop/htdocs/shop.com' })).toBe('htdocs/shop.com')
     expect(relRoot({ site_user: null })).toBe('')
-    expect(joinPath('htdocs/a.com', 'index.php')).toBe('htdocs/a.com/index.php')
+    expect(joinPath('htdocs/a.com', 'app')).toBe('htdocs/a.com/app')
     expect(joinPath('', '.ssh')).toBe('.ssh')
     expect(parentPath('htdocs/a.com/assets')).toBe('htdocs/a.com')
     expect(parentPath('htdocs')).toBe('')

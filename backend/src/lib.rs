@@ -34,6 +34,37 @@ use crate::{
 
 pub static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
 
+/// 주석만 고친 마이그레이션의 예전 체크섬(SHA-384). 이미 설치된 서버에서 "변경됨" 오류가 나지 않도록
+/// 시작할 때 현재 체크섬으로 바꿔 줍니다. SQL 내용이 바뀐 경우에는 절대 여기에 넣지 마세요.
+const LEGACY_CHECKSUMS: &[(i64, &str)] = &[
+    (
+        2,
+        "05ad04c45bda19254b9adb7b57137ff245ed00aaab565bb31c802a5e2b9b80cf43ff5085353be733d91a916ea092f780",
+    ),
+    (
+        3,
+        "d7e31ead4553121ff45d6a064e3963ad96f52603b33a00e9bd938af93e1d4bfb1e25e0999b4ba7ff5cb379adf7800eb4",
+    ),
+];
+
+async fn migrate_compat(db: &sqlx::MySqlPool) {
+    for (version, old) in LEGACY_CHECKSUMS {
+        let Some(m) = MIGRATOR.iter().find(|m| m.version == *version) else {
+            continue;
+        };
+        let Ok(old) = hex::decode(old) else { continue };
+        // 테이블이 아직 없으면(새 설치) 실패해도 무시
+        let _ = sqlx::query(
+            "UPDATE _sqlx_migrations SET checksum = ? WHERE version = ? AND checksum = ?",
+        )
+        .bind(m.checksum.as_ref())
+        .bind(version)
+        .bind(old)
+        .execute(db)
+        .await;
+    }
+}
+
 pub async fn build_state(cfg: Config) -> anyhow::Result<AppState> {
     let opts: MySqlConnectOptions = cfg.database_url.parse().context("DATABASE_URL 형식 오류")?;
     let opts = opts
@@ -45,6 +76,7 @@ pub async fn build_state(cfg: Config) -> anyhow::Result<AppState> {
         .connect_with(opts)
         .await
         .context("MariaDB 접속 실패 (DATABASE_URL 확인)")?;
+    migrate_compat(&db).await;
     MIGRATOR.run(&db).await.context("DB 마이그레이션 실패")?;
 
     let redis_client =

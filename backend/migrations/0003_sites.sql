@@ -1,4 +1,4 @@
--- CloudPanel 방식 사이트: 파일 기반(HTML·PHP·Node) / 리버스 프록시, 사이트 유저, SSL
+-- 사이트: 파일 기반 사이트 / 리버스 프록시, 사이트 유저, SSL
 
 ALTER TABLE apps
     MODIFY project_id BIGINT UNSIGNED NULL,

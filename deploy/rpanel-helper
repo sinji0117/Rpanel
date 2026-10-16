@@ -9,7 +9,6 @@
 #   - systemd 유닛: rpanel-app 사용자로만 실행, 허용된 키만, 경로는 앱 디렉토리 안
 #   - Nginx 사이트: 허용된 지시어만, root/로그/프록시 대상 경로 고정, 다른 사이트와 도메인 중복 금지
 #   - 사이트 유저: rpanel-sites 그룹, /home/<user> 만, 레지스트리(/etc/rpanel/site-users)에 있는 것만 삭제
-#   - PHP-FPM 풀: 레지스트리의 사이트 유저로만, 허용된 키만
 #   - SSL: Let's Encrypt(webroot) / 사용자 인증서(키 일치 검사)
 set -euo pipefail
 umask 022
@@ -161,7 +160,7 @@ validate_site() {
     fi
     d="${line%%[[:space:]]*}"
     case "$d" in
-      try_files|proxy_set_header|location|fastcgi_param|fastcgi_split_path_info|return) ;;
+      try_files|proxy_set_header|location|return) ;;
       *) [[ "$line" == *'$'* || "$line" == *'\'* || "$line" == *'`'* ]] && die "site: unexpected characters: $line" ;;
     esac
     [[ "$line" == *'`'* ]] && die "site: unexpected characters: $line"
@@ -197,17 +196,9 @@ validate_site() {
       proxy_pass)
         re='^proxy_pass https?://[A-Za-z0-9.-]+(:[0-9]{1,5})?(/[A-Za-z0-9._~/-]*)?;$'
         [[ "$line" =~ $re ]] || die "site: bad proxy_pass" ;;
-      fastcgi_pass) [[ -n "$suser" && "$line" == "fastcgi_pass unix:/run/php/rpanel-$slug.sock;" ]] || die "site: bad fastcgi_pass" ;;
-      fastcgi_index) [[ "$line" == "fastcgi_index index.php;" ]] || die "site: bad fastcgi_index" ;;
-      fastcgi_read_timeout) [[ "$line" =~ ^fastcgi_read_timeout\ [0-9]{1,5}s\;$ ]] || die "site: bad fastcgi_read_timeout" ;;
-      fastcgi_split_path_info) [[ "$line" == 'fastcgi_split_path_info ^(.+\.php)(/.+)$;' ]] || die "site: bad fastcgi_split_path_info" ;;
-      fastcgi_param)
-        [[ "$line" == 'fastcgi_param SCRIPT_FILENAME $realpath_root$fastcgi_script_name;' || \
-           "$line" == 'fastcgi_param HTTPS $rpanel_https if_not_empty;' ]] || die "site: fastcgi_param not allowed: $line" ;;
-      include) [[ "$line" == "include fastcgi_params;" ]] || die "site: include not allowed" ;;
       location)
         [[ "$line" == "location / {" || "$line" == "location /api/ {" || "$line" == "location = /index.html {" || \
-           "$line" == "location ^~ /.well-known/acme-challenge/ {" || "$line" == 'location ~ \.php$ {' || \
+           "$line" == "location ^~ /.well-known/acme-challenge/ {" || \
            "$line" == 'location ~ /\.(?!well-known).* {' || \
            "$line" == 'location ~* \.(?:js|css|woff2?|ttf|eot|svg|png|jpe?g|gif|webp|avif|ico)$ {' ]] || die "site: location not allowed: $line" ;;
       *) die "site: directive not allowed: $d" ;;
@@ -447,7 +438,7 @@ restore_data() {
 site_create() {
   local slug="$1" user="$2" domain="$3" kind="$4" home root
   valid_site_user "$user"; valid_domain "$domain"
-  [[ "$kind" =~ ^(static|php|node)$ ]] || die "invalid kind"
+  [[ "$kind" =~ ^(static|rust)$ ]] || die "invalid kind"
   [[ -z "$(site_user_of "$slug")" ]] || die "이미 사이트 유저가 있는 앱입니다: $slug"
   id "$user" >/dev/null 2>&1 && die "시스템에 이미 있는 사용자입니다: $user"
   getent group "$SITES_GROUP" >/dev/null || groupadd --system "$SITES_GROUP"
@@ -462,28 +453,25 @@ site_create() {
   install -d -o "$user" -g "$user" -m 0700 "$home/.ssh"
   install -m 0600 -o "$user" -g "$user" /dev/null "$home/.ssh/authorized_keys"
   case "$kind" in
-    php)
-      cat > "$root/index.php" <<EOF
-<?php
-// $domain — Rpanel 로 만든 PHP 사이트. 이 파일을 지우고 사이트 파일을 올리세요.
-echo '<h1>$domain</h1><p>PHP ' . PHP_VERSION . ' 동작 중</p>';
+    rust)
+      cat > "$root/README.txt" <<EOF
+$domain — Rpanel 로 만든 Rust 사이트입니다.
+
+1) 내 컴퓨터(또는 빌드 서버)에서:  cargo build --release
+2) target/release/<프로그램 이름> 파일을 이 폴더에 'app' 이라는 이름으로 올립니다.
+   (패널의 파일 탭 업로드, 또는 SFTP)
+3) 패널에서 '적용'을 누르면 실행됩니다.
+
+프로그램은 PORT 환경변수로 받은 포트에서 127.0.0.1 로 열어야 합니다.
+  let port = std::env::var("PORT").unwrap_or("3000".into());
+  // 예: axum::serve(TcpListener::bind(format!("127.0.0.1:{port}")).await?, app)
+데이터베이스 주소 등은 패널의 환경변수 탭 값이 그대로 전달됩니다.
 EOF
       ;;
     static)
       cat > "$root/index.html" <<EOF
 <!doctype html><html lang="ko"><meta charset="utf-8"><title>$domain</title>
 <body style="font-family:sans-serif;padding:4rem"><h1>$domain</h1><p>Rpanel 로 만든 사이트입니다. 이 파일을 지우고 사이트 파일을 올리세요.</p></body></html>
-EOF
-      ;;
-    node)
-      cat > "$root/server.js" <<'EOF'
-// Rpanel 로 만든 Node.js 사이트 예시 — PORT 환경변수로 받은 포트에서 실행하세요.
-const http = require('http');
-const port = process.env.PORT || 3000;
-http.createServer((req, res) => {
-  res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-  res.end('<h1>Node.js ' + process.version + ' 동작 중</h1>');
-}).listen(port, '127.0.0.1', () => console.log('listening on ' + port));
 EOF
       ;;
   esac
@@ -511,7 +499,6 @@ site_delete() {
   [[ -n "$user" ]] || return 0
   valid_site_user "$user"
   id -nG "$user" 2>/dev/null | tr ' ' '\n' | grep -qx "$SITES_GROUP" || die "$user 는 rpanel 사이트 유저가 아닙니다"
-  remove_php_pools "$slug"
   pkill -u "$user" 2>/dev/null || true
   sleep 0.5
   gpasswd -d www-data "$user" >/dev/null 2>&1 || true
@@ -519,94 +506,6 @@ site_delete() {
   rm -rf --one-file-system "/home/$user"
   awk -v s="$slug" '$1!=s' "$SITES_REG" > "$SITES_REG.tmp"; mv "$SITES_REG.tmp" "$SITES_REG"; chmod 0644 "$SITES_REG"
   echo "deleted site user $user"
-}
-
-# ───────────────────────── PHP-FPM ─────────────────────────
-
-valid_php_version() {
-  [[ "${1:-}" =~ ^(5\.6|7\.[0-4]|8\.[0-9])$ ]] || die "invalid php version: '${1:-}'"
-  [[ -d "/etc/php/$1/fpm/pool.d" ]] || die "PHP $1 FPM 이 설치되어 있지 않습니다 (설치: install.sh --php=$1)"
-}
-
-validate_pool() {
-  local f="$1" slug="$2" user="$3" line key val
-  local line_re='^([a-z_.]+(\[[A-Za-z_.][A-Za-z0-9_.]*\])?) = (.*)$'
-  local env_key_re='^env\[[A-Za-z_][A-Za-z0-9_]*\]$'
-  local env_val_re='^"[^"\\$`]*"$'
-  local seen_section=0
-  while IFS= read -r line || [[ -n "$line" ]]; do
-    [[ -z "$line" || "$line" == \;* ]] && continue
-    if [[ "$line" == "[rpanel-$slug]" ]]; then seen_section=1; continue; fi
-    (( seen_section )) || die "pool: section [rpanel-$slug] must come first"
-    [[ "$line" =~ $line_re ]] || die "pool: bad line: $line"
-    key="${BASH_REMATCH[1]}"; val="${BASH_REMATCH[3]}"
-    case "$key" in
-      user|group) [[ "$val" == "$user" ]] || die "pool: $key must be $user" ;;
-      listen) [[ "$val" == "/run/php/rpanel-$slug.sock" ]] || die "pool: bad listen" ;;
-      listen.owner|listen.group) [[ "$val" == www-data ]] || die "pool: bad $key" ;;
-      listen.mode) [[ "$val" == 0660 ]] || die "pool: bad listen.mode" ;;
-      pm) [[ "$val" == ondemand || "$val" == dynamic ]] || die "pool: bad pm" ;;
-      pm.max_children|pm.max_requests|pm.start_servers|pm.min_spare_servers|pm.max_spare_servers)
-        [[ "$val" =~ ^[0-9]{1,4}$ ]] || die "pool: bad $key" ;;
-      pm.process_idle_timeout) [[ "$val" =~ ^[0-9]{1,4}s$ ]] || die "pool: bad $key" ;;
-      'php_admin_value[memory_limit]'|'php_admin_value[upload_max_filesize]'|'php_admin_value[post_max_size]')
-        [[ "$val" =~ ^[0-9]{1,5}M$ ]] || die "pool: bad $key" ;;
-      'php_admin_value[max_execution_time]'|'php_admin_value[max_input_time]')
-        [[ "$val" =~ ^[0-9]{1,5}$ ]] || die "pool: bad $key" ;;
-      'php_admin_flag[log_errors]') [[ "$val" == on || "$val" == off ]] || die "pool: bad $key" ;;
-      'php_admin_value[error_log]') [[ "$val" == "/home/$user/logs/php-error.log" ]] || die "pool: bad error_log" ;;
-      env\[*\])
-        [[ "$key" =~ $env_key_re ]] || die "pool: bad env key"
-        [[ "$val" =~ $env_val_re ]] || die "pool: bad env value for $key" ;;
-      *) die "pool: key not allowed: $key" ;;
-    esac
-  done < "$f"
-}
-
-remove_php_pools() {
-  local slug="$1" f v
-  for f in /etc/php/*/fpm/pool.d/rpanel-"$slug".conf; do
-    [[ -e "$f" ]] || continue
-    v="$(echo "$f" | cut -d/ -f4)"
-    rm -f "$f"
-    systemctl reload "php$v-fpm" 2>/dev/null || systemctl restart "php$v-fpm" 2>/dev/null || true
-  done
-}
-
-install_php_pool() {
-  local slug="$1" version="$2" src="$STAGING/$1.php.conf" user dst backup="" f v
-  valid_php_version "$version"
-  user="$(site_user_of "$slug")"; [[ -n "$user" ]] || die "사이트 유저가 없는 앱입니다: $slug"
-  staged_file "$src"
-  validate_pool "$src" "$slug" "$user"
-  # 다른 버전에 있던 풀은 제거 (버전 변경)
-  for f in /etc/php/*/fpm/pool.d/rpanel-"$slug".conf; do
-    [[ -e "$f" ]] || continue
-    v="$(echo "$f" | cut -d/ -f4)"
-    [[ "$v" == "$version" ]] && continue
-    rm -f "$f"; systemctl reload "php$v-fpm" 2>/dev/null || true
-  done
-  dst="/etc/php/$version/fpm/pool.d/rpanel-$slug.conf"
-  if [[ -f "$dst" ]]; then backup=$(mktemp); cp -p "$dst" "$backup"; fi
-  install -m 0644 -o root -g root "$src" "$dst"
-  if ! "php-fpm$version" -t >/tmp/rpanel-fpm-test.$$ 2>&1; then
-    cat /tmp/rpanel-fpm-test.$$ >&2; rm -f /tmp/rpanel-fpm-test.$$
-    if [[ -n "$backup" ]]; then mv "$backup" "$dst"; else rm -f "$dst"; fi
-    die "php-fpm$version -t 실패 — 이전 설정으로 되돌렸습니다"
-  fi
-  rm -f /tmp/rpanel-fpm-test.$$ "${backup:-/nonexistent}"
-  systemctl enable "php$version-fpm" >/dev/null 2>&1 || true
-  if systemctl is-active --quiet "php$version-fpm"; then systemctl reload "php$version-fpm"; else systemctl start "php$version-fpm"; fi
-  for _ in $(seq 1 20); do [[ -S "/run/php/rpanel-$slug.sock" ]] && break; sleep 0.25; done
-  [[ -S "/run/php/rpanel-$slug.sock" ]] || die "PHP-FPM 소켓이 만들어지지 않았습니다: journalctl -u php$version-fpm"
-  echo "installed $dst (php$version-fpm reloaded)"
-}
-
-php_versions() {
-  local d
-  for d in /etc/php/*/fpm/pool.d; do
-    [[ -d "$d" ]] && echo "$d" | cut -d/ -f4
-  done | sort -V
 }
 
 # ───────────────────────── SSL ─────────────────────────
@@ -754,9 +653,6 @@ case "$cmd" in
   nginx-log)   valid_slug "${1:-}"; nginx_log "$1" "${2:-}" "${3:-200}" ;;
   site-create)   valid_slug "${1:-}"; site_create "$1" "${2:-}" "${3:-}" "${4:-}" ;;
   site-password) valid_slug "${1:-}"; site_password "$1" ;;
-  install-php-pool) valid_slug "${1:-}"; install_php_pool "$1" "${2:-}" ;;
-  remove-php-pool)  valid_slug "${1:-}"; remove_php_pools "$1" ;;
-  php-versions) php_versions ;;
   ssl-issue)   valid_slug "${1:-}"; slug="$1"; shift; ssl_issue "$slug" "$@" ;;
   ssl-custom)  valid_slug "${1:-}"; ssl_custom "$1" ;;
   ssl-info)    valid_slug "${1:-}"; ssl_info "$1" ;;
@@ -771,12 +667,12 @@ case "$cmd" in
     ssl_remove "$1" >/dev/null
     site_delete "$1"
     rm -rf --one-file-system "$DATA/apps/$1" "$DATA/www/$1" "$DATA/builds/$1"
-    rm -f "$DATA/keys/$1" "$DATA/keys/$1.pub" "$STAGING/$1.service" "$STAGING/$1.conf" "$STAGING/$1.php.conf" "$STAGING"/cron-"$1"-*
+    rm -f "$DATA/keys/$1" "$DATA/keys/$1.pub" "$STAGING/$1.service" "$STAGING/$1.conf" "$STAGING"/cron-"$1"-*
     # 백업 파일(/var/lib/rpanel/backups/<slug>)은 남겨 둡니다
     echo "purged $1"
     ;;
   *)
-    die "usage: rpanel-helper {prepare-app|install-unit|remove-unit|install-site|remove-site|purge-app} <slug> | svc {start|stop|restart} <slug> | status|journal <slug> | {install,remove,run}-cron|cron-status|cron-log <slug> <id> | db-{create,drop,password} <db> <user> | backup-db <slug> <db> <stamp> | backup-data <slug> <stamp> | restore-db <slug> <db> <file> | restore-data <slug> <file> | nginx-log <slug> access|error <lines> | site-create <slug> <user> <domain> <static|php|node> | site-password <slug> (stdin) | install-php-pool <slug> <ver> | php-versions | ssl-issue <slug> <email> <domain>... | ssl-custom|ssl-info|ssl-remove <slug> | backup-files <slug> <stamp> | restore-files <slug> <file>"
+    die "usage: rpanel-helper {prepare-app|install-unit|remove-unit|install-site|remove-site|purge-app} <slug> | svc {start|stop|restart} <slug> | status|journal <slug> | {install,remove,run}-cron|cron-status|cron-log <slug> <id> | db-{create,drop,password} <db> <user> | backup-db <slug> <db> <stamp> | backup-data <slug> <stamp> | restore-db <slug> <db> <file> | restore-data <slug> <file> | nginx-log <slug> access|error <lines> | site-create <slug> <user> <domain> <static|rust> | site-password <slug> (stdin) | ssl-issue <slug> <email> <domain>... | ssl-custom|ssl-info|ssl-remove <slug> | backup-files <slug> <stamp> | restore-files <slug> <file>"
     ;;
 esac
 }

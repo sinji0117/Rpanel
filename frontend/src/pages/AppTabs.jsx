@@ -36,6 +36,50 @@ function Secret({ value }) {
   )
 }
 
+/** mysql://user:pw@host:port/db → 각 항목 (다른 프로그램·DB 도구에 그대로 입력) */
+export function parseDbUrl(url) {
+  const m = /^[a-z]+:\/\/([^:@/]*):([^@]*)@([^:/]+)(?::(\d+))?\/([^?]*)/.exec(url || '')
+  if (!m) return null
+  const dec = (x) => {
+    try {
+      return decodeURIComponent(x)
+    } catch {
+      return x
+    }
+  }
+  return { user: dec(m[1]), password: dec(m[2]), host: m[3], port: m[4] || '3306', database: dec(m[5]) }
+}
+
+function DbCredentials({ url }) {
+  const [show, setShow] = useState(false)
+  const c = parseDbUrl(url)
+  if (!c) return null
+  const rows = [
+    ['DB 이름', c.database],
+    ['사용자', c.user],
+    ['비밀번호', c.password, true],
+    ['호스트', c.port === '3306' ? c.host : `${c.host}:${c.port}`],
+  ]
+  return (
+    <dl className="mt-2 grid grid-cols-[80px_1fr] items-center gap-x-3 gap-y-1 text-xs" aria-label="DB 접속 정보">
+      {rows.map(([k, v, secret]) => (
+        <div key={k} className="contents">
+          <dt className="text-ink-400">{k}</dt>
+          <dd className="flex items-center gap-2 font-mono">
+            <span className="truncate">{secret && !show ? '••••••••' : v}</span>
+            {secret && (
+              <button type="button" className="text-ink-400 hover:text-signal" onClick={() => setShow((x) => !x)}>
+                {show ? '숨기기' : '보기'}
+              </button>
+            )}
+            <CopyButton text={v} />
+          </dd>
+        </div>
+      ))}
+    </dl>
+  )
+}
+
 // ───────────────────────── 데이터베이스 · Redis ─────────────────────────
 
 export function DatabaseTab({ app, onChanged }) {
@@ -153,6 +197,7 @@ export function DatabaseTab({ app, onChanged }) {
                   </span>
                 </div>
                 <Secret value={db.url} />
+                <DbCredentials url={db.url} />
               </li>
             ))}
           </ul>
@@ -222,7 +267,7 @@ export function BackupTab({ app, onChanged }) {
     <div className="space-y-4">
       <Section
         title="백업"
-        desc={`연결된 DB 덤프(.sql.gz)와 ${app.site_user ? '사이트 파일(htdocs, .tar.gz)을 ' : app.kind === 'rust' || app.kind === 'node' ? '앱 data 디렉토리(.tar.gz)를 ' : ''}/var/lib/rpanel/backups/${app.slug}/ 에 저장합니다. NAS·다른 서버가 이 폴더를 가져가도록(rsync 등) 해두면 오프사이트 백업이 됩니다.`}
+        desc={`연결된 DB 덤프(.sql.gz)와 ${app.site_user ? '사이트 파일(htdocs, .tar.gz)을 ' : app.kind === 'rust' ? '앱 data 디렉토리(.tar.gz)를 ' : ''}/var/lib/rpanel/backups/${app.slug}/ 에 저장합니다. NAS·다른 서버가 이 폴더를 가져가도록(rsync 등) 해두면 오프사이트 백업이 됩니다.`}
         actions={
           <button
             className="btn-primary"

@@ -1,9 +1,9 @@
 #!/bin/bash
-# Rpanel 설치 — Ubuntu 24.04 를 막 설치한 서버에서 이 패널 하나만 설치하면 웹 호스팅이 동작합니다.
-# (Nginx · PHP-FPM · MariaDB · Redis · Node.js · Let's Encrypt 를 함께 설치·설정)
+# Rpanel 설치 엔진 — Ubuntu 24.04 에 패널과 필요한 프로그램을 설치·설정합니다.
+# (Nginx · MariaDB · Redis · Rust · Node.js(프런트 빌드용) · Let's Encrypt)
 #
-#   한 줄 설치:
-#     curl -fsSL https://raw.githubusercontent.com/sinji0117/Rpanel/main/deploy/bootstrap.sh | sudo bash
+#   보통은 저장소 맨 위의 install.sh / update.sh 로 실행합니다:
+#     curl -fsSL https://raw.githubusercontent.com/sinji0117/Rpanel/main/install.sh | sudo bash
 #
 #   소스를 직접 받은 경우:
 #     sudo ./deploy/install.sh [옵션]
@@ -12,44 +12,46 @@
 #   --mode=standalone        (기본) 이 서버가 80/443 을 직접 받고 SSL 도 여기서 발급 (Let's Encrypt)
 #   --mode=proxy             앞단 리버스 프록시(Nginx Proxy Manager 등)가 SSL 을 처리하고 :80 으로 전달
 #   --trusted-proxy=IP       proxy 모드에서 앞단 프록시 IP (실제 접속자 IP 복원 + 80 포트 허용 대상)
-#   --allow-from=CIDR,...    SSH·패널(8443) 접속 허용 대역 (기본: 어디서나)
-#   --php=8.3[,8.2,7.4]      설치할 PHP 버전 (기본 8.3, 8.3 외 버전은 ondrej/php PPA 사용)
-#   --no-php                 PHP 를 설치하지 않음
+#   --allow-from=CIDR,...    SSH·패널(8443) 접속 허용 대역 (기본: 어디서나, any 로 되돌림)
 #   --panel-domain=DOMAIN    패널 접속 도메인 (standalone 에서 Let's Encrypt 인증서 발급, --email 필요)
 #   --email=EMAIL            Let's Encrypt 계정 이메일
-#   --no-firewall            ufw 를 건드리지 않음
-#   --no-ssh-password        사이트 유저의 SSH/SFTP 비밀번호 로그인을 켜지 않음 (키만)
+#   --no-firewall            ufw 를 건드리지 않음 (--firewall 로 다시 켬)
+#   --no-ssh-password        사이트 유저의 SSH/SFTP 비밀번호 로그인을 켜지 않음 (--ssh-password 로 다시 켬)
 #   --dry-run-mode           패널을 RPANEL_EXEC_MODE=dry-run 으로 시작 (둘러보기용)
 #   --no-build               빌드 생략 (이미 빌드된 결과물 사용)
 #
-# 여러 번 실행해도 안전합니다 (비밀값 유지). 업데이트: sudo rpanel-update
+# 여러 번 실행해도 안전합니다. 비밀값과 처음 고른 옵션은 /etc/rpanel/rpanel.env 에 저장돼 다음 실행(업데이트)에도 그대로 쓰입니다.
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ENVF=/etc/rpanel/rpanel.env
+envget() { [[ -f $ENVF ]] && grep -E "^$1=" "$ENVF" | tail -n1 | cut -d= -f2- || true; }
+
+# 옵션 기본값: 지난번 설치 때 저장한 값 → 없으면 기본
 BUILD=1
-FIREWALL=1
-SSH_PASSWORD=1
 EXEC_MODE=real
 MODE_ARG=""
+FIREWALL="$(envget RPANEL_FIREWALL)"; [[ "$FIREWALL" == 0 ]] || FIREWALL=1
+SSH_PASSWORD="$(envget RPANEL_SSH_PASSWORD)"; [[ "$SSH_PASSWORD" == 0 ]] || SSH_PASSWORD=1
 PROXY_IP="${RPANEL_TRUSTED_PROXY:-}"
-ALLOW_FROM=""
-PHP_VERSIONS="8.3"
-PANEL_DOMAIN=""
-EMAIL=""
+ALLOW_FROM="$(envget RPANEL_ALLOW_FROM)"
+PANEL_DOMAIN="$(envget RPANEL_PANEL_DOMAIN)"
+EMAIL="$(envget RPANEL_EMAIL)"
 for arg in "$@"; do
   case "$arg" in
     --mode=*) MODE_ARG="${arg#*=}" ;;
     --trusted-proxy=*) PROXY_IP="${arg#*=}" ;;
+    --allow-from=any|--allow-from=) ALLOW_FROM="" ;;
     --allow-from=*) ALLOW_FROM="${arg#*=}" ;;
-    --php=*) PHP_VERSIONS="${arg#*=}" ;;
-    --no-php) PHP_VERSIONS="" ;;
     --panel-domain=*) PANEL_DOMAIN="${arg#*=}" ;;
     --email=*) EMAIL="${arg#*=}" ;;
     --no-build) BUILD=0 ;;
     --no-firewall) FIREWALL=0 ;;
+    --firewall) FIREWALL=1 ;;
     --no-ssh-password) SSH_PASSWORD=0 ;;
+    --ssh-password) SSH_PASSWORD=1 ;;
     --dry-run-mode) EXEC_MODE=dry-run ;;
-    -h|--help) sed -n '2,29p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,23p' "$0"; exit 0 ;;
     *) echo "알 수 없는 옵션: $arg  (--help)" >&2; exit 2 ;;
   esac
 done
@@ -67,8 +69,6 @@ die()  { printf '\033[1;31m✘ %s\033[0m\n' "$*" >&2; exit 1; }
 [[ "${ID:-}" == "ubuntu" ]] || warn "Ubuntu 24.04 기준 스크립트입니다 — 현재: ${PRETTY_NAME:-unknown}"
 export DEBIAN_FRONTEND=noninteractive
 
-ENVF=/etc/rpanel/rpanel.env
-envget() { [[ -f $ENVF ]] && grep -E "^$1=" "$ENVF" | tail -n1 | cut -d= -f2- || true; }
 genpw() { openssl rand -hex 24; }
 mem_mb() { awk '/MemTotal/ {print int($2/1024)}' /proc/meminfo; }
 
@@ -86,13 +86,12 @@ else
   PROXY_IP=""
 fi
 [[ -z "$ALLOW_FROM" ]] || [[ "$ALLOW_FROM" =~ ^[0-9a-fA-F.:/,]+$ ]] || die "--allow-from 형식 오류 (예: 10.0.0.0/24,100.64.0.0/10)"
-[[ -z "$PHP_VERSIONS" ]] || [[ "$PHP_VERSIONS" =~ ^([0-9]\.[0-9])(,[0-9]\.[0-9])*$ ]] || die "--php 형식 오류 (예: 8.3,7.4)"
 [[ -z "$PANEL_DOMAIN" ]] || [[ "$PANEL_DOMAIN" =~ ^([a-z0-9]([a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}$ ]] || die "--panel-domain 형식 오류"
 [[ -z "$PANEL_DOMAIN" || -n "$EMAIL" ]] || die "--panel-domain 에는 --email 이 필요합니다"
 info "설치 모드: $EDGE${PROXY_IP:+ (앞단 프록시 $PROXY_IP)}"
 
 # ───────────────────────── 1. 기본 ─────────────────────────
-say "1/9 기본 패키지"
+say "1/8 기본 패키지"
 apt-get update -q >/dev/null
 apt-get install -y -q curl ca-certificates gnupg git rsync openssl sudo build-essential pkg-config libssl-dev \
   openssh-client openssh-server nginx mariadb-server mariadb-client redis-server ufw certbot unzip zip >/dev/null
@@ -105,7 +104,7 @@ systemctl enable --now qemu-guest-agent >/dev/null 2>&1 || true
 info "$(nginx -v 2>&1) · $(mariadb --version | awk '{print $5}' | tr -d ,) · $(redis-server --version | awk '{print $3}')"
 
 # ───────────────────────── 2. MariaDB ─────────────────────────
-say "2/9 MariaDB"
+say "2/8 MariaDB"
 systemctl enable --now mariadb >/dev/null 2>&1 || true
 # 다른 설정 파일보다 나중에 읽히도록 z- 접두어 (bind-address 를 덮어쓰는 설정이 있어도 확실히 적용)
 cat > /etc/mysql/mariadb.conf.d/z-rpanel-bind.cnf <<'EOF'
@@ -165,7 +164,7 @@ else
 fi
 
 # ───────────────────────── 3. Redis ─────────────────────────
-say "3/9 Redis"
+say "3/8 Redis"
 RCONF=/etc/redis/redis.conf
 [[ -f $RCONF ]] || die "$RCONF 가 없습니다"
 redis_set() { # 활성 줄만 지우고 끝에 다시 씀 (주석 예시는 보존)
@@ -196,7 +195,7 @@ if [[ -z "$REDIS_URL_V" || "$REDIS_URL_V" == *"<"* || "$REDIS_URL_V" != *":$REDI
 fi
 
 # ───────────────────────── 4. Node.js ─────────────────────────
-say "4/9 Node.js 22"
+say "4/8 Node.js 22"
 node_ok() {
   command -v node >/dev/null && node -e 'const [a,b]=process.versions.node.split(".").map(Number); process.exit((a>22||(a===22&&b>=12)||(a===20&&b>=19))?0:1)'
 }
@@ -207,43 +206,8 @@ fi
 node_ok || die "Node.js 20.19+/22.12+ 설치 실패 (현재: $(node -v 2>/dev/null || echo 없음))"
 info "node $(node -v) · npm $(npm -v)"
 
-# ───────────────────────── 5. PHP-FPM ─────────────────────────
-say "5/9 PHP"
-if [[ -n "$PHP_VERSIONS" ]]; then
-  need_ppa=0
-  for v in ${PHP_VERSIONS//,/ }; do
-    apt-cache show "php$v-fpm" >/dev/null 2>&1 || need_ppa=1
-  done
-  if (( need_ppa )); then
-    info "ondrej/php PPA 추가 (Ubuntu 기본 저장소에 없는 PHP 버전)"
-    apt-get install -y -q software-properties-common >/dev/null
-    add-apt-repository -y ppa:ondrej/php >/dev/null 2>&1 || die "ondrej/php PPA 추가 실패"
-    apt-get update -q >/dev/null
-  fi
-  for v in ${PHP_VERSIONS//,/ }; do
-    pkgs="php$v-fpm php$v-cli php$v-mysql php$v-curl php$v-gd php$v-mbstring php$v-xml php$v-zip php$v-intl php$v-bcmath php$v-opcache"
-    # shellcheck disable=SC2086
-    apt-get install -y -q $pkgs >/dev/null || die "PHP $v 설치 실패"
-    apt-get install -y -q "php$v-redis" "php$v-imagick" >/dev/null 2>&1 || true
-    # 기본 www 풀은 상시 프로세스를 띄우지 않도록 ondemand 로
-    www="/etc/php/$v/fpm/pool.d/www.conf"
-    [[ -f "$www" ]] && sed -i -E 's/^pm = (dynamic|static)$/pm = ondemand/' "$www"
-    systemctl enable "php$v-fpm" >/dev/null 2>&1 || true
-    systemctl restart "php$v-fpm"
-    info "PHP $v ($(php$v -r 'echo PHP_VERSION;' 2>/dev/null || echo '?'))"
-  done
-  command -v composer >/dev/null || {
-    curl -fsSL https://getcomposer.org/installer -o /tmp/composer-setup.php \
-      && php /tmp/composer-setup.php --quiet --install-dir=/usr/local/bin --filename=composer >/dev/null 2>&1 \
-      && info "composer $(composer --version 2>/dev/null | awk '{print $3}')" || warn "composer 설치 건너뜀"
-    rm -f /tmp/composer-setup.php
-  }
-else
-  info "건너뜀 (--no-php)"
-fi
-
-# ───────────────────────── 6. 사용자 · 빌드 ─────────────────────────
-say "6/9 사용자 · Rust · 빌드"
+# ───────────────────────── 5. 사용자 · 빌드 ─────────────────────────
+say "5/8 사용자 · Rust · 빌드"
 id rpanel >/dev/null 2>&1 || useradd --system --home-dir /var/lib/rpanel --create-home --shell /usr/sbin/nologin rpanel
 id rpanel-app >/dev/null 2>&1 || useradd --system --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin rpanel-app
 install -d -o rpanel -g rpanel -m 0755 /var/lib/rpanel /var/lib/rpanel/builds /var/lib/rpanel/apps /var/lib/rpanel/www
@@ -253,11 +217,26 @@ install -d -o root -g rpanel -m 0750 /etc/rpanel
 install -d -o root -g root -m 0755 /var/lib/rpanel/acme
 getent group rpanel-sites >/dev/null || groupadd --system rpanel-sites
 
-if [[ ! -x /var/lib/rpanel/.cargo/bin/cargo ]]; then
-  info "rustup 설치 (rpanel 사용자 — 앱 빌드에도 사용)"
-  sudo -u rpanel -H bash -c 'curl --proto "=https" --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --no-modify-path' >/dev/null
+# rpanel 사용자로 실행 (프록시를 쓰는 서버라면 프록시 설정도 함께 전달)
+PROXY_ENV=()
+for v in http_proxy https_proxy HTTP_PROXY HTTPS_PROXY no_proxy NO_PROXY SSL_CERT_FILE NODE_EXTRA_CA_CERTS; do
+  [[ -n "${!v:-}" ]] && PROXY_ENV+=("$v=${!v}")
+done
+as_rpanel() { sudo -u rpanel -H env "${PROXY_ENV[@]}" "$@"; }
+
+CARGO=/var/lib/rpanel/.cargo/bin/cargo
+if [[ ! -x $CARGO ]]; then
+  info "Rust 설치 (rustup — 앱 빌드에도 사용)"
+  RUSTUP_INIT="$(mktemp /tmp/rustup-init.XXXXXX.sh)"
+  curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs -o "$RUSTUP_INIT" \
+    || die "Rust 설치 파일을 받지 못했습니다 — 인터넷 연결(https://sh.rustup.rs)을 확인하세요"
+  chmod 0644 "$RUSTUP_INIT"
+  as_rpanel sh "$RUSTUP_INIT" -y --profile minimal --no-modify-path >/dev/null \
+    || { rm -f "$RUSTUP_INIT"; die "Rust 설치에 실패했습니다 — 인터넷 연결을 확인하고 다시 실행하세요"; }
+  rm -f "$RUSTUP_INIT"
 fi
-info "$(sudo -u rpanel -H /var/lib/rpanel/.cargo/bin/cargo --version)"
+[[ -x $CARGO ]] || die "Rust(cargo)가 설치되지 않았습니다: $CARGO"
+info "$(as_rpanel "$CARGO" --version)"
 
 # 소스 저장소는 건드리지 않고 rpanel 소유 사본에서 빌드 (target/node_modules 보존 → 증분 빌드)
 SRC=/var/lib/rpanel/.self-build
@@ -266,9 +245,11 @@ if [[ $BUILD -eq 1 ]]; then
   rsync -a --delete --exclude .git --exclude target --exclude node_modules --exclude dist "$REPO/" "$SRC/"
   chown -R rpanel:rpanel "$SRC"
   info "백엔드 빌드 (cargo build --release) — 처음엔 5~10분 걸립니다"
-  sudo -u rpanel -H bash -c "cd '$SRC/backend' && /var/lib/rpanel/.cargo/bin/cargo build --release --locked --quiet --bins"
+  as_rpanel bash -c "cd '$SRC/backend' && '$CARGO' build --release --locked --quiet --bins" \
+    || die "백엔드 빌드에 실패했습니다 (위 오류 참고)"
   info "프런트 빌드 (React 19 + Vite + Tailwind 4)"
-  sudo -u rpanel -H bash -c "cd '$SRC/frontend' && npm ci --no-audit --no-fund --loglevel=error >/dev/null && npm run build >/dev/null"
+  as_rpanel bash -c "cd '$SRC/frontend' && npm ci --no-audit --no-fund --loglevel=error >/dev/null && npm run build >/dev/null" \
+    || die "화면(프런트) 빌드에 실패했습니다 (위 오류 참고)"
 elif [[ -x "$REPO/backend/target/release/rpanel" && -f "$REPO/frontend/dist/index.html" ]]; then
   SRC="$REPO"
 fi
@@ -276,16 +257,24 @@ fi
 [[ -x "$SRC/backend/target/release/rpanel-files" ]] || die "파일 관리 도구가 없습니다: $SRC/backend/target/release/rpanel-files"
 [[ -f "$SRC/frontend/dist/index.html" ]] || die "프런트 빌드 결과가 없습니다: $SRC/frontend/dist"
 
-# ───────────────────────── 7. 설치 ─────────────────────────
-say "7/9 패널 설치"
+# ───────────────────────── 6. 설치 ─────────────────────────
+say "6/8 패널 설치"
 install -m 0755 -o root -g root "$SRC/backend/target/release/rpanel" /usr/local/bin/rpanel
 install -d -m 0755 /usr/share/rpanel/www
 rsync -a --delete "$SRC/frontend/dist/" /usr/share/rpanel/www/
 chmod -R a+rX /usr/share/rpanel/www
+# 설치된 버전 기록 (rpanel-update 가 새 버전과 비교)
+if git -C "$REPO" rev-parse --short HEAD >/dev/null 2>&1; then
+  git -C "$REPO" log -1 --format='%h %cd' --date=format:'%Y-%m-%d' > /usr/share/rpanel/VERSION
+else
+  echo "local $(date +%Y-%m-%d)" > /usr/share/rpanel/VERSION
+fi
 install -d -m 0755 /usr/local/lib/rpanel
 install -m 0755 -o root -g root "$REPO/deploy/rpanel-helper" /usr/local/lib/rpanel/rpanel-helper
 install -m 0755 -o root -g root "$SRC/backend/target/release/rpanel-files" /usr/local/lib/rpanel/rpanel-files
-install -m 0755 -o root -g root "$REPO/deploy/bootstrap.sh" /usr/local/sbin/rpanel-update
+# 관리 명령: sudo rpanel-update / sudo rpanel-uninstall
+install -m 0755 -o root -g root "$REPO/update.sh" /usr/local/sbin/rpanel-update
+install -m 0755 -o root -g root "$REPO/uninstall.sh" /usr/local/sbin/rpanel-uninstall
 
 cat > /etc/sudoers.d/rpanel.tmp <<'EOF'
 # Rpanel: 패널은 이 helper 하나만 root로 실행할 수 있습니다 (인자·파일은 helper가 검증)
@@ -307,7 +296,7 @@ COOKIE=true
 EXTRA=""
 if [[ -f $ENVF ]]; then
   # 스크립트가 관리하지 않는 사용자 추가 설정은 보존
-  EXTRA="$(grep -Ev '^(#|$|DATABASE_URL=|REDIS_URL=|JWT_SECRET=|BIND_ADDR=|RPANEL_EXEC_MODE=|COOKIE_SECURE=|RPANEL_EDGE_MODE=|RPANEL_TRUSTED_PROXY=|RPANEL_IPV6=)' "$ENVF" || true)"
+  EXTRA="$(grep -Ev '^(#|$|DATABASE_URL=|REDIS_URL=|JWT_SECRET=|BIND_ADDR=|RPANEL_EXEC_MODE=|COOKIE_SECURE=|RPANEL_EDGE_MODE=|RPANEL_TRUSTED_PROXY=|RPANEL_IPV6=|RPANEL_ALLOW_FROM=|RPANEL_FIREWALL=|RPANEL_SSH_PASSWORD=|RPANEL_PANEL_DOMAIN=|RPANEL_EMAIL=)' "$ENVF" || true)"
   cp -p "$ENVF" "$ENVF.bak"
 fi
 {
@@ -321,6 +310,12 @@ fi
   echo "RPANEL_EDGE_MODE=$([[ $EDGE == proxy ]] && echo proxy || echo direct)"
   echo "RPANEL_TRUSTED_PROXY=$PROXY_IP"
   echo "RPANEL_IPV6=$IPV6"
+  echo "# 설치 옵션 (업데이트 때 그대로 다시 적용)"
+  echo "RPANEL_ALLOW_FROM=$ALLOW_FROM"
+  echo "RPANEL_FIREWALL=$FIREWALL"
+  echo "RPANEL_SSH_PASSWORD=$SSH_PASSWORD"
+  echo "RPANEL_PANEL_DOMAIN=$PANEL_DOMAIN"
+  echo "RPANEL_EMAIL=$EMAIL"
   if [[ -n "$EXTRA" ]]; then
     echo "$EXTRA"
   else
@@ -424,6 +419,11 @@ if [[ -n "$PANEL_DOMAIN" ]]; then
 fi
 
 # ───────────────────────── 사이트 유저 SSH/SFTP ─────────────────────────
+if [[ $SSH_PASSWORD -eq 0 && -f /etc/ssh/sshd_config.d/50-rpanel-sites.conf ]]; then
+  rm -f /etc/ssh/sshd_config.d/50-rpanel-sites.conf
+  systemctl reload ssh 2>/dev/null || systemctl reload sshd 2>/dev/null || true
+  info "사이트 유저 SSH/SFTP 비밀번호 로그인 끔 (공개키만)"
+fi
 if [[ $SSH_PASSWORD -eq 1 && -d /etc/ssh/sshd_config.d ]]; then
   cat > /etc/ssh/sshd_config.d/50-rpanel-sites.conf <<'EOF'
 # managed by rpanel — 사이트 유저(rpanel-sites 그룹)는 비밀번호로 SSH/SFTP 접속 가능
@@ -441,8 +441,8 @@ EOF
   fi
 fi
 
-# ───────────────────────── 8. 시작 ─────────────────────────
-say "8/9 패널 시작"
+# ───────────────────────── 7. 시작 ─────────────────────────
+say "7/8 패널 시작"
 systemctl restart rpanel
 ok=0
 for _ in $(seq 1 30); do
@@ -452,8 +452,8 @@ done
 (( ok )) || die "패널이 시작되지 않았습니다: journalctl -u rpanel -n 50 --no-pager"
 info "패널 동작 확인 (db·redis ok)"
 
-# ───────────────────────── 9. 방화벽 ─────────────────────────
-say "9/9 방화벽 (ufw)"
+# ───────────────────────── 8. 방화벽 ─────────────────────────
+say "8/8 방화벽 (ufw)"
 if [[ $FIREWALL -eq 1 ]]; then
   # 지금 SSH 로 접속해 있는 주소는 잠기지 않도록 허용 (sudo·파이프 실행에서도 동작하도록 소켓에서 직접 읽음)
   SSH_FROM="$(ss -Htn state established '( sport = :22 )' 2>/dev/null | awk '{print $4}' | sed -E 's/:[0-9]+$//; s/^\[//; s/\]$//; s/^::ffff://' | sort -u | tr '\n' ' ')"
@@ -495,14 +495,14 @@ else
 fi
 cat <<EOF
 
-$(printf '\033[1;32m')✔ Rpanel 설치 완료$(printf '\033[0m')
+$(printf '\033[1;32m')✔ Rpanel ${RPANEL_DONE_WORD:-설치} 완료$(printf '\033[0m')
 
   접속      $URL
-            → 첫 화면에서 관리자 계정을 만드세요
+$([[ -z "${RPANEL_DONE_WORD:-}" ]] && echo "            → 첫 화면에서 관리자 계정을 만드세요")
   모드      $EDGE$([[ $EDGE == proxy ]] && echo " — SSL 은 앞단 프록시($PROXY_IP)에서, 도메인은 프록시에서 이 서버 :80 으로 연결")
-  PHP       ${PHP_VERSIONS:-설치 안 함}
   실행 모드  $MODE$( [[ $MODE == dry-run ]] && echo "  — 실제 배포하려면 $ENVF 에서 RPANEL_EXEC_MODE=real 후 systemctl restart rpanel")
   설정·비밀  $ENVF
   업데이트   sudo rpanel-update
+  삭제      sudo rpanel-uninstall
   로그      journalctl -u rpanel -f
 EOF

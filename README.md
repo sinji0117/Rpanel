@@ -1,257 +1,269 @@
 # Rpanel
 
-**셀프호스팅 웹 호스팅 패널 — CloudPanel처럼 사이트를 만들고, Dokploy처럼 Git에서 배포합니다.**
-Ubuntu 24.04 서버에 이 패널 하나만 설치하면 Nginx · PHP-FPM · MariaDB · Redis · Node.js · Let's Encrypt 까지 함께 설정되어
-바로 웹사이트를 운영할 수 있습니다. Docker 없이 systemd + Nginx 위에서 동작합니다.
+**Rust로 만든 웹 서비스를 내 서버에 올리고 관리하는 무료 관리 화면(웹 패널)입니다.**
 
-| 계층 | 기술 |
+리눅스 명령어를 잘 몰라도 브라우저에서 클릭으로 사이트를 만들고, 프로그램을 올리고, https 자물쇠를 붙이고, 백업할 수 있습니다.
+누구나 무료로 쓰고 고칠 수 있는 오픈소스(MIT 라이선스)입니다.
+
+---
+
+## 이런 걸 할 수 있어요
+
+- **사이트 만들기**: 주소(도메인)만 넣으면 사이트가 생깁니다.
+  - **Rust 프로그램**: 내 컴퓨터에서 빌드한 실행 파일을 올리면 서비스로 실행됩니다.
+  - **HTML 사이트**: HTML·CSS·JS 파일을 올리면 바로 보입니다. React·Vue 등을 빌드한 결과물도 됩니다.
+  - **연결(리버스 프록시)**: 다른 서버나 포트로 넘겨줍니다.
+- **Git 자동 배포**: GitHub·GitLab에 코드를 올리면 서버가 알아서 `cargo build`하고 새 버전으로 바꿉니다. 실패하면 이전 버전으로 되돌아갑니다.
+- **파일 올리기**: 브라우저에서 끌어다 놓거나, FileZilla 같은 프로그램으로 올립니다.
+- **https 자물쇠**: 무료 인증서(Let's Encrypt)를 클릭 한 번으로 받고, 자동으로 갱신합니다.
+- **데이터베이스**: MariaDB와 Redis를 클릭 한 번으로 만들고, 접속 주소를 프로그램에 자동으로 알려 줍니다.
+- **백업과 복원**: 매일·매주 자동 백업하고, 문제가 생기면 그때로 되돌립니다.
+- **예약 작업(크론)**: 정해진 시간마다 명령을 실행합니다.
+- **상태 보기**: CPU·메모리·디스크 사용량, 프로그램 로그, 방문·오류 기록을 실시간으로 봅니다.
+
+사이트마다 별도의 리눅스 계정으로 나뉘어 있어서, 한 사이트에 문제가 생겨도 다른 사이트는 안전합니다.
+
+> **Rust 전용 패널입니다.** PHP(WordPress 등)나 Node.js 서버 프로그램은 실행하지 않습니다.
+> (React·Vue 같은 화면은 빌드한 HTML 파일로 올리면 됩니다.)
+
+---
+
+## 준비물
+
+| 항목 | 내용 |
 |---|---|
-| 백엔드 | Rust + Axum 0.8 (Tokio) |
-| DB | SQLx (`mysql` 기능) + MariaDB 10.11 LTS |
-| 캐시·세션 | Redis 7.x |
-| 프런트 | React 19 + Vite + Tailwind CSS 4 |
-| 인증 | JWT(액세스, 15분) + Redis 리프레시 세션(회전·재사용 탐지) |
-| 실시간 | Axum WebSocket — 서버 지표, 배포 로그 스트림 |
-| 테스트 | `cargo test` · Vitest · Playwright |
+| 서버 | **Ubuntu Server 24.04**를 새로 설치한 컴퓨터. 클라우드 서버(VPS)나 집의 남는 PC·가상머신 모두 됩니다. |
+| 사양 | 메모리 **2GB 이상**(서버에서 Rust를 빌드하려면 4GB 이상 권장), 디스크 20GB 이상 |
+| 인터넷 | 설치하는 동안 인터넷 연결이 필요합니다. |
+| 도메인 (선택) | `example.com` 같은 주소. 없어도 설치와 둘러보기는 됩니다. |
 
-```
- 브라우저 ──▶ :8443 (HTTPS, Nginx) ─┬─ /        → 패널 UI (React)
-                                    └─ /api, ws → 127.0.0.1:8090 (rpanel, 일반 사용자 권한)
-                                                   │ sudo rpanel-helper  (검증된 시스템 작업만)
-                                                   │ sudo -u <사이트유저> rpanel-files  (사이트 파일만)
- 방문자 ──▶ :80 / :443 (Nginx, 사이트별 설정) ─┬─ PHP 사이트    → PHP-FPM 풀 (사이트 유저로 실행)
-                                               ├─ HTML 사이트   → /home/<사이트유저>/htdocs/<도메인>
-                                               ├─ Node·Rust 앱  → 127.0.0.1:81xx (systemd 서비스)
-                                               └─ 리버스 프록시  → 지정한 주소
-```
+> 다른 웹 호스팅 관리 패널이 이미 깔린 서버에는 설치하지 마세요. 아무것도 없는 깨끗한 서버를 권장합니다.
 
 ---
 
-## 기능
+## 설치하기 (3단계)
 
-### 사이트 (CloudPanel 방식)
-- **사이트 추가** — 도메인만 입력하면 사이트 유저(리눅스 계정)·홈 폴더·Nginx 설정·PHP-FPM 풀이 만들어지고 바로 응답합니다.
-  - **PHP** — WordPress·Laravel·그누보드 등. 사이트마다 전용 PHP-FPM 풀(사이트 유저 권한, `ondemand`), 버전 선택(여러 버전 공존), memory_limit·업로드 크기·실행 시간 설정, 웹 루트 하위 폴더(`public`)
-  - **HTML** — 파일을 올리면 바로 서비스
-  - **Node.js** — 파일을 올리고 시작 명령으로 실행 (systemd, 사이트 유저 권한, 포트 자동 할당)
-  - **리버스 프록시** — 도메인을 다른 주소(내부 서버·포트)로 연결
-- **파일 관리자** — 탐색, 업로드(드래그 앤 드롭, 최대 2GB), 다운로드, 편집기, 새 폴더/파일, 이름 변경, 권한, 삭제, zip·tar.gz 풀기
-- **SSH · SFTP** — 사이트 유저로 FileZilla·WinSCP·터미널 접속 (비밀번호 또는 공개키)
-- **SSL** — Let's Encrypt 무료 인증서(자동 갱신) 또는 가지고 있는 인증서 업로드, HTTP→HTTPS 강제, HTTP/2
-- **데이터베이스** — MariaDB DB·전용 계정 생성, 접속 정보 자동 주입 (`DATABASE_URL`, PHP 는 `getenv()`)
-- **Redis** — 사이트마다 DB 번호 배정, `REDIS_URL` 자동 주입
-- **백업·복원** — DB 덤프 + 사이트 파일(`htdocs`), 매일/매주 예약, 보관 개수, 다운로드, 복원
-- **크론** — 사이트 유저 권한으로 예약 실행 (systemd timer — 예: `php artisan schedule:run`, `wp cron event run`)
-- **로그** — 도메인별 Nginx 접속/에러 로그와 상태코드·경로·IP 통계, PHP 에러 로그, 서비스 로그
+### 1. 서버에 접속합니다
 
-### Git 배포 (Dokploy 방식)
-- 프로젝트 / 앱 — **Rust**(cargo) · **Static**(React·Vite 빌드) · **Node** 앱을 Git 에서 빌드해 배포
-- 실시간 배포 로그(WebSocket), 헬스체크 실패 시 이전 릴리스로 자동 원복, 원클릭 롤백, 배포 취소
-- Deploy key(앱별 SSH 키), Webhook(GitLab/GitHub push 시 자동 배포)
-- 프런트(Static)의 `/api/` 를 백엔드 포트로 프록시 → 한 도메인에서 React + API
+- **Windows**: `PowerShell`을 엽니다.
+- **Mac**: `터미널`을 엽니다.
 
-### 공통
-- 대시보드 (CPU·메모리·디스크·load 실시간), 감사 로그, 로그인 rate limit, 비밀번호 변경 시 전 세션 로그아웃
-
----
-
-## 설치
-
-Ubuntu Server **24.04** 를 설치한 직후의 서버에서 한 줄이면 됩니다 (root 권한, 인터넷 연결 필요).
+그리고 아래처럼 입력합니다. `사용자`와 `서버IP`는 내 서버 정보로 바꾸세요.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/sinji0117/Rpanel/main/deploy/bootstrap.sh | sudo bash
+ssh 사용자@서버IP
 ```
 
-10분 안팎(대부분 Rust 빌드) 뒤:
+### 2. 아래 한 줄을 복사해서 붙여 넣습니다
 
-```
-✔ Rpanel 설치 완료
-  접속      https://<서버IP>:8443   (자체 서명 인증서 — 브라우저 경고에서 '계속' 선택)
-            → 첫 화면에서 관리자 계정을 만드세요
+```bash
+curl -fsSL https://raw.githubusercontent.com/sinji0117/Rpanel/main/install.sh | sudo bash
 ```
 
-> **저장소가 private 이면** 위 주소가 404 입니다. 토큰으로 받아서 실행하세요:
-> `sudo git clone https://<토큰>@github.com/sinji0117/Rpanel.git /opt/rpanel-src && sudo /opt/rpanel-src/deploy/install.sh`
+- 비밀번호를 물으면 서버 계정 비밀번호를 입력합니다. 입력하는 동안 화면에 아무것도 안 보이는 것이 정상입니다.
+- **10~20분** 정도 걸립니다. 웹 서버(Nginx), 데이터베이스(MariaDB·Redis), Rust 등 필요한 프로그램을 모두 자동으로 설치합니다.
+- 끝나면 `✔ Rpanel 설치 완료`와 접속 주소가 나옵니다.
 
-### 설치 모드
+### 3. 브라우저로 접속합니다
 
-| 모드 | 언제 | 하는 일 |
+```
+https://서버IP:8443
+```
+
+1. **"안전하지 않음" 경고가 나와도 정상입니다.** 처음에는 임시 인증서를 쓰기 때문입니다.
+   - Chrome: `고급` → `계속 진행`을 누릅니다.
+   - Safari: `세부사항 보기` → `이 웹 사이트 방문`을 누릅니다.
+2. 첫 화면에서 **관리자 계정(이메일·비밀번호)을 만듭니다.**
+3. 끝입니다. 이제 패널을 쓸 수 있습니다.
+
+> **클라우드 서버(AWS, 오라클, 네이버클라우드 등)를 쓰는 경우**
+> 업체 관리 화면의 "방화벽"이나 "보안 그룹"에서 포트 **22, 80, 443, 8443**을 열어 주세요. 이것을 안 하면 접속이 안 됩니다.
+
+---
+
+## 첫 사이트 만들기 (Rust 프로그램 올리기)
+
+### 1. 도메인을 서버에 연결합니다
+
+도메인을 산 곳(가비아, 후이즈, Cloudflare 등)의 **DNS 설정**에 아래 두 줄을 추가합니다.
+
+| 종류 | 이름(호스트) | 값 |
 |---|---|---|
-| `--mode=standalone` (기본) | 서버가 인터넷에서 80/443 을 직접 받을 때 (VPS, 공인 IP 포트포워딩) | 사이트마다 Let's Encrypt 발급, 80·443 개방 |
-| `--mode=proxy --trusted-proxy=<IP>` | 앞단에 리버스 프록시(Nginx Proxy Manager, Cloudflare Tunnel 등)가 SSL 을 처리할 때 | 실제 접속자 IP 복원, 80 은 프록시에서만 허용, SSL 은 프록시에서 |
+| A | `@` (비워 두는 곳도 있음) | 서버의 공인 IP |
+| A | `www` | 서버의 공인 IP |
 
-옵션은 한 줄 설치 뒤에 붙입니다: `curl … | sudo bash -s -- --mode=proxy --trusted-proxy=10.0.0.10`
+반영되는 데 몇 분에서 몇 시간이 걸릴 수 있습니다.
 
-| 옵션 | 설명 |
-|---|---|
-| `--allow-from=CIDR,…` | SSH(22)·패널(8443) 접속 허용 대역 (기본: 어디서나) — 예: `10.0.0.0/24,100.64.0.0/10` |
-| `--php=8.3,8.2,7.4` | 설치할 PHP 버전 (기본 `8.3`. 그 외 버전은 ondrej/php PPA) · `--no-php` |
-| `--panel-domain=panel.example.com --email=you@example.com` | 패널을 도메인으로 접속 + Let's Encrypt 인증서 (standalone) |
-| `--no-firewall` | ufw 를 건드리지 않음 |
-| `--no-ssh-password` | 사이트 유저의 SSH/SFTP 비밀번호 로그인을 켜지 않음 (공개키만) |
-| `--dry-run-mode` | 실제 배포 명령 없이 둘러보기 |
+### 2. 프로그램이 `PORT`를 읽도록 합니다
 
-### 설치 스크립트가 하는 일
+패널이 프로그램마다 빈 포트를 정해서 `PORT` 환경변수로 알려 줍니다. 프로그램은 그 포트로 `127.0.0.1`에서 열기만 하면 됩니다. [axum](https://github.com/tokio-rs/axum)을 쓴다면 이렇게 씁니다.
 
-| 단계 | 내용 |
-|---|---|
-| Nginx | 기본 서버는 등록되지 않은 도메인·IP 직접 접속을 끊음(444 / TLS 거부), Let's Encrypt 확인 경로, 갱신 시 자동 reload |
-| PHP-FPM | 선택한 버전 + 주요 확장(mysql·curl·gd·mbstring·xml·zip·intl·bcmath·opcache·redis·imagick), composer |
-| MariaDB 10.11 | `127.0.0.1` 바인딩, 익명 계정·test DB·원격 root 제거, RAM 기준 튜닝(없을 때만), 패널 DB |
-| Redis 7 | `127.0.0.1` 바인딩, 비밀번호 생성(이미 있으면 유지), `maxmemory 1gb` |
-| Node.js 22 / Rust | NodeSource, rustup (Git 앱 빌드용) |
-| 패널 | `rpanel`·`rpanel-app` 사용자, `rpanel-sites` 그룹, 빌드·설치, helper + sudoers, systemd, HTTPS :8443 |
-| SSH | `rpanel-sites` 그룹만 비밀번호 로그인 허용 (`Match Group`) |
-| 비밀값 | `/etc/rpanel/rpanel.env` — DB·Redis 비밀번호, JWT 키 자동 생성 (재실행해도 유지) |
-| ufw | 22·8443 ← `--allow-from`, 80·443 ← 어디서나(standalone) / 프록시만(proxy). **지금 SSH 로 접속 중인 주소는 자동 허용** |
-
-이미 MariaDB·Redis 를 쓰고 있는 서버에서 실행해도 기존 데이터와 Redis 비밀번호는 유지되고, 패널용 DB·설정만 추가됩니다.
-
-### 업데이트
-
-```bash
-sudo rpanel-update        # 최신 소스 → 증분 빌드 → 재시작 (DB 스키마는 자동 마이그레이션)
+```rust
+#[tokio::main]
+async fn main() {
+    let port = std::env::var("PORT").unwrap_or_else(|_| "3000".into());
+    let app = axum::Router::new().route("/", axum::routing::get(|| async { "안녕하세요!" }));
+    let listener = tokio::net::TcpListener::bind(format!("127.0.0.1:{port}")).await.unwrap();
+    axum::serve(listener, app).await.unwrap();
+}
 ```
+
+### 3. 패널에서 사이트를 추가합니다
+
+1. 왼쪽 메뉴에서 **사이트**를 누르고, **+ 사이트 추가**를 누릅니다.
+2. 종류는 **Rust**를 고릅니다.
+3. 도메인에 `example.com www.example.com`처럼 입력하고 **사이트 만들기**를 누릅니다.
+4. 화면에 **접속 정보(사용자 이름·비밀번호)가 한 번만** 나옵니다. 꼭 메모해 두세요. 파일을 올릴 때 씁니다.
+
+### 4. 실행 파일을 빌드해서 올립니다
+
+1. 내 컴퓨터에서 빌드합니다.
+   ```bash
+   cargo build --release
+   ```
+   - 서버는 리눅스(보통 x86_64)입니다. Mac이나 Windows에서 빌드한다면 리눅스용으로 빌드해야 합니다. 가장 쉬운 방법은 [`cross`](https://github.com/cross-rs/cross)를 쓰는 것입니다: `cross build --release --target x86_64-unknown-linux-gnu`
+   - 직접 빌드하기 번거로우면 아래 **"Git으로 자동 배포하기"**를 쓰세요. 서버가 대신 빌드합니다.
+2. `target/release/` 안에 생긴 실행 파일을 올립니다. **이름은 `app`으로** 합니다.
+   - **브라우저에서**: 사이트 → **파일** 탭에서 `업로드`를 누르거나 파일을 끌어다 놓습니다.
+   - **FileZilla 같은 프로그램으로**: 프로토콜 **SFTP**, 호스트는 서버 IP, 포트 22, 사용자·비밀번호는 3단계에서 받은 접속 정보입니다.
+3. 패널 위쪽의 **적용** 버튼을 누릅니다. 프로그램이 실행되고, 정상으로 응답하는지까지 확인합니다.
+
+새 버전을 올릴 때도 똑같이 `app` 파일을 덮어쓰고 **적용**을 누르면 됩니다. 프로그램이 출력하는 로그는 **서비스 로그** 탭에서 봅니다.
+
+### 5. https(자물쇠)를 붙입니다
+
+사이트 → **SSL** 탭에서 `발급`을 누릅니다. 도메인이 이 서버를 가리키고 있어야 발급됩니다(1단계). 인증서는 자동으로 갱신됩니다.
+
+---
+
+## Git으로 자동 배포하기
+
+코드를 GitHub·GitLab에 올려 두었다면, 서버가 직접 빌드하고 실행하게 할 수 있습니다.
+
+1. 왼쪽 메뉴 **프로젝트** → **+ 새 프로젝트**를 만들고, 그 안에서 **+ 새 앱**을 누릅니다.
+2. 종류 **Rust**를 고르고, Git 저장소 주소와 **바이너리 이름**(`Cargo.toml`의 `name`)을 넣습니다.
+3. 비공개 저장소라면 앱의 **Git · 웹훅** 탭에 나오는 **Deploy key**를 GitHub/GitLab 저장소 설정에 등록합니다.
+4. **배포**를 누르면 화면에 빌드 과정이 실시간으로 나옵니다.
+5. 같은 탭의 **Webhook 주소**를 GitHub/GitLab에 등록하면, 앞으로는 코드를 올릴 때마다 자동으로 배포됩니다.
+
+첫 빌드는 몇 분 걸릴 수 있습니다. 다음부터는 빌드 결과를 재사용해서 빨라집니다.
+
+---
+
+## 데이터베이스 쓰기
+
+1. 사이트(또는 앱) → **데이터베이스** 탭에서 `+ 데이터베이스`를 누르고 `만들기`를 누릅니다.
+2. 접속 주소가 `DATABASE_URL` 환경변수로 프로그램에 자동으로 전달됩니다. 코드에서는 이렇게 읽으면 됩니다.
+   ```rust
+   let url = std::env::var("DATABASE_URL")?; // mysql://사용자:비밀번호@127.0.0.1:3306/DB이름
+   ```
+3. Redis가 필요하면 같은 탭에서 Redis를 배정합니다. `REDIS_URL`로 전달됩니다.
+4. 다른 설정값(API 키 등)은 **환경변수** 탭에 넣으면 프로그램에 전달됩니다. 바꾼 뒤에는 **적용**(또는 **배포**)을 눌러야 반영됩니다.
+
+---
+
+## 백업
+
+- 사이트 → **백업** 탭에서 `지금 백업`을 누르면 바로 백업합니다. 데이터베이스와 사이트 파일이 함께 저장됩니다.
+- 같은 화면에서 **매일/매주 자동 백업**을 켤 수 있습니다.
+- 백업 목록에서 **다운로드**하거나, **복원**을 눌러 그 시점으로 되돌릴 수 있습니다.
+
+> 백업 파일은 같은 서버에 저장됩니다. 서버 자체가 고장 나는 경우에 대비해서, 중요한 서비스는 백업 파일을 가끔 내 컴퓨터로 내려받아 두세요.
 
 ---
 
 ## 자주 묻는 질문
 
-**Nginx 가 두 군데(앞단 프록시 서버와 이 서버)에 다 있어도 되나요?**
-네. 서로 다른 서버(또는 컨테이너)라면 문제없습니다. 예를 들어 `인터넷 → Nginx Proxy Manager(:443, SSL) → 이 서버(:80)` 처럼
-앞단 Nginx 는 SSL 을 풀어 넘기고, 이 서버의 Nginx 는 도메인별로 PHP·파일·앱에 연결합니다. 이때는 `--mode=proxy` 로 설치하세요.
-문제가 되는 경우는 **같은 서버에 Nginx 를 관리하는 패널이 둘** 있을 때입니다(예: CloudPanel 이 깔린 서버에 Rpanel 을 또 설치) —
-둘 다 80/443 과 `/etc/nginx` 를 차지하려 하므로 Rpanel 은 깨끗한 서버에 설치하세요. 또 proxy 모드에서는 Let's Encrypt
-확인 요청이 앞단 프록시에서 끝나므로, 인증서는 앞단에서 발급해야 합니다(패널 SSL 탭에 안내가 나옵니다).
+**집 공유기 뒤에 있거나, 앞에 다른 프록시 서버(Nginx Proxy Manager 등)가 있어요.**
+설치 명령 끝에 옵션을 붙여서 "프록시 모드"로 설치하세요. `10.0.0.10` 자리에는 앞단 프록시 서버의 IP를 넣습니다.
 
-**다른 Nginx 설정과 도메인이 겹치면?** 패널은 이미 다른 설정 파일이 쓰는 도메인을 거부합니다. 기존 파일을 정리한 뒤 적용하세요.
+```bash
+curl -fsSL https://raw.githubusercontent.com/sinji0117/Rpanel/main/install.sh | sudo bash -s -- --mode=proxy --trusted-proxy=10.0.0.10
+```
 
-**기존 DB 를 패널로 가져오려면?** 실수로 지우는 것을 막기 위해 패널은 자기가 만든 DB 만 관리합니다. 패널에서 새 DB 를 만든 뒤 옮기세요:
-`sudo mariadb-dump --single-transaction 기존DB | sudo mariadb 새DB`
+- 이 모드에서는 https 인증서를 **앞단 프록시에서** 발급합니다.
+- 앞단 프록시에는 도메인마다 `이 서버 IP:80`으로 연결해 주세요.
 
-**WordPress 설치는?** PHP 사이트 → 데이터베이스 탭에서 DB 생성 → 파일 관리자로 WordPress zip 업로드 후 "풀기" → 브라우저에서 설치 화면.
-DB 접속 정보는 데이터베이스 탭에 표시됩니다(호스트 `127.0.0.1`).
+**Nginx가 두 군데(앞단 프록시 서버와 이 서버)에 다 있어도 되나요?**
+네, **서로 다른 서버라면 괜찮습니다.**
+- 앞쪽은 https를 처리해서 넘겨주고, 이 서버는 사이트를 보여 주는 역할을 나눠 맡습니다.
+- 문제가 되는 건 **한 서버에 이런 패널을 두 개** 설치할 때입니다. 둘이 같은 자리(80·443 포트)를 차지하려고 싸웁니다.
+
+**프로그램이 시작되지 않아요.**
+- **서비스 로그** 탭에서 오류 메시지를 확인하세요.
+- 프로그램이 `PORT` 환경변수의 포트로 열고 있는지 확인하세요.
+- `exec format error`가 보이면 리눅스용으로 빌드되지 않은 파일입니다(4단계 참고).
+- `GLIBC_2.xx not found`가 보이면 내 컴퓨터의 리눅스가 서버보다 최신이라 생긴 문제입니다. `cross`로 빌드하거나 Git 자동 배포를 쓰세요.
+
+**PHP 사이트(WordPress 등)도 같이 돌리고 싶어요.**
+이 패널은 PHP를 지원하지 않습니다. PHP를 지원하는 다른 호스팅 패널을 **다른 서버**에 설치해서 쓰세요. 필요하면 이 패널의 "연결(리버스 프록시)" 사이트로 그 서버를 연결할 수 있습니다.
+
+**관리자 비밀번호를 잊어버렸어요.**
+1. 서버에 SSH로 접속해서 아래를 실행합니다. 패널 관리자 계정만 지워지고, 사이트·데이터는 그대로입니다.
+   ```bash
+   sudo mariadb rpanel -e "DELETE FROM users"
+   ```
+2. 다시 `https://서버IP:8443`에 접속하면 관리자 계정을 새로 만드는 화면이 나옵니다.
+
+**사이트 파일 접속 비밀번호를 잊어버렸어요.**
+사이트 → **SSH · SFTP** 탭에서 새 비밀번호로 바꿀 수 있습니다.
+
+**패널 주소를 `https://panel.내도메인.com`처럼 쓰고 싶어요.**
+1. 도메인 DNS에 `panel` A 레코드를 서버 IP로 추가합니다.
+2. 서버에서 `sudo rpanel-update --force --panel-domain=panel.내도메인.com --email=내이메일`을 실행합니다. 기존 사이트와 데이터는 그대로 유지됩니다.
 
 ---
 
-## 보안 모델
+## 업데이트와 삭제
 
-- 패널 프로세스는 **root 가 아닌 `rpanel` 사용자**로 실행됩니다. 패널 UI 는 HTTPS(8443) 로만 서비스되고, `--allow-from` 으로 접근 대역을 제한할 수 있습니다.
-- root 가 필요한 작업은 **`/usr/local/lib/rpanel/rpanel-helper` 한 개**만 sudo 로 허용합니다. helper 는 모든 인자와 스테이징 파일을 **화이트리스트**로 다시 검사합니다:
-  - Nginx: 허용된 지시어·location 만, `root` 는 해당 사이트 폴더로 고정, 인증서 경로·`fastcgi_pass` 소켓 고정, `include` 는 `fastcgi_params` 만, 다른 설정과 도메인 중복 금지, `nginx -t` 실패 시 원복
-  - systemd: 실행 사용자 고정(앱은 `rpanel-app`, 사이트는 그 사이트 유저), `NoNewPrivileges` 필수, 경로는 해당 앱/사이트 안
-  - PHP-FPM 풀: 사이트 유저로만, 허용된 키만(`auto_prepend_file`·`disable_functions` 변경 등 거부), `php-fpm -t` 실패 시 원복
-  - 사이트 유저: `rpanel-sites` 그룹, 시스템 계정 이름 거부, 레지스트리(`/etc/rpanel/site-users`)에 있는 계정만 삭제
-  - MariaDB: 패널이 만든 DB(`/etc/rpanel/managed-dbs`)만 삭제·덤프·복원
-  - SSL: 인증서와 개인키 일치 검사, 키는 root 0600
-- **사이트 파일은 그 사이트 유저 권한으로만** 다룹니다 (`sudo -u <사이트유저> rpanel-files`). 홈 디렉토리 밖을 가리키는 경로·심볼릭 링크는 거부합니다.
-- 사이트끼리는 리눅스 계정으로 격리됩니다 (홈 0750, PHP 는 사이트 유저로 실행). Nginx(`www-data`)만 각 사이트 그룹에 들어가 정적 파일을 읽습니다.
-- 이 계약은 `backend/tests/helper_contract.rs` 가 생성 템플릿 통과 + 위험한 변형(설정 주입, 경로 탈출, 권한 상승 시도 등)으로 검증합니다.
+### 업데이트
 
----
-
-## 사용 예
-
-### PHP 사이트 (WordPress·Laravel)
-1. **사이트 → + 사이트 추가 → PHP**, 도메인 `example.com www.example.com` → 접속 정보(SFTP 사용자·비밀번호)가 한 번 표시됩니다
-2. **데이터베이스 탭**에서 DB 생성 → 다시 **적용**하면 PHP 에서 `getenv('DATABASE_URL')` 로도 읽을 수 있습니다
-3. **파일 탭**에 사이트 파일 업로드 (또는 SFTP), Laravel 이면 **설정 → 웹 루트** 를 `public` 으로
-4. **SSL 탭** → Let's Encrypt 발급 (standalone) — 도메인 DNS 가 이 서버를 가리켜야 합니다
-5. **크론 탭** → `php artisan schedule:run` 을 `*:0/1` 로
-
-### Rust API + React 프런트 (Git)
-1. **프로젝트** 생성 → 앱 1 **Rust**: Git 저장소, 바이너리 이름, 헬스체크 `/api/health` (도메인 비움)
-2. **Git · 웹훅 탭** → Deploy key 를 저장소에 등록 → **배포**
-3. 앱 2 **Static**: 프런트 저장소, 도메인, **/api/ 프록시 포트 = 앱 1 포트** → **배포**
-4. Webhook URL·토큰을 GitLab/GitHub 에 등록하면 push 할 때마다 자동 배포
-
-### 홈랩 예시 — 앞단에 Nginx Proxy Manager 가 있을 때
-```bash
-curl -fsSL https://raw.githubusercontent.com/sinji0117/Rpanel/main/deploy/bootstrap.sh \
-  | sudo bash -s -- --mode=proxy --trusted-proxy=10.0.0.10 --allow-from=10.0.0.0/24,100.64.0.0/10
-```
-NPM 에 도메인마다 Proxy Host → `<이 서버 IP>:80` 을 등록하고 SSL 은 NPM 에서 발급합니다.
-
----
-
-## 디렉토리 구조
-
-```
-/usr/local/bin/rpanel                      패널
-/usr/local/lib/rpanel/rpanel-helper        권한 작업 helper (root 0755)
-/usr/local/lib/rpanel/rpanel-files         사이트 파일 도구 (사이트 유저로 실행)
-/usr/share/rpanel/www/                     패널 UI
-/etc/rpanel/rpanel.env                     설정·비밀값 (root:rpanel 0640)
-/etc/rpanel/site-users, managed-dbs        helper 레지스트리
-/etc/rpanel/certs/<slug>/                  직접 올린 인증서 (root 0600)
-/etc/letsencrypt/live/rpanel-<slug>/       Let's Encrypt 인증서
-/etc/nginx/conf.d/rpanel.conf              기본 서버(444) · 공통 map
-/etc/nginx/sites-available/rpanel-<slug>.conf
-/etc/php/<ver>/fpm/pool.d/rpanel-<slug>.conf
-/etc/systemd/system/rpanel-app-<slug>.service, rpanel-cron-<slug>-<id>.{service,timer}
-
-/home/<사이트유저>/htdocs/<도메인>/        사이트 파일 (CloudPanel 과 같은 구조)
-/home/<사이트유저>/logs/php-error.log
-/var/lib/rpanel/
-  builds/<slug>/repo                       Git 앱 체크아웃·빌드 캐시
-  apps/<slug>/releases/<배포id>, current   Git 앱 릴리스 (최근 3개)
-  apps/<slug>/app.env                      환경변수 (0600)
-  www/<slug>/current                       Git 정적 앱
-  backups/<slug>/                          백업 (앱을 삭제해도 남김)
-  acme/                                    Let's Encrypt 확인 경로
-```
-
-## 개발
+서버에 접속해서 아래 한 줄을 실행합니다.
 
 ```bash
-# MariaDB + Redis 준비 후
-cd backend
-DATABASE_URL=mysql://rpanel:pw@127.0.0.1:3306/rpanel \
-REDIS_URL=redis://:pw@127.0.0.1:6379/10 \
-JWT_SECRET=$(openssl rand -hex 32) \
-RPANEL_EXEC_MODE=dry-run RPANEL_DATA_DIR=/tmp/rpanel-data \
-cargo run
-
-cd frontend && npm install && npm run dev     # http://localhost:5173 (/api → 127.0.0.1:8090 프록시)
+sudo rpanel-update
 ```
 
-### 테스트
+- 새 버전이 있을 때만 업데이트합니다. 새 버전이 있는지 확인만 하려면 `sudo rpanel-update --check`.
+- 사이트, 데이터베이스, 설정, 비밀번호는 **그대로 유지**됩니다. 처음 설치할 때 붙인 옵션(프록시 모드 등)도 그대로 적용됩니다.
+- 업데이트 전에 패널 데이터를 자동으로 백업하고, 새 버전이 제대로 시작되지 않으면 **이전 버전으로 자동으로 되돌립니다.**
+- 업데이트하는 동안 몇 분간 패널 화면이 안 열릴 수 있지만, 사이트는 계속 접속됩니다.
+
+### 삭제
 
 ```bash
-cd backend && cargo test                       # 단위 + helper 계약 + rpanel-files
-
-# 통합 테스트 (실제 MariaDB/Redis, dry-run 실행기, WebSocket 포함) — ⚠ 테스트 DB 내용을 지웁니다
-RPANEL_TEST_DATABASE_URL=mysql://user:pw@127.0.0.1:3306/rpanel_test \
-RPANEL_TEST_REDIS_URL=redis://:pw@127.0.0.1:6379/15 \
-cargo test --test api
-
-cd frontend && npm test                        # Vitest
-npx playwright install chromium && npm run e2e # E2E (가짜 API, 백엔드 불필요)
+sudo rpanel-uninstall
 ```
 
-## API 요약
+실행하면 두 가지 중 하나를 고르라고 물어봅니다.
 
-| 메서드 | 경로 | 설명 |
+| 선택 | 지우는 것 | 남기는 것 |
 |---|---|---|
-| GET | `/api/health` | DB·Redis 상태 |
-| GET/POST | `/api/auth/status`, `/setup`, `/login`, `/refresh`, `/logout`, `/me`, `/password`, `/ws-ticket` | 인증 |
-| GET/POST | `/api/sites` | 사이트 목록(응답 확인) / 만들기 (`type`: html·php·node·proxy) |
-| PUT | `/api/apps/{id}/site-user/password`, `/api/apps/{id}/php` | 사이트 유저 비밀번호, PHP 설정 |
-| GET/POST/PUT/DELETE | `/api/apps/{id}/ssl`, `/ssl/letsencrypt`, `/ssl/custom`, `/ssl/force` | SSL |
-| GET/PUT/POST | `/api/apps/{id}/files`, `/files/content`, `/files/upload`, `/files/download`, `/files/op` | 파일 관리자 |
-| GET/POST | `/api/projects`, `/api/projects/{id}` (PUT/DELETE), `/api/projects/{id}/apps` | Git 프로젝트·앱 |
-| GET/PUT/DELETE | `/api/apps/{id}` · GET/PUT `/env` · POST `/deploy` | 앱 |
-| GET/POST | `/api/apps/{id}/deployments`, `/api/deployments/{id}`, `/cancel`, `/rollback` | 배포·적용 기록 |
-| GET/POST | `/api/apps/{id}/service`, `/journal`, `/deploy-key`, `/webhook`, POST `/api/hooks/{slug}` | 운영 |
-| GET/POST/DELETE | `/api/databases`, `/api/apps/{id}/databases`, `/api/apps/{id}/redis` | DB·Redis |
-| GET/POST/PUT/DELETE | `/api/backups`, `/api/apps/{id}/backups`, `/backup-settings`, `/api/backups/{id}/restore`, `/download` | 백업 |
-| GET/POST/PUT/DELETE | `/api/apps/{id}/cron`, `/api/cron/{id}`, `/run`, `/log`, `/api/cron/preview` | 크론 |
-| GET | `/api/apps/{id}/nginx-logs`, `/api/system/info`, `/overview`, `/php`, `/edge`, `/api/audit` | 로그·시스템 |
-| WS | `/api/ws/metrics?ticket=`, `/api/ws/deployments/{id}?ticket=` | 실시간 |
+| **1) 패널만 삭제** | 패널 프로그램, 사이트 연결 설정 (사이트 접속이 멈춤) | 사이트 파일, 데이터베이스, 백업, 설정 — 다시 설치하면 이어서 쓸 수 있습니다 |
+| **2) 전부 삭제** | 위의 것 + 사이트 파일과 계정, 패널이 만든 데이터베이스, 백업, 인증서 | 없음 (되돌릴 수 없습니다) |
 
-인증된 요청은 `Authorization: Bearer <access>`, 쿠키 기반 엔드포인트(`/auth/refresh`, `/auth/logout`)는 `X-Requested-With: rpanel` 헤더가 필요합니다(CSRF 방지).
+- 어느 쪽이든 Nginx·MariaDB·Redis 같은 기본 프로그램은 지우지 않습니다. 다른 곳에서 쓰고 있을 수 있기 때문입니다.
+- `rpanel-uninstall` 명령이 없어졌다면(설치가 중간에 실패한 경우 등) 이렇게 실행하세요:
+  ```bash
+  curl -fsSL https://raw.githubusercontent.com/sinji0117/Rpanel/main/uninstall.sh | sudo bash
+  ```
 
-## 라이선스
+---
 
-MIT — [LICENSE](LICENSE)
+## 문제가 생겼을 때
+
+| 증상 | 확인할 것 |
+|---|---|
+| 패널(`:8443`)에 접속이 안 돼요 | 클라우드 업체 방화벽에서 8443 포트를 열었는지 확인하세요. 주소가 `https://`로 시작하는지도 확인하세요. |
+| 사이트가 안 열려요 | 도메인 DNS가 서버 IP를 가리키는지 확인하세요(반영에 시간이 걸릴 수 있음). 클라우드 방화벽에서 80·443 포트도 열어야 합니다. |
+| "502 Bad Gateway"가 나와요 | 프로그램이 꺼져 있다는 뜻입니다. `app` 파일을 올리고 **적용**을 눌렀는지, **서비스 로그**에 오류가 없는지 확인하세요. |
+| https 발급이 실패해요 | 위의 DNS와 80 포트가 대부분의 원인입니다. 프록시 모드라면 앞단 프록시에서 발급해야 합니다. |
+| HTML 사이트에 "403"이나 "404"가 나와요 | 파일 탭에서 `index.html`이 사이트 폴더 **바로 안**에 있는지 확인하세요. zip을 풀면 폴더가 한 겹 더 생기는 경우가 많습니다. |
+| 그 밖의 오류 | 사이트 → **Nginx 로그** 탭의 오류 기록을 확인하세요. 해결이 안 되면 [이슈](https://github.com/sinji0117/Rpanel/issues)에 남겨 주세요. |
+
+---
+
+## 더 알아보기
+
+- 설치 옵션, 구조, 보안 설계, 개발·테스트 방법, API는 **[기술 문서](docs/ADVANCED.md)**를 보세요.
+- 라이선스: MIT ([LICENSE](LICENSE)). 개인·회사 모두 무료로 쓰고 고치고 배포할 수 있습니다.

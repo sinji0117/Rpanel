@@ -694,7 +694,7 @@ async fn full_flow() {
         StatusCode::NO_CONTENT
     );
 
-    // ── CloudPanel 방식 사이트 만들기 ──
+    // ── 사이트 만들기 ──
     let r = ctx
         .post(
             "/api/sites",
@@ -722,11 +722,12 @@ async fn full_flow() {
     assert!(log.contains("✔ 적용 완료"));
     assert!(d["commit_sha"].is_null());
 
+    // 업로드형 Rust 사이트 (실행 파일을 올려 사이트 유저로 실행)
     let r = ctx
         .post(
             "/api/sites",
             &t,
-            json!({"type":"php","domains":"shop.example.com","password":"site-password-1"}),
+            json!({"type":"rust","domains":"shop.example.com","password":"site-password-1"}),
         )
         .await;
     assert_eq!(r.status, StatusCode::CREATED, "{:?}", r.body);
@@ -734,22 +735,24 @@ async fn full_flow() {
         r.body["generated_password"].is_null(),
         "given password is not echoed"
     );
-    assert_eq!(r.body["app"]["php_version"], "8.3");
-    let php_id = r.body["app"]["id"].as_u64().unwrap();
+    assert_eq!(r.body["app"]["kind"], "rust");
+    assert_eq!(r.body["app"]["source"], "files");
+    assert_eq!(r.body["app"]["start_cmd"], "./app");
+    assert!(r.body["app"]["port"].as_u64().is_some());
+    let rust_id = r.body["app"]["id"].as_u64().unwrap();
     let d = wait_deploy(&ctx, &t, r.body["deployment_id"].as_u64().unwrap()).await;
-    assert!(
-        d["log"]
-            .as_str()
-            .unwrap()
-            .contains("install-php-pool shop-example-com 8.3"),
-        "{d:?}"
-    );
+    assert_eq!(d["status"], "success", "{d:?}");
+    let log = d["log"].as_str().unwrap();
+    assert!(log.contains("chmod u+x -- ./app"), "{log}");
+    assert!(log.contains("install-unit shop-example-com"), "{log}");
+    assert!(log.contains("install-site shop-example-com"), "{log}");
 
+    // PHP 는 지원하지 않음
     assert_eq!(
         ctx.post(
             "/api/sites",
             &t,
-            json!({"type":"php","domains":"x.example.com","php_version":"5.6"})
+            json!({"type":"php","domains":"x.example.com"})
         )
         .await
         .status,
@@ -800,6 +803,7 @@ async fn full_flow() {
     assert_eq!(r.status, StatusCode::CREATED, "{:?}", r.body);
     assert!(r.body["app"]["site_user"].is_null());
     let proxy_id = r.body["app"]["id"].as_u64().unwrap();
+    // Node.js 등 Rust 가 아닌 실행 사이트는 만들 수 없음
     let r = ctx
         .post(
             "/api/sites",
@@ -807,38 +811,56 @@ async fn full_flow() {
             json!({"type":"node","domains":"node.example.com"}),
         )
         .await;
-    assert_eq!(r.status, StatusCode::CREATED);
-    assert!(r.body["app"]["port"].as_u64().is_some());
-    assert_eq!(r.body["app"]["start_cmd"], "node server.js");
-    let node_id = r.body["app"]["id"].as_u64().unwrap();
-    wait_deploy(&ctx, &t, r.body["deployment_id"].as_u64().unwrap()).await;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST);
 
     // 사이트 설정 변경 → 바로 적용
     let r = ctx
-        .req(Method::PUT, &format!("/api/apps/{php_id}"), Some(&t), None, Some(json!({"name":"Shop","domains":"shop.example.com www.shop.example.com","web_root":"public"})))
+        .req(Method::PUT, &format!("/api/apps/{rust_id}"), Some(&t), None, Some(json!({"name":"Shop","domains":"shop.example.com www.shop.example.com","start_cmd":"./shop-server --port $PORT"})))
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+    assert_eq!(r.body["start_cmd"], "./shop-server --port $PORT");
+    assert_eq!(
+        ctx.req(
+            Method::PUT,
+            &format!("/api/apps/{rust_id}"),
+            Some(&t),
+            None,
+            Some(json!({"name":"Shop","domains":"shop.example.com"}))
+        )
+        .await
+        .status,
+        StatusCode::BAD_REQUEST,
+        "start_cmd is required for rust sites"
+    );
+    let r = ctx
+        .req(
+            Method::PUT,
+            &format!("/api/apps/{html_id}"),
+            Some(&t),
+            None,
+            Some(json!({"name":"Static","domains":"static-site.example.com","web_root":"public"})),
+        )
         .await;
     assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
     assert_eq!(r.body["web_root"], "public");
     let r = ctx
         .req(
             Method::PUT,
-            &format!("/api/apps/{php_id}"),
+            &format!("/api/apps/{html_id}"),
             Some(&t),
             None,
-            Some(json!({"name":"Shop","domains":"shop.example.com","web_root":"../etc"})),
+            Some(json!({"name":"Static","domains":"static-site.example.com","web_root":"../etc"})),
         )
         .await;
     assert_eq!(r.status, StatusCode::BAD_REQUEST);
-    for _ in 0..50 {
-        if ctx.get(&format!("/api/apps/{php_id}"), &t).await.body["status"] != "deploying" {
-            break;
+    for id in [rust_id, html_id] {
+        for _ in 0..50 {
+            if ctx.get(&format!("/api/apps/{id}"), &t).await.body["status"] != "deploying" {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
         }
-        tokio::time::sleep(Duration::from_millis(100)).await;
     }
-    let r = ctx.req(Method::PUT, &format!("/api/apps/{php_id}/php"), Some(&t), None, Some(json!({"version":"8.3","memory_mb":512,"upload_mb":128,"max_exec":120,"max_children":8}))).await;
-    assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
-    assert_eq!(r.body["client_max_body_mb"], 128);
-    assert_eq!(ctx.req(Method::PUT, &format!("/api/apps/{html_id}/php"), Some(&t), None, Some(json!({"version":"8.3","memory_mb":512,"upload_mb":128,"max_exec":120,"max_children":8}))).await.status, StatusCode::BAD_REQUEST);
 
     // 사이트 유저 · SSL · 파일 (dry-run 에서는 파일 관리자 비활성)
     assert_eq!(
@@ -939,8 +961,8 @@ async fn full_flow() {
         StatusCode::BAD_REQUEST
     );
     assert_eq!(
-        ctx.get("/api/system/php", &t).await.body["versions"],
-        json!(["8.3"])
+        ctx.get("/api/system/php", &t).await.status,
+        StatusCode::NOT_FOUND
     );
     // 파일 사이트 백업은 htdocs
     let r = ctx
@@ -966,13 +988,13 @@ async fn full_flow() {
     // 파일 사이트 크론 허용
     let r = ctx
         .post(
-            &format!("/api/apps/{php_id}/cron"),
+            &format!("/api/apps/{rust_id}/cron"),
             &t,
-            json!({"name":"wp-cron","schedule":"*:0/5","command":"php wp-cron.php"}),
+            json!({"name":"cleanup","schedule":"*:0/5","command":"./app --cleanup"}),
         )
         .await;
     assert_eq!(r.status, StatusCode::CREATED, "{:?}", r.body);
-    for id in [html_id, php_id, proxy_id, node_id] {
+    for id in [html_id, rust_id, proxy_id] {
         let r = ctx
             .req(
                 Method::DELETE,

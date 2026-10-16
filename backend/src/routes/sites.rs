@@ -1,4 +1,4 @@
-//! 사이트(도메인) 중심 화면 — CloudPanel의 Sites 목록
+//! 사이트(도메인) 중심 화면 — 사이트 목록과 응답 확인
 //! 도메인마다 이 서버의 Nginx(:80)에 Host 헤더로 요청해 실제 응답을 확인하고, Nginx 로그를 보여줍니다.
 
 use std::{collections::HashMap, time::Instant};

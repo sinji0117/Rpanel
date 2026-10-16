@@ -105,7 +105,7 @@ export default function ProjectDetail() {
           }
         >
           Git 저장소에서 빌드하는 앱입니다. Rust(Axum) 백엔드는 <b>Rust</b>, React + Vite 프런트는 <b>Static</b>으로 만들고, 프런트의 “/api/ 프록시 포트”에
-          백엔드 포트를 넣으면 한 도메인에서 프런트와 API 를 함께 서비스합니다. 파일을 직접 올리는 PHP·HTML 사이트는 <b>사이트</b> 메뉴에서 만드세요.
+          백엔드 포트를 넣으면 한 도메인에서 프런트와 API 를 함께 서비스합니다. 빌드한 실행 파일·HTML 을 직접 올리는 사이트는 <b>사이트</b> 메뉴에서 만드세요.
         </Empty>
       )}
 

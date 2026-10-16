@@ -19,7 +19,7 @@ use crate::{
 /// 사이트 유저 (파일 기반 사이트만)
 pub fn site_user(app: &App) -> AppResult<&str> {
     app.site_user.as_deref().ok_or_else(|| {
-        AppError::bad("파일 관리자는 사이트(HTML·PHP·Node 파일) 앱에서만 쓸 수 있습니다")
+        AppError::bad("파일 관리자는 사이트(Rust·HTML 파일) 앱에서만 쓸 수 있습니다")
     })
 }
 

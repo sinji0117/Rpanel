@@ -43,8 +43,6 @@ pub struct Project {
 pub enum AppKind {
     Rust,
     Static,
-    Node,
-    Php,
     Proxy,
 }
 
@@ -53,8 +51,6 @@ impl AppKind {
         match self {
             AppKind::Rust => "rust",
             AppKind::Static => "static",
-            AppKind::Node => "node",
-            AppKind::Php => "php",
             AppKind::Proxy => "proxy",
         }
     }
@@ -62,15 +58,13 @@ impl AppKind {
         match s {
             "rust" => Some(Self::Rust),
             "static" => Some(Self::Static),
-            "node" => Some(Self::Node),
-            "php" => Some(Self::Php),
             "proxy" => Some(Self::Proxy),
             _ => None,
         }
     }
     /// systemd 서비스로 상주하는 앱인가 (포트 필요)
     pub fn is_service(&self) -> bool {
-        matches!(self, AppKind::Rust | AppKind::Node)
+        matches!(self, AppKind::Rust)
     }
 }
 
@@ -80,7 +74,7 @@ impl AppKind {
 pub enum Source {
     /// Git 저장소에서 빌드
     Git,
-    /// 사이트 유저 홈의 파일을 그대로 서비스 (CloudPanel 방식)
+    /// 사이트 유저 홈(/home/<유저>/htdocs/<도메인>)의 파일을 그대로 서비스
     Files,
     /// 파일 없음 (리버스 프록시)
     None,
@@ -138,11 +132,6 @@ pub struct App {
     pub site_user: Option<String>,
     pub site_root: Option<String>,
     pub web_root: String,
-    pub php_version: Option<String>,
-    pub php_memory_mb: u32,
-    pub php_upload_mb: u32,
-    pub php_max_exec: u32,
-    pub php_max_children: u32,
     pub proxy_target: Option<String>,
     /// none | letsencrypt | custom
     pub ssl_mode: String,
@@ -210,8 +199,8 @@ pub struct AuditLog {
 }
 
 pub const APP_COLUMNS: &str = "id, project_id, name, slug, kind, git_url, git_branch, root_dir, build_cmd, start_cmd, \
-     binary_name, output_dir, port, api_proxy_port, domains, health_path, status, current_commit, current_release, webhook_token, redis_db, backup_schedule, backup_keep, backup_last_scheduled, source, site_user, site_root, web_root, php_version, \
-     php_memory_mb, php_upload_mb, php_max_exec, php_max_children, proxy_target, ssl_mode, force_https, client_max_body_mb, \
+     binary_name, output_dir, port, api_proxy_port, domains, health_path, status, current_commit, current_release, webhook_token, redis_db, backup_schedule, backup_keep, backup_last_scheduled, source, site_user, site_root, web_root, \
+     proxy_target, ssl_mode, force_https, client_max_body_mb, \
      created_at, updated_at";
 
 pub const DEPLOY_COLUMNS: &str =

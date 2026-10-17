@@ -211,14 +211,19 @@ export function CopyButton({ text, label = t('복사') }) {
 
 export function Tabs({ tabs, active, onChange }) {
   return (
-    <div role="tablist" className="mb-5 flex gap-1 overflow-x-auto border-b border-ink-700/70">
+    // 좁은 화면에선 옆으로 밀어서 보지만 스크롤바는 그리지 않음.
+    // 아래 줄은 테두리 대신 안쪽 그림자로 그려서 탭 밑줄이 밖으로 넘치지 않게 (넘치면 세로 스크롤바가 생김)
+    <div
+      role="tablist"
+      className="mb-5 flex gap-1 overflow-x-auto overflow-y-hidden shadow-[inset_0_-1px_0_var(--color-ink-700)] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+    >
       {tabs.map((t) => (
         <button
           key={t.id}
           role="tab"
           aria-selected={active === t.id}
           onClick={() => onChange(t.id)}
-          className={`-mb-px border-b-2 px-3.5 py-2.5 text-sm whitespace-nowrap transition ${
+          className={`shrink-0 border-b-2 px-3.5 py-2.5 text-sm whitespace-nowrap transition ${
             active === t.id ? 'border-signal text-ink-100' : 'border-transparent text-ink-400 hover:text-ink-100'
           }`}
         >

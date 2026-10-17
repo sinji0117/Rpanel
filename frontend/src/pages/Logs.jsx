@@ -34,7 +34,7 @@ function useFilter(lines) {
     const k = q.trim().toLowerCase()
     return (k ? lines.filter((l) => l.toLowerCase().includes(k)) : lines).map((text, i) => ({ seq: i + 1, text }))
   }, [lines, q])
-  const input = <input className="input w-48 py-1 text-xs" placeholder={t('검색…')} aria-label={t('로그 검색')} value={q} onChange={(e) => setQ(e.target.value)} />
+  const input = <input className="input w-full py-1 text-xs sm:w-48" placeholder={t('검색…')} aria-label={t('로그 검색')} value={q} onChange={(e) => setQ(e.target.value)} />
   return [shown, input]
 }
 
@@ -74,8 +74,8 @@ function AuditLog() {
     <section className="card">
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-ink-700/70 px-5 py-3">
         <p className="text-xs text-ink-400">{t('패널에서 누가 언제 무엇을 했는지 (로그인, 만들기·바꾸기·지우기)')}</p>
-        <div className="flex items-center gap-2">
-          <input className="input w-48 py-1 text-xs" placeholder={t('검색…')} aria-label={t('활동 검색')} value={q} onChange={(e) => setQ(e.target.value)} />
+        <div className="flex flex-wrap items-center gap-2">
+          <input className="input w-full py-1 text-xs sm:w-48" placeholder={t('검색…')} aria-label={t('활동 검색')} value={q} onChange={(e) => setQ(e.target.value)} />
           <LinesSelect value={n} onChange={setN} options={[100, 200, 500]} />
           <button className="btn-ghost px-2.5 py-1 text-xs" onClick={() => audit.reload()}>
             {t('새로고침')}

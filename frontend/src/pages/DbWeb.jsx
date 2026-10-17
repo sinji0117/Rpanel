@@ -154,7 +154,7 @@ export function DbWebStandalone() {
           {session.username}
         </span>
         <span className="ml-auto flex items-center gap-2">
-          <ThemeLangSwitch compact />
+          <ThemeLangSwitch compact up={false} right />
           <button
             className="btn-ghost"
             onClick={async () => {

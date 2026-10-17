@@ -8,7 +8,7 @@ export function Shell({ title, subtitle, children }) {
   return (
     <div className="relative flex min-h-screen items-center justify-center px-4">
       <div className="absolute top-4 right-4">
-        <ThemeLangSwitch compact />
+        <ThemeLangSwitch compact up={false} right />
       </div>
       <div className="w-full max-w-sm">
         <div className="mb-8 flex justify-center">

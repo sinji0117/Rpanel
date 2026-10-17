@@ -42,13 +42,14 @@ test('최초 설정 → 대시보드 실시간 지표', async ({ page }) => {
   await expect(page.getByRole('heading', { name: '대시보드' })).toBeVisible()
   await expect(page.getByText('DRY-RUN 모드')).toBeVisible()
   await expect(page.getByTestId('cpu-value')).toHaveText('23.5%')
-  await expect(page.getByText('실시간')).toBeVisible()
+  await expect(page.getByRole('switch', { name: /자동 갱신/ })).toBeVisible()
+  await expect(page.getByText('실시간 스트림 (2초 갱신)')).toBeVisible()
   // 모니터링 그래프 4개 + 가동 시간 (부팅 시각으로 계산)
   for (const name of ['CPU 사용률', '메모리 사용률', '디스크 사용률', 'Load Average']) await expect(page.getByRole('img', { name })).toBeVisible()
   await expect(page.getByText('/ (371 GB)')).toBeVisible()
   await expect(page.getByText('6 CPU').first()).toBeVisible()
   await expect(page.getByTestId('uptime-value')).toHaveText('3일 4시간 5분')
-  await page.getByLabel('기간').selectOption('24h')
+  await page.getByRole('region', { name: '모니터링', exact: true }).getByLabel('기간').selectOption('24h')
   await expect(page.getByRole('img', { name: 'CPU 사용률' }).locator('circle')).toHaveCount(0) // 점이 많으면 선만
 })
 
@@ -507,7 +508,14 @@ test('관리자 추가·수정·삭제', async ({ page }) => {
   await menu(page).getByRole('link', { name: '설정' }).click()
   await expect(page.getByRole('heading', { name: '내 비밀번호 변경' })).toBeVisible()
   await menu(page).getByRole('link', { name: '대시보드' }).click()
-  await expect(page.getByText('Intel Xeon E5-2690', { exact: false })).toBeVisible()
+  await expect(page.getByText('Intel Xeon E5-2690', { exact: false }).first()).toBeVisible()
+  // 대시보드 시스템 이벤트 · 스냅샷
+  const ev = page.getByRole('region', { name: '서버 시스템 이벤트 및 오류 로그' })
+  await expect(ev.getByText('Connection refused', { exact: false })).toBeVisible()
+  await ev.getByRole('button', { name: /^오류/ }).click()
+  await expect(ev.getByText('overcommit_memory', { exact: false })).toHaveCount(0)
+  await page.getByRole('button', { name: '시스템 스냅샷' }).click()
+  await expect(page.getByText('/usr/local/bin/rpanel', { exact: false })).toBeVisible()
 })
 
 test('테마 낮·밤 전환과 영어 전환', async ({ page }) => {
@@ -521,15 +529,16 @@ test('테마 낮·밤 전환과 영어 전환', async ({ page }) => {
   await page.getByRole('radiogroup', { name: '테마' }).first().getByRole('radio', { name: '밤' }).click()
   await expect(html).toHaveAttribute('data-theme', 'dark')
 
-  await page.getByRole('combobox', { name: '언어' }).selectOption('en')
+  await page.getByRole('radiogroup', { name: '언어' }).getByRole('radio', { name: /English/ }).click()
   await expect(menu(page).getByRole('link', { name: 'Dashboard' })).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible()
-  await expect(html).toHaveAttribute('lang', 'en')
+  await expect(html).toHaveAttribute('lang', 'en-US')
   // 새로 고쳐도 유지
   await page.reload()
   await expect(menu(page).getByRole('link', { name: 'Sites' })).toBeVisible()
   await expect(html).toHaveAttribute('data-theme', 'dark')
-  await page.getByRole('combobox', { name: 'Language' }).selectOption('ko')
+  await page.getByTestId('lang-picker').first().click()
+  await page.getByRole('option', { name: /한국어/ }).click()
   await expect(menu(page).getByRole('link', { name: '사이트' })).toBeVisible()
 })
 

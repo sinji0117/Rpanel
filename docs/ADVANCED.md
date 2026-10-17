@@ -169,7 +169,8 @@
 ## 관리자 · 화면 설정
 
 - 관리자는 모두 같은 권한입니다. 자기 자신과 마지막 관리자는 지울 수 없고, 비밀번호 변경·삭제 시 그 관리자의 세션을 모두 끊습니다. 로그인 시각은 `users.last_login_at`.
-- 테마(낮·밤·자동)와 언어(한국어·English)는 브라우저 `localStorage`(`rpanel.theme`, `rpanel.lang`)에 저장합니다. 번역은 `frontend/src/i18n/en.js` (한국어 원문이 키). 새 문구를 넣으면 `src/i18n/en.test.js` 가 번역 누락을 잡습니다.
+- 테마(낮·밤·자동)와 언어는 브라우저 `localStorage`(`rpanel.theme`, `rpanel.lang`)에 저장합니다. 번역은 `frontend/src/i18n/<언어>.js` (한국어 원문이 키) 이고, 영어(`en.js`) 외의 언어 파일은 고를 때 따로 내려받습니다. 빠진 문구는 영어로 보입니다.
+- 새 문구를 넣으면 `src/i18n/en.test.js` 가 영어 번역 누락을, 그리고 모든 언어 파일이 영어와 같은 키·같은 자리표시자(`{n}` 등)를 갖는지 확인합니다. 언어를 더하려면 `<id>.js` 를 만들고 `src/i18n/index.js` 의 `LANGS` 에 한 줄을 넣고, `LangPicker.jsx` 에 국기를 더합니다.
 
 ## 업로드형 Rust 사이트
 
@@ -286,6 +287,7 @@ npx playwright install chromium && npm run e2e # E2E (가짜 API, 백엔드 불�
 | GET/POST/PUT/DELETE | `/api/apps/{id}/cron`, `/api/cron/{id}`, `/run`, `/log`, `/api/cron/preview` | 크론 |
 | GET | `/api/apps/{id}/nginx-logs`, `/api/system/info`, `/overview`, `/edge`, `/version`, `/api/audit` | 로그·시스템·버전 |
 | GET | `/api/system/metrics?range=`, `/api/logs/system?kind=&lines=`, `/api/logs/deployments` | 모니터링 기록·로그 |
+| GET | `/api/system/events?limit=`, `/api/system/processes` | 대시보드 시스템 이벤트(journald + nginx error.log, helper `system-events`) · 상위 프로세스 |
 | GET/POST/PUT/DELETE | `/api/runtimes`, `/api/runtimes/{id}`, `/default`, PUT `/api/apps/{id}/runtime` | 언어 런타임 버전 |
 | GET/POST/PUT/DELETE | `/api/mongo`, `/api/mongo/{id}` (앱 연결), `/password`, `/backups`, `/users`, `/users/{uid}`, `/users/{uid}/password` | MongoDB |
 | GET/POST | `/api/dbweb/admin/{id}`, `/query`, `/table/{t}`, `/table/{t}/{insert,update,delete}` | DB 웹 관리 (관리자) |

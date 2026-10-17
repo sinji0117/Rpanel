@@ -357,3 +357,34 @@ pub async fn deployment_log(
         deployments::recent(&state, q.limit.unwrap_or(100).clamp(1, 500)).await?
     )))
 }
+
+/// GET /api/system/events?limit=150 — 패널·nginx·DB·Redis·cron 과 시스템 오류 기록 (journald + nginx error.log)
+pub async fn events(
+    State(state): State<AppState>,
+    user: AuthUser,
+    Query(q): Query<LimitQuery>,
+) -> AppResult<Json<serde_json::Value>> {
+    user.require_admin()?;
+    let limit = q.limit.unwrap_or(150).clamp(1, 1000);
+    let n = limit.to_string();
+    let ja = ["system-events", n.as_str()];
+    let na = ["system-log", "nginx", n.as_str()];
+    let (journal, nginx) = tokio::join!(
+        crate::deploy::helper::call_quiet(&state, &ja),
+        crate::deploy::helper::call_quiet(&state, &na),
+    );
+    let journal = journal.map(|o| o.stdout).unwrap_or_default();
+    let nginx = nginx.map(|o| o.stdout).unwrap_or_default();
+    let events = crate::sysevents::merge(&journal, &nginx, limit as usize);
+    let summary = crate::sysevents::summary(&events);
+    Ok(Json(json!({ "events": events, "summary": summary })))
+}
+
+/// GET /api/system/processes — CPU·메모리 상위 프로세스
+pub async fn processes(user: AuthUser) -> AppResult<Json<serde_json::Value>> {
+    user.require_admin()?;
+    let (list, summary) = tokio::task::spawn_blocking(|| crate::sysevents::top_processes(40))
+        .await
+        .map_err(|e| anyhow::anyhow!(e))?;
+    Ok(Json(json!({ "processes": list, "summary": summary })))
+}

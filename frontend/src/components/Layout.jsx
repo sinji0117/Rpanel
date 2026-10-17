@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import { NavLink, Outlet, useLocation } from 'react-router'
 import { useAuth } from '../context/AuthContext'
-import { LANGS, setLang, t, useLang } from '../i18n'
+import { t, useLang } from '../i18n'
+import { LangPicker } from './LangPicker'
 import { getTheme, setTheme } from '../lib/prefs'
 import NotificationBell from './NotificationBell'
 import { StaleBundleBanner, VersionBadge } from './VersionInfo'
@@ -206,8 +207,8 @@ const THEME_OPTIONS = [
 ]
 
 /** 테마(낮·밤·자동) 와 언어를 바로 바꾸는 작은 스위치 */
-export function ThemeLangSwitch({ compact = false }) {
-  const lang = useLang()
+export function ThemeLangSwitch({ compact = false, up = true, right = false }) {
+  useLang()
   const [theme, setThemeState] = useState(getTheme())
   return (
     <div className={`flex items-center gap-2 ${compact ? '' : 'flex-wrap'}`}>
@@ -230,18 +231,7 @@ export function ThemeLangSwitch({ compact = false }) {
           </button>
         ))}
       </div>
-      <select
-        aria-label={t('언어')}
-        className="rounded-lg border border-ink-700 bg-ink-900 px-1.5 py-0.5 text-xs text-ink-300"
-        value={lang}
-        onChange={(e) => setLang(e.target.value)}
-      >
-        {LANGS.map((l) => (
-          <option key={l.id} value={l.id}>
-            {l.label}
-          </option>
-        ))}
-      </select>
+      <LangPicker up={up} right={right} />
     </div>
   )
 }
@@ -288,7 +278,7 @@ export default function Layout() {
         <div className="border-b border-ink-800 px-3 py-3 md:hidden">
           {nav}
           <div className="mt-3 px-3">
-            <ThemeLangSwitch />
+            <ThemeLangSwitch up={false} />
           </div>
           <div className="mt-2 flex items-center justify-between px-3">
             <button className="text-sm text-ink-400" onClick={logout}>

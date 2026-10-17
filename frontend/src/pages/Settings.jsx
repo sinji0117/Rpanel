@@ -3,7 +3,8 @@ import { Link } from 'react-router'
 import { ErrorBox, Field, PageHeader, Section } from '../components/ui'
 import { useAuth } from '../context/AuthContext'
 import { useToast } from '../context/ToastContext'
-import { LANGS, setLang, t, useLang } from '../i18n'
+import { t, useLang } from '../i18n'
+import { LangGrid } from '../components/LangPicker'
 import { del, get, post, put } from '../lib/api'
 import { useFetch } from '../lib/useFetch'
 import { confirmDialog } from '../components/Dialog'
@@ -196,7 +197,7 @@ function PanelAccess() {
 export default function Settings() {
   const { user, logout } = useAuth()
   const toast = useToast()
-  const lang = useLang()
+  useLang()
   const [theme, setThemeState] = useState(getTheme())
   const [cur, setCur] = useState('')
   const [next, setNext] = useState('')
@@ -223,7 +224,7 @@ export default function Settings() {
             </div>
             <div>
               <span className="label">{t('언어')}</span>
-              <ChoiceCards name={t('언어')} value={lang} options={LANGS} onChange={setLang} />
+              <LangGrid />
             </div>
           </div>
         </Section>

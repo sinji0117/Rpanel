@@ -228,6 +228,20 @@ export function createMockBackend({ needsSetup = false } = {}) {
         points.push({ t: nowS - i * 60, c: 5 + (i % 7), m: 4 * 2 ** 30, mt: 47 * 2 ** 30, l: [0.3, 0.2, 0.15], d: [['/', 41 * 2 ** 30, 371 * 2 ** 30]] })
       return json(route, 200, { range: url.searchParams.get('range') || '30m', interval: 60, cpu_count: 6, points })
     }
+    if (path === '/system/events') {
+      const ago = (s) => new Date(Date.now() - s * 1000).toISOString()
+      const events = [
+        { id: 1, timestamp: ago(120), level: 'info', source: 'rpanel', message: 'rpanel: listening on 127.0.0.1:8090' },
+        { id: 2, timestamp: ago(60), level: 'warn', source: 'redis', message: 'WARNING overcommit_memory is set to 0' },
+        { id: 3, timestamp: ago(30), level: 'error', source: 'nginx', message: 'connect() failed (111: Connection refused) while connecting to upstream' },
+      ]
+      return json(route, 200, { events, summary: { total: 3, errors: 1, warnings: 1, info: 1 } })
+    }
+    if (path === '/system/processes')
+      return json(route, 200, {
+        processes: [{ pid: 812, name: 'rpanel', user: 'rpanel', cpu: 1.2, mem_mb: 48.3, status: 'sleep', command: '/usr/local/bin/rpanel' }],
+        summary: { total: 1, running: 0, sleeping: 1, zombie: 0 },
+      })
     if (path === '/logs/deployments')
       return json(
         route,

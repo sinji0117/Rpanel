@@ -1726,6 +1726,17 @@ case "$cmd" in
       *) die "system-log: kind must be panel|nginx|ssh|mariadb|redis" ;;
     esac
     ;;
+  system-events)
+    # 대시보드 시스템 이벤트: 패널·nginx·DB·Redis·cron 기록과 모든 오류(priority ≤ 3) (읽기 전용)
+    n="${1:-150}"
+    [[ "$n" =~ ^[0-9]{1,4}$ ]] && (( n >= 1 && n <= 1000 )) || die "system-events: count must be 1..1000"
+    journalctl -n "$n" -o json --no-pager \
+      _SYSTEMD_UNIT=rpanel.service + _SYSTEMD_UNIT=nginx.service \
+      + _SYSTEMD_UNIT=mariadb.service + _SYSTEMD_UNIT=mysql.service \
+      + _SYSTEMD_UNIT=redis-server.service + _SYSTEMD_UNIT=redis.service \
+      + _SYSTEMD_UNIT=cron.service + _SYSTEMD_UNIT=crond.service \
+      + PRIORITY=0 + PRIORITY=1 + PRIORITY=2 + PRIORITY=3 2>/dev/null || true
+    ;;
   runtime-install) runtime_install "${1:-}" "${2:-}" ;;
   panel-domain-set)    panel_domain_set "${1:-}" "${2:-}" ;;
   panel-domain-remove) panel_domain_remove ;;
@@ -1747,7 +1758,7 @@ case "$cmd" in
     echo "purged $1"
     ;;
   *)
-    die "usage: rpanel-helper {prepare-app|install-unit|remove-unit|install-site|remove-site|purge-app} <slug> | svc {start|stop|restart} <slug> | status|journal <slug> | {install,remove,run}-cron|cron-status|cron-log <slug> <id> | db-{create,drop,password} <db> <user> | db-user-create <db> <user> <all|read> (pw stdin) | db-user-drop <db> <user> | db-user-password <db> <user> (pw stdin) | redis-user-set <user> <pattern> <rw|ro> (pw stdin) | redis-user-drop <user> | backup-db <slug> <db> <stamp> | backup-data <slug> <stamp> | restore-db <slug> <db> <file> | restore-data <slug> <file> | nginx-log <slug> access|error <lines> | site-create <slug> <user> <domain> <static|rust|python> | site-password <slug> (stdin) | site-account-create <slug> <user> <ssh|sftp> (pw stdin) | site-account-update <slug> <user> <ssh|sftp> <on|off> | site-account-password <slug> <user> (stdin) | site-account-keys <slug> <user> (stdin) | site-account-delete <slug> <user> | ssl-issue <slug> <email> <domain>... | ssl-custom|ssl-info|ssl-remove <slug> | backup-files <slug> <stamp> | restore-files <slug> <file> | backup-mongo <slug> <db> <stamp> | restore-mongo <slug> <db> <file> | runtime-install|runtime-remove <python|node> <version> | system-log <panel|nginx|ssh|mariadb|redis> <lines> | panel-domain-set <domain> <email> | panel-domain-remove | db-engine-upgrade|db-engine-downgrade <mariadb|mongodb|redis> <version> | panel-access <any|CIDR,...> | storage-set <backups|projects> <path|default>"
+    die "usage: rpanel-helper {prepare-app|install-unit|remove-unit|install-site|remove-site|purge-app} <slug> | svc {start|stop|restart} <slug> | status|journal <slug> | {install,remove,run}-cron|cron-status|cron-log <slug> <id> | db-{create,drop,password} <db> <user> | db-user-create <db> <user> <all|read> (pw stdin) | db-user-drop <db> <user> | db-user-password <db> <user> (pw stdin) | redis-user-set <user> <pattern> <rw|ro> (pw stdin) | redis-user-drop <user> | backup-db <slug> <db> <stamp> | backup-data <slug> <stamp> | restore-db <slug> <db> <file> | restore-data <slug> <file> | nginx-log <slug> access|error <lines> | site-create <slug> <user> <domain> <static|rust|python> | site-password <slug> (stdin) | site-account-create <slug> <user> <ssh|sftp> (pw stdin) | site-account-update <slug> <user> <ssh|sftp> <on|off> | site-account-password <slug> <user> (stdin) | site-account-keys <slug> <user> (stdin) | site-account-delete <slug> <user> | ssl-issue <slug> <email> <domain>... | ssl-custom|ssl-info|ssl-remove <slug> | backup-files <slug> <stamp> | restore-files <slug> <file> | backup-mongo <slug> <db> <stamp> | restore-mongo <slug> <db> <file> | runtime-install|runtime-remove <python|node> <version> | system-log <panel|nginx|ssh|mariadb|redis> <lines> | system-events <count> | panel-domain-set <domain> <email> | panel-domain-remove | db-engine-upgrade|db-engine-downgrade <mariadb|mongodb|redis> <version> | panel-access <any|CIDR,...> | storage-set <backups|projects> <path|default>"
     ;;
 esac
 }

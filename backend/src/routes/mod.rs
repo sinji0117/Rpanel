@@ -51,6 +51,8 @@ pub fn router(state: AppState) -> Router {
         .route("/system/version", get(system::version))
         .route("/system/metrics", get(system::metrics_history))
         .route("/logs/system", get(system::system_log))
+        .route("/system/events", get(system::events))
+        .route("/system/processes", get(system::processes))
         // 알림
         .route(
             "/notifications",

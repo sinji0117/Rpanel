@@ -689,6 +689,13 @@ fn helper_system_log_whitelist() {
     for kind in ["panel", "nginx", "ssh", "mariadb", "redis"] {
         assert!(run(&["system-log", kind, "5"]).status.success(), "{kind}");
     }
+    for n in ["0", "1001", "5;id", "-1", "abc"] {
+        assert!(
+            !run(&["system-events", n]).status.success(),
+            "system-events {n} accepted"
+        );
+    }
+    assert!(run(&["system-events", "5"]).status.success());
 }
 
 #[test]

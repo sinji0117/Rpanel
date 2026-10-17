@@ -63,10 +63,12 @@ export function useDeploymentLog(deploymentId, initialStatus) {
   return { lines, status, connected }
 }
 
-/** 서버 지표 스트림 (최근 N개 보관) */
-export function useMetrics(keep = 60) {
+/** 서버 지표 스트림 (최근 N개 보관, enabled=false로 일시정지 가능) */
+export function useMetrics(keep = 60, enabled = true) {
   const [history, setHistory] = useState([])
   const [connected, setConnected] = useState(false)
+  const enabledRef = useRef(enabled)
+  enabledRef.current = enabled
 
   useEffect(() => {
     let ws
@@ -81,6 +83,7 @@ export function useMetrics(keep = 60) {
       }
       ws.onopen = () => setConnected(true)
       ws.onmessage = (ev) => {
+        if (!enabledRef.current) return
         try {
           const msg = JSON.parse(ev.data)
           if (msg.type === 'metrics') setHistory((h) => [...h.slice(-(keep - 1)), msg.data])

@@ -7,6 +7,11 @@ import { get } from '../lib/api'
 import { ago, bytes, percent, shortSha, uptime } from '../lib/format'
 import { useFetch, useInterval } from '../lib/useFetch'
 import { useMetrics } from '../lib/useSockets'
+import SystemResourceMonitor from '../components/SystemResourceMonitor'
+import SystemLogViewer from '../components/SystemLogViewer'
+import ExportDataModal from '../components/ExportDataModal'
+import HistoricalTrendChart from '../components/HistoricalTrendChart'
+import SystemSnapshotModal from '../components/SystemSnapshotModal'
 import { t, tx } from '../i18n'
 
 function Stat({ label, value, sub }) {
@@ -56,7 +61,7 @@ function ChartCard({ title, right, children }) {
 }
 
 /** 모니터링: CPU · 메모리 · 디스크 · Load average 기록 그래프 */
-function Monitoring({ latest, cpuCount }) {
+function Monitoring({ latest, cpuCount, autoRefresh = true }) {
   const [range, setRange] = useState(() => {
     try {
       return localStorage.getItem('rpanel.metricsRange') || '30m'
@@ -65,7 +70,7 @@ function Monitoring({ latest, cpuCount }) {
     }
   })
   const hist = useFetch(() => get(`/system/metrics?range=${range}`), [range])
-  useInterval(() => hist.reload(true), 60000)
+  useInterval(() => autoRefresh && hist.reload(true), 60000)
   const pts = hist.data?.points ?? []
   const times = pts.map((p) => p.t)
   const cpus = hist.data?.cpu_count || cpuCount
@@ -176,10 +181,13 @@ function Monitoring({ latest, cpuCount }) {
 }
 
 export default function Dashboard() {
+  const [autoRefresh, setAutoRefresh] = useState(true)
+  const [exportOpen, setExportOpen] = useState(false)
+  const [snapshotOpen, setSnapshotOpen] = useState(false)
   const overview = useFetch(() => get('/system/overview'), [])
   const info = useFetch(() => get('/system/info'), [])
-  const { latest, connected } = useMetrics(2)
-  useInterval(() => overview.reload(true), 10000)
+  const { latest, history, connected } = useMetrics(30, autoRefresh)
+  useInterval(() => autoRefresh && overview.reload(true), 10000)
 
   const o = overview.data
   const host = info.data?.host
@@ -191,15 +199,77 @@ export default function Dashboard() {
         subtitle={host ? `${host.hostname ?? 'app-server'} · ${host.os ?? ''} · ${host.cpu_count} vCPU` : t('서버 상태')}
         actions={
           <>
-            <span className={`inline-flex items-center gap-2 text-xs ${connected ? 'text-signal' : 'text-ink-400'}`}>
-              <span className={`h-1.5 w-1.5 rounded-full ${connected ? 'bg-signal animate-pulse' : 'bg-ink-600'}`} />
-              {connected ? t('실시간') : t('연결 중…')}
-            </span>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={autoRefresh}
+              onClick={() => setAutoRefresh((v) => !v)}
+              className={`inline-flex items-center gap-2 rounded-lg border px-3 py-1.5 text-xs font-medium transition cursor-pointer ${
+                autoRefresh
+                  ? 'border-signal/40 bg-signal/10 text-signal hover:bg-signal/20'
+                  : 'border-ink-700 bg-ink-900 text-ink-400 hover:border-ink-600 hover:text-ink-200'
+              }`}
+              title={autoRefresh ? t('실시간 갱신 일시정지') : t('실시간 갱신 재개')}
+            >
+              <span className="relative flex h-2 w-2 items-center justify-center">
+                {autoRefresh && connected ? (
+                  <>
+                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-signal opacity-75" />
+                    <span className="relative inline-flex h-2 w-2 rounded-full bg-signal" />
+                  </>
+                ) : (
+                  <span className={`inline-flex h-2 w-2 rounded-full ${autoRefresh ? 'bg-signal' : 'bg-ink-600'}`} />
+                )}
+              </span>
+              <span className="whitespace-nowrap font-medium">{t('자동 갱신')}</span>
+              <span
+                className={`rounded px-1.5 py-0.5 text-[10px] font-mono uppercase ${
+                  autoRefresh ? 'bg-signal/20 text-signal' : 'bg-ink-800 text-ink-400'
+                }`}
+              >
+                {autoRefresh ? t('켜짐') : t('일시정지')}
+              </span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setSnapshotOpen(true)}
+              className="btn-ghost inline-flex items-center gap-1.5 px-3 py-1.5 text-xs text-ink-300 hover:text-ink-100 hover:border-ink-600 cursor-pointer"
+              title={t('시스템 스냅샷')}
+            >
+              <span aria-hidden="true">📷</span>
+              <span>{t('시스템 스냅샷')}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setExportOpen(true)}
+              className="btn-ghost inline-flex items-center gap-1.5 px-3 py-1.5 text-xs text-ink-300 hover:text-ink-100 hover:border-ink-600 cursor-pointer"
+              title={t('데이터 내보내기')}
+            >
+              <span aria-hidden="true">📥</span>
+              <span>{t('내보내기')}</span>
+            </button>
+
             <Link to="/sites?new=1" className="btn-primary">
               {t('+ 사이트 추가')}
             </Link>
           </>
         }
+      />
+
+      <ExportDataModal
+        open={exportOpen}
+        onClose={() => setExportOpen(false)}
+        latest={latest}
+        host={host}
+      />
+
+      <SystemSnapshotModal
+        open={snapshotOpen}
+        onClose={() => setSnapshotOpen(false)}
+        latest={latest}
+        host={host}
       />
 
       {info.data?.exec_mode === 'dry-run' && (
@@ -219,7 +289,26 @@ export default function Dashboard() {
         <UptimeStat bootTime={info.data?.boot_time} panelStarted={info.data?.panel_started_at} latest={latest} />
       </div>
 
-      <Monitoring latest={latest} cpuCount={host?.cpu_count} />
+      <div className="mt-4">
+        <SystemResourceMonitor
+          latest={latest}
+          history={history}
+          host={host}
+          connected={connected}
+          autoRefresh={autoRefresh}
+          onToggleAutoRefresh={() => setAutoRefresh((v) => !v)}
+        />
+      </div>
+
+      <div className="mt-4">
+        <HistoricalTrendChart autoRefresh={autoRefresh} />
+      </div>
+
+      <Monitoring latest={latest} cpuCount={host?.cpu_count} autoRefresh={autoRefresh} />
+
+      <div className="mt-4">
+        <SystemLogViewer autoRefresh={autoRefresh} />
+      </div>
 
       <div className="mt-4 grid gap-4 lg:grid-cols-3">
         <div className="card p-5" aria-label={t('시스템')}>

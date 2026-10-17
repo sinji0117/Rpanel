@@ -1587,6 +1587,15 @@ async fn full_flow() {
         ctx.get("/api/logs/system?kind=shadow", &t).await.status,
         StatusCode::BAD_REQUEST
     );
+    // 대시보드 시스템 이벤트·프로세스
+    let r = ctx.get("/api/system/events?limit=20", &t).await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+    assert!(r.body["events"].is_array());
+    assert!(r.body["summary"]["total"].is_u64());
+    let r = ctx.get("/api/system/processes", &t).await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+    assert!(!r.body["processes"].as_array().unwrap().is_empty());
+    assert!(r.body["processes"][0]["pid"].is_u64());
     let r = ctx.get("/api/logs/deployments?limit=5", &t).await;
     assert_eq!(r.status, StatusCode::OK);
     assert!(!r.body.as_array().unwrap().is_empty());

@@ -1,0 +1,9 @@
+{
+  "name": "Rpanel",
+  "description": "Modern web server and application management panel for deploying sites, databases, runtimes, and services.",
+  "requestFeedback": false,
+  "userFacing": true,
+  "capabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

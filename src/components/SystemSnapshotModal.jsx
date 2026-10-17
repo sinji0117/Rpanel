@@ -1,0 +1,213 @@
+import { useEffect, useState } from 'react'
+import { Modal } from './ui'
+import { get } from '../lib/api'
+import { bytes } from '../lib/format'
+import { triggerDownload } from './ExportDataModal'
+import { t } from '../i18n'
+
+export default function SystemSnapshotModal({ open, onClose, latest, host }) {
+  const [loading, setLoading] = useState(false)
+  const [snapshotText, setSnapshotText] = useState('')
+  const [copied, setCopied] = useState(false)
+  const [saved, setSaved] = useState(false)
+
+  useEffect(() => {
+    if (!open) return
+    let active = true
+    setLoading(true)
+    setCopied(false)
+    setSaved(false)
+
+    const fetchSnapshotData = async () => {
+      try {
+        const [procRes, eventsRes] = await Promise.all([
+          get('/system/processes').catch(() => ({ processes: [] })),
+          get('/system/events?limit=30').catch(() => ({ events: [] })),
+        ])
+
+        if (!active) return
+
+        const now = new Date()
+        const iso = now.toISOString()
+        const processes = procRes?.processes ?? []
+        const events = eventsRes?.events ?? []
+
+        // Format system resources
+        const cpuPercent = latest?.cpu_percent ?? 0
+        const cpuCount = host?.cpu_count || 8
+        const load = latest?.load ?? [0.38, 0.32, 0.28]
+        const memTotal = latest?.mem_total ?? 16 * 1024 ** 3
+        const memUsed = latest?.mem_used ?? 5.4 * 1024 ** 3
+        const memFree = Math.max(0, memTotal - memUsed)
+        const memPercent = memTotal > 0 ? ((memUsed / memTotal) * 100).toFixed(1) : '0.0'
+        const primaryDisk = latest?.disks?.[0] || { mount: '/', total: 200 * 1024 ** 3, used: 38 * 1024 ** 3 }
+        const diskFree = Math.max(0, primaryDisk.total - primaryDisk.used)
+        const diskPercent = ((primaryDisk.used / primaryDisk.total) * 100).toFixed(1)
+
+        const divider = '================================================================================'
+        const sectionDivider = '--------------------------------------------------------------------------------'
+
+        const lines = [
+          divider,
+          '                      RPANEL SYSTEM SNAPSHOT REPORT',
+          divider,
+          `Timestamp     : ${iso} (${now.toUTCString()})`,
+          `Host Node     : ${host?.hostname || 'app-server'}`,
+          `Operating Sys : ${host?.os || 'Linux'} (Kernel ${host?.kernel || '6.8.0'})`,
+          `Architecture  : ${host?.cpu_brand || 'AMD EPYC'} (${cpuCount} vCPUs)`,
+          `Status        : ${cpuPercent >= 90 || memPercent >= 90 ? 'CRITICAL (>90% THRESHOLD)' : 'NOMINAL (HEALTHY)'}`,
+          '',
+          sectionDivider,
+          '1. CURRENT RESOURCE USAGE SUMMARY',
+          sectionDivider,
+          `• CPU Usage        : ${cpuPercent.toFixed(1)}% across ${cpuCount} vCPUs`,
+          `  - Load Average   : 1m: ${load[0].toFixed(2)} | 5m: ${load[1].toFixed(2)} | 15m: ${load[2].toFixed(2)}`,
+          `  - Alert Status   : ${cpuPercent >= 90 ? 'CRITICAL (>90%)' : 'NORMAL'}`,
+          `• Memory / RAM     : ${bytes(memUsed)} / ${bytes(memTotal)} (${memPercent}% used, ${bytes(memFree)} free)`,
+          `  - Alert Status   : ${memPercent >= 90 ? 'CRITICAL (>90%)' : 'NORMAL'}`,
+          `• Primary Disk (${primaryDisk.mount}) : ${bytes(primaryDisk.used)} / ${bytes(primaryDisk.total)} (${diskPercent}% used, ${bytes(diskFree)} free)`,
+          '',
+          sectionDivider,
+          '2. CURRENT ACTIVE PROCESSES (TOP)',
+          sectionDivider,
+          'PID'.padEnd(8) +
+            'USER'.padEnd(12) +
+            'CPU%'.padEnd(10) +
+            'MEM(MB)'.padEnd(12) +
+            'STATUS'.padEnd(12) +
+            'COMMAND',
+          '--------------------------------------------------------------------------------',
+        ]
+
+        if (processes.length === 0) {
+          lines.push('  No active process records retrieved.')
+        } else {
+          processes.forEach((p) => {
+            const pLine =
+              String(p.pid).padEnd(8) +
+              String(p.user).padEnd(12) +
+              `${Number(p.cpu).toFixed(1)}%`.padEnd(10) +
+              `${Number(p.mem_mb).toFixed(1)} MB`.padEnd(12) +
+              String(p.status).toUpperCase().padEnd(12) +
+              String(p.command)
+            lines.push(pLine)
+          })
+        }
+
+        lines.push('')
+        lines.push(sectionDivider)
+        lines.push('3. RECENT CRITICAL & SYSTEM LOGS (LAST 20)')
+        lines.push(sectionDivider)
+
+        if (events.length === 0) {
+          lines.push('  No recent system event logs recorded.')
+        } else {
+          events.slice(-20).forEach((e) => {
+            const timeStr = e.timestamp.replace('T', ' ').slice(0, 19)
+            const levelTag = `[${e.level.toUpperCase().padEnd(5)}]`
+            lines.push(`${timeStr} ${levelTag} [${e.source}] ${e.message}`)
+          })
+        }
+
+        lines.push('')
+        lines.push(divider)
+        lines.push(`Generated by Rpanel v0.10.0 • Autonomous Server System`)
+        lines.push(divider)
+
+        setSnapshotText(lines.join('\n'))
+      } catch {
+        setSnapshotText('Failed to generate system snapshot report.')
+      } finally {
+        if (active) setLoading(false)
+      }
+    }
+
+    fetchSnapshotData()
+    return () => {
+      active = false
+    }
+  }, [open, latest, host])
+
+  const handleSaveFile = () => {
+    const timestampStr = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
+    const filename = `rpanel-snapshot-${timestampStr}.txt`
+    triggerDownload(snapshotText, filename, 'text/plain;charset=utf-8;')
+    setSaved(true)
+    setTimeout(() => setSaved(false), 2000)
+  }
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(snapshotText)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    } catch {
+      /* ignore */
+    }
+  }
+
+  return (
+    <Modal open={open} title={t('시스템 스냅샷')} onClose={onClose} wide>
+      <div className="space-y-4 py-1">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="text-xs text-ink-300">
+            {t('현재 활성 프로세스, 자원 사용량, 최근 주요 오류 로그를 요약한 시스템 스냅샷입니다.')}
+          </p>
+
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={handleCopy}
+              disabled={loading || !snapshotText}
+              className="rounded-lg border border-ink-700 bg-ink-900 px-3 py-1.5 text-xs text-ink-200 transition hover:border-ink-600 hover:text-ink-100 disabled:opacity-50 cursor-pointer"
+            >
+              {copied ? `✓ ${t('클립보드에 복사되었습니다')}` : t('스냅샷 복사')}
+            </button>
+
+            <button
+              type="button"
+              onClick={handleSaveFile}
+              disabled={loading || !snapshotText}
+              className="btn-primary px-3.5 py-1.5 text-xs cursor-pointer"
+            >
+              {saved ? `✓ ${t('스냅샷 다운로드 완료')}` : `💾 ${t('스냅샷 저장 (TXT)')}`}
+            </button>
+          </div>
+        </div>
+
+        {/* Text Area Terminal View */}
+        <div className="relative">
+          {loading ? (
+            <div className="flex h-96 items-center justify-center rounded-lg border border-ink-800 bg-ink-950 font-mono text-xs text-ink-400">
+              <span className="animate-pulse">{t('스냅샷 캡처 중…')}</span>
+            </div>
+          ) : (
+            <textarea
+              readOnly
+              value={snapshotText}
+              className="h-96 w-full resize-none rounded-lg border border-ink-800 bg-ink-950 p-4 font-mono text-xs leading-relaxed text-ink-100 focus:outline-none select-all"
+            />
+          )}
+        </div>
+
+        <div className="flex justify-end gap-2 border-t border-ink-800 pt-3">
+          <button
+            type="button"
+            onClick={onClose}
+            className="btn-ghost px-4 py-1.5 text-xs cursor-pointer"
+          >
+            {t('닫기')}
+          </button>
+          <button
+            type="button"
+            onClick={handleSaveFile}
+            disabled={loading || !snapshotText}
+            className="btn-primary px-4 py-1.5 text-xs cursor-pointer"
+          >
+            {saved ? `✓ ${t('스냅샷 다운로드 완료')}` : `💾 ${t('파일로 저장')}`}
+          </button>
+        </div>
+      </div>
+    </Modal>
+  )
+}

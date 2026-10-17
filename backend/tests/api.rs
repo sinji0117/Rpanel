@@ -2893,6 +2893,62 @@ async fn full_flow() {
             .await
             .unwrap();
 
+        // 저장 위치 (백업 · 프로젝트)
+        let r = ctx.get("/api/system/storage", &t).await;
+        assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+        let items = r.body["items"].as_array().unwrap();
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0]["kind"], "backups");
+        assert_eq!(items[0]["custom"], false);
+        assert!(items[0]["path"].as_str().unwrap().ends_with("/backups"));
+        assert!(items[1]["free_bytes"].as_u64().is_some());
+        for (kind, path, code) in [
+            ("backups", "/etc/rpanel-b", StatusCode::BAD_REQUEST),
+            ("backups", "/data/../etc", StatusCode::BAD_REQUEST),
+            ("backups", "relative", StatusCode::BAD_REQUEST),
+            ("backups", "", StatusCode::BAD_REQUEST),
+            ("nope", "/data/x", StatusCode::NOT_FOUND),
+        ] {
+            let r = ctx
+                .req(
+                    Method::PUT,
+                    &format!("/api/system/storage/{kind}"),
+                    Some(&t),
+                    None,
+                    Some(json!({ "path": path })),
+                )
+                .await;
+            assert_eq!(r.status, code, "{kind} {path} {:?}", r.body);
+        }
+        let r = ctx
+            .req(
+                Method::PUT,
+                "/api/system/storage/backups",
+                Some(&t),
+                None,
+                Some(json!({ "path": "/data/rpanel-backups" })),
+            )
+            .await;
+        assert_eq!(r.status, StatusCode::ACCEPTED, "{:?}", r.body);
+        let mut done = false;
+        for _ in 0..50 {
+            let r = ctx.get("/api/system/storage", &t).await;
+            if r.body["job"]["status"] == "done" {
+                assert!(
+                    r.body["job"]["log"]
+                        .as_str()
+                        .unwrap()
+                        .contains("storage-set backups /data/rpanel-backups"),
+                    "{:?}",
+                    r.body
+                );
+                done = true;
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+        assert!(done, "storage job did not finish");
+
         let pa = "/api/system/panel-access";
         assert_eq!(ctx.get(pa, &t).await.body["restricted"], false);
         let r = ctx

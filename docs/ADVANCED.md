@@ -151,6 +151,14 @@
 - `GET/PUT /api/system/panel-access` → helper `panel-access <any|CIDR,…>` 가 `/etc/nginx/rpanel-panel-allow.conf`(allow … / deny all)를 쓰고 Nginx reload. 패널 설정(`rpanel-panel.conf`, 패널 도메인)은 이 파일을 `include` 하고, `/api/hooks/` 는 `allow all`. ufw 가 켜져 있으면 패널 포트를 그 대역에 엽니다.
 - 지금 요청한 IP 가 목록에 없으면 거부 (잠김 방지). 잠겼을 때: `sudo /usr/local/lib/rpanel/rpanel-helper panel-access any`.
 
+## 저장 위치 (백업 · 프로젝트 파일)
+
+- `GET /api/system/storage`, `PUT /api/system/storage/{backups|projects}` `{path}` (빈 값 = 기본 위치로) → helper `storage-set <kind> <path|default>` (백그라운드 작업, 결과는 `panel_settings.storage_job` · 알림 `storage`).
+- 코드는 늘 `/var/lib/rpanel/{backups,apps,www,builds}` 를 씁니다. helper 가 rsync 로 새 위치에 복사(프로젝트는 2차 복사 동안 `rpanel-app-*` 중지)한 뒤 `/etc/systemd/system/var-lib-rpanel-<dir>.mount`(bind, `WantedBy=multi-user.target`, `Before=rpanel.service`)로 원래 경로에 연결하고, 예전 사본을 지웁니다. 마운트를 systemd 가 하므로 호스트 네임스페이스에 생기고 패널 서비스(PrivateTmp)에도 전파됩니다.
+- 지금 위치는 `/etc/rpanel/storage` (`<kind> <path>`, 0644, helper 만 수정). 검사: 절대 경로·허용 문자, `/etc /usr /var /home /tmp /root …` 안 금지, 심볼릭 링크 금지, 비어 있는 폴더, 두 종류가 서로 겹치지 않음, FAT/exFAT/NTFS/tmpfs 금지, 남은 공간.
+- 옮기는 동안 배포·백업·DB 버전 바꾸기는 409, 반대로 그런 작업이 진행 중이면 옮기기가 409.
+- `uninstall.sh --purge` 는 마운트 유닛을 풀고 그 위치의 데이터도 지웁니다 (keep 모드는 그대로 둠).
+
 ## 알림
 
 - 테이블 `notifications`(제목은 한국어 템플릿 + `params` JSON → 화면에서 번역), 설정은 `panel_settings`(k=`notifications`, JSON).
@@ -201,6 +209,8 @@
 /usr/share/rpanel/www/                     패널 UI
 /etc/rpanel/rpanel.env                     설정·비밀값 (root:rpanel 0640)
 /etc/rpanel/site-users, managed-dbs, managed-db-users   helper 레지스트리
+/etc/rpanel/storage                        저장 위치 (바꾼 경우만)
+/etc/systemd/system/var-lib-rpanel-*.mount  다른 위치를 원래 경로에 연결 (bind)
 /etc/redis/rpanel-users.conf               Redis 계정(ACL, 비밀번호 해시)
 /etc/rpanel/certs/<slug>/                  직접 올린 인증서 (root 0600)
 /etc/letsencrypt/live/rpanel-<slug>/       Let's Encrypt 인증서
@@ -282,6 +292,7 @@ npx playwright install chromium && npm run e2e # E2E (가짜 API, 백엔드 불�
 | POST/GET | `/api/dbweb/login`, `/logout`, `/me`, `/api/dbweb/s/{db}/…` (`X-DB-Token`) | DB 웹 관리 (DB 계정) |
 | GET/PUT/DELETE | `/api/system/panel-domain` | 패널 도메인 |
 | GET/PUT | `/api/system/panel-access` | 패널 접속 허용 IP |
+| GET/PUT | `/api/system/storage`, `/api/system/storage/{kind}` | 저장 위치 (백업 · 프로젝트 파일) |
 | GET/POST | `/api/db-engines`, `/api/db-engines/{engine}` | DB 서버 버전 |
 | GET/POST | `/api/dbweb/mongo/{id}`, `/collections`, `/c/{coll}`, `/c/{coll}/{insert,update,delete}` | MongoDB 웹 관리 |
 | GET/POST | `/api/dbweb/redis`, `/{db}/keys`, `/{db}/key?k=`, `/{db}/{set,delete}` | Redis 웹 관리 |

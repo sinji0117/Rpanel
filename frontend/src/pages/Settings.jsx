@@ -8,6 +8,7 @@ import { del, get, post, put } from '../lib/api'
 import { useFetch } from '../lib/useFetch'
 import { confirmDialog } from '../components/Dialog'
 import { getTheme, setTheme } from '../lib/prefs'
+import { StorageSettings } from './StorageSettings'
 
 const THEMES = [
   { id: 'light', label: '낮', desc: '밝은 화면', icon: '☀' },
@@ -241,6 +242,7 @@ export default function Settings() {
 
         <PanelDomain />
         <PanelAccess />
+        <StorageSettings />
 
         <Section title={t('내 비밀번호 변경')} desc={t('변경하면 모든 기기의 세션이 로그아웃됩니다. 다른 관리자는 관리자 메뉴에서 관리합니다.')}>
           <form

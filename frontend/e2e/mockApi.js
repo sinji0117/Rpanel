@@ -959,6 +959,28 @@ export function createMockBackend({ needsSetup = false } = {}) {
       e.version = body.version + '.1'
       return json(route, 202, { engine: e.engine, target: body.version, status: 'running' })
     }
+    // ── 저장 위치 ──
+    if (path === '/system/storage') {
+      db.storage ??= { backups: null, projects: null }
+      const item = (kind) => ({
+        kind,
+        label: kind === 'backups' ? '백업' : '프로젝트 파일',
+        path: db.storage[kind] ?? (kind === 'backups' ? '/var/lib/rpanel/backups' : '/var/lib/rpanel'),
+        custom: db.storage[kind] != null,
+        default_path: kind === 'backups' ? '/var/lib/rpanel/backups' : '/var/lib/rpanel',
+        total_bytes: 100e9,
+        free_bytes: 40e9,
+      })
+      return json(route, 200, { items: [item('backups'), item('projects')], job: db.storageJob ?? null, last: null, busy: null })
+    }
+    m = path.match(/^\/system\/storage\/(backups|projects)$/)
+    if (m && method === 'PUT') {
+      const p = (body.path || '').trim()
+      if (p && (!p.startsWith('/') || /^\/(etc|var|usr|home|tmp)(\/|$)/.test(p))) return json(route, 400, { error: 'bad_request', message: '시스템 폴더 안은 쓸 수 없습니다' })
+      db.storage[m[1]] = p || null
+      db.storageJob = { kind: m[1], target: p, status: 'done', log: `▶ 복사: … → ${p || 'default'}\n✔ ${p || '기본'}`, started_at: now(), finished_at: now() }
+      return json(route, 202, { kind: m[1], target: p, status: 'running' })
+    }
     // ── 패널 접속 IP ──
     if (path === '/system/panel-access') {
       if (method === 'PUT') {

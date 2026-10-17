@@ -163,7 +163,7 @@ $(printf '\033[1;32m')✔ 패널을 삭제했습니다$(printf '\033[0m')  (사�
   남겨 둔 것
     사이트 파일      /home/<사이트 계정>/   ${SITE_USERS[*]:-(없음)}
     데이터베이스     MariaDB 안의 패널 DB와 사이트 DB 그대로
-    백업            /var/lib/rpanel/backups/
+    백업            $(awk '$1=="backups"{print $2"/ (→ /var/lib/rpanel/backups)"; f=1} END{if(!f) print "/var/lib/rpanel/backups/"}' /etc/rpanel/storage 2>/dev/null || echo /var/lib/rpanel/backups/)
     설정·인증서      /etc/rpanel/  /etc/letsencrypt/
 
   다시 설치하면 이어서 쓸 수 있습니다:
@@ -256,6 +256,25 @@ if command -v certbot >/dev/null; then
   done
 fi
 rm -f /var/log/nginx/rpanel-*.log*
+# 다른 위치로 옮긴 백업·프로젝트 파일 (저장 위치 설정): 마운트를 풀고 그 폴더도 지움
+for f in /etc/systemd/system/var-lib-rpanel-*.mount; do
+  [[ -e "$f" ]] || continue
+  systemctl disable --now "$(basename "$f")" >/dev/null 2>&1 || true
+  rm -f "$f"
+done
+systemctl daemon-reload
+if [[ -f /etc/rpanel/storage ]]; then
+  while read -r kind path; do
+    [[ "$path" == /?* ]] || continue
+    if [[ $kind == projects ]]; then
+      rm -rf --one-file-system "$path/apps" "$path/www" "$path/builds"; rmdir "$path" 2>/dev/null || true
+    else
+      rm -rf --one-file-system "$path"
+    fi
+    info "$path 삭제"
+  done < /etc/rpanel/storage
+fi
+for d in backups apps www builds; do mountpoint -q "/var/lib/rpanel/$d" && umount "/var/lib/rpanel/$d" || true; done
 rm -rf --one-file-system /var/lib/rpanel /etc/rpanel /opt/rpanel-src /opt/rpanel
 userdel rpanel >/dev/null 2>&1 || true
 userdel rpanel-app >/dev/null 2>&1 || true

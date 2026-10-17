@@ -29,6 +29,11 @@ pub struct DeploymentDetail {
 
 /// 새 배포 생성 + 백그라운드 실행. 같은 앱의 진행 중 배포가 있으면 409.
 pub async fn enqueue(state: &AppState, app_id: u64, user_id: Option<u64>) -> AppResult<u64> {
+    if crate::storage::running() {
+        return Err(AppError::Conflict(
+            "저장 위치를 옮기는 중입니다. 끝난 뒤 배포하세요".into(),
+        ));
+    }
     let mut tx = state.db.begin().await?;
     // 앱 행 잠금으로 동시 트리거 직렬화
     let _: (u64,) = sqlx::query_as("SELECT id FROM apps WHERE id = ? FOR UPDATE")

@@ -74,6 +74,11 @@ pub async fn upgrade(
 ) -> AppResult<(StatusCode, Json<Value>)> {
     user.require_admin()?;
     let e = Engine::parse(&engine).ok_or(AppError::NotFound)?;
+    if crate::storage::running() {
+        return Err(AppError::Conflict(
+            "저장 위치를 옮기는 중입니다. 끝난 뒤 다시 시도하세요".into(),
+        ));
+    }
     if let Some(r) = dbengines::running() {
         return Err(AppError::Conflict(format!(
             "{r} 버전을 바꾸는 중입니다. 끝난 뒤 다시 시도하세요"

@@ -1465,6 +1465,180 @@ runtime_remove() {
   echo "removed $lang $v"
 }
 
+# ───────────────────────── 저장 위치 (백업 · 프로젝트) ─────────────────────────
+# 데이터를 새 위치로 옮긴 뒤 원래 경로(/var/lib/rpanel/…)에 bind mount 합니다.
+# 패널·앱·Nginx 는 계속 원래 경로를 쓰므로 다른 설정은 바뀌지 않습니다.
+# 마운트는 systemd .mount 유닛으로 (재부팅 후에도 유지, 호스트 네임스페이스에서 실행).
+#   /etc/rpanel/storage : "<kind> <path>" 한 줄씩 (helper 만 수정, 기본 위치면 줄 없음)
+
+STORAGE_REG="${RPANEL_TEST_STORAGE_REG:-/etc/rpanel/storage}"
+
+storage_subdirs() {
+  case "$1" in
+    backups)  echo "backups" ;;
+    projects) echo "apps www builds" ;;
+    *) die "invalid storage kind: '$1'" ;;
+  esac
+}
+
+storage_get() { [[ -f $STORAGE_REG ]] && awk -v k="$1" '$1==k {print $2; exit}' "$STORAGE_REG" || true; }
+
+# 새 위치 안에서 각 하위 폴더가 놓일 곳
+storage_dst() {
+  local kind="$1" base="$2" sub="$3"
+  if [[ $kind == backups ]]; then echo "$base"; else echo "$base/$sub"; fi
+}
+
+valid_storage_path() {
+  local p="${1:-}"
+  [[ "$p" =~ ^/[A-Za-z0-9._/-]{1,200}$ ]] || die "경로는 / 로 시작하고 영문·숫자·. _ - / 만 쓸 수 있습니다: '$p'"
+  [[ "$p" != *//* && "$p" != */ && "$p" != */./* && "$p" != */../* && "$p" != */. && "$p" != */.. ]] \
+    || die "경로가 올바르지 않습니다: $p"
+  case "$p/" in
+    /bin/*|/boot/*|/dev/*|/etc/*|/lib/*|/lib32/*|/lib64/*|/libx32/*|/proc/*|/root/*|/run/*|/sbin/*|/sys/*|/usr/*|/tmp/*|/home/*|/snap/*|/lost+found/*|/var/*)
+      die "시스템 폴더 안은 쓸 수 없습니다 (/srv, /data, /mnt 등을 쓰세요): $p" ;;
+  esac
+}
+
+# 다른 종류의 위치와 겹치면 안 됨
+storage_no_overlap() {
+  local kind="$1" p="$2" other o
+  for other in backups projects; do
+    [[ $other == "$kind" ]] && continue
+    o="$(storage_get "$other")"; [[ -n "$o" ]] || continue
+    [[ "$p" == "$o" || "$p/" == "$o/"* || "$o/" == "$p/"* ]] && die "$other 위치($o)와 겹칩니다: $p"
+  done
+  return 0
+}
+
+storage_set() {
+  local kind="${1:-}" new="${2:-}" cur subs sub dst unit fs ancestor need avail n
+  local -a stopped=() olds=() news=()
+  subs="$(storage_subdirs "$kind")"
+  cur="$(storage_get "$kind")"
+  [[ "$new" == default ]] && new=""
+  if [[ -n "$new" ]]; then
+    valid_storage_path "$new"
+    storage_no_overlap "$kind" "$new"
+  fi
+  [[ "$new" != "$cur" ]] || die "이미 그 위치입니다"
+  [[ -n "$new" && -n "$cur" && ( "$new/" == "$cur/"* || "$cur/" == "$new/"* ) ]] && die "지금 위치와 겹치는 경로는 고를 수 없습니다"
+
+  if [[ -n "$new" ]]; then
+    # 존재하면 비어 있는 폴더여야 함 (lost+found 만 있는 새 디스크는 허용), 심볼릭 링크 금지
+    ancestor="$new"; while [[ ! -e "$ancestor" ]]; do ancestor="$(dirname "$ancestor")"; done
+    [[ "$(realpath -e "$ancestor")" == "$ancestor" ]] || die "경로에 심볼릭 링크가 있습니다: $ancestor"
+    if [[ -e "$new" ]]; then
+      [[ -d "$new" ]] || die "폴더가 아닙니다: $new"
+      [[ -z "$(ls -A "$new" | grep -vx 'lost+found' || true)" ]] || die "비어 있는 폴더만 고를 수 있습니다: $new"
+    fi
+    fs="$(stat -f -c %T "$ancestor")"
+    case "$fs" in
+      msdos|vfat|exfat|ntfs|ntfs3|fuseblk|tmpfs|ramfs) die "$fs 파일시스템은 쓸 수 없습니다 (권한·소유자를 저장하지 못하거나 재부팅하면 사라짐)" ;;
+    esac
+    need=0
+    for sub in $subs; do
+      n="$(du -sb --one-file-system "$DATA/$sub" 2>/dev/null | cut -f1 || true)"
+      need=$(( need + ${n:-0} ))
+    done
+    avail=$(( $(stat -f -c '%a * %S' "$ancestor") ))
+    (( need + need / 20 + 104857600 < avail )) || die "공간이 부족합니다: 필요 약 $(( need / 1048576 ))MB, 남은 공간 $(( avail / 1048576 ))MB"
+    echo "▶ 옮길 데이터: 약 $(( need / 1048576 ))MB → $new ($fs, 남은 공간 $(( avail / 1048576 ))MB)" >&2
+  else
+    echo "▶ 기본 위치($DATA)로 되돌립니다" >&2
+  fi
+
+  command -v rsync >/dev/null || apt_install_quiet rsync >&2 || die "rsync 를 설치하지 못했습니다"
+  # 1차 복사 (서비스는 계속 실행)
+  for sub in $subs; do
+    install -d -m 0755 "$DATA/$sub"
+    if [[ -n "$new" ]]; then dst="$(storage_dst "$kind" "$new" "$sub")"; else dst="$DATA/.storage-$sub.new"; fi
+    install -d -m 0755 "$dst"
+    news+=("$dst")
+    echo "▶ 복사: $DATA/$sub → $dst" >&2
+    rsync -aH --numeric-ids --delete "$DATA/$sub/" "$dst/" >&2 \
+      || { for d in "${news[@]}"; do [[ -n "$new" ]] || rm -rf --one-file-system "$d"; done; die "복사 실패 — 아무것도 바꾸지 않았습니다"; }
+  done
+
+  # 프로젝트: 앱을 잠깐 멈추고 마지막으로 맞춤
+  if [[ $kind == projects ]]; then
+    mapfile -t stopped < <(systemctl list-units --type=service --state=active --plain --no-legend 'rpanel-app-*.service' 2>/dev/null | awk '{print $1}')
+    if (( ${#stopped[@]} )); then
+      echo "▶ 앱 ${#stopped[@]}개 잠시 중지" >&2
+      systemctl stop "${stopped[@]}" || true
+    fi
+  fi
+  for sub in $subs; do
+    if [[ -n "$new" ]]; then dst="$(storage_dst "$kind" "$new" "$sub")"; else dst="$DATA/.storage-$sub.new"; fi
+    rsync -aH --numeric-ids --delete "$DATA/$sub/" "$dst/" >&2 || {
+      (( ${#stopped[@]} )) && systemctl start "${stopped[@]}" || true
+      die "복사 실패 — 아무것도 바꾸지 않았습니다"
+    }
+  done
+
+  # 바꾸기
+  for sub in $subs; do
+    unit="$(systemd-escape -p --suffix=mount "$DATA/$sub")"
+    if [[ -n "$cur" ]]; then
+      systemctl disable --now "$unit" >&2 || die "$DATA/$sub 마운트를 풀지 못했습니다"
+      rm -f "/etc/systemd/system/$unit"
+      for _ in $(seq 40); do mountpoint -q "$DATA/$sub" || break; sleep 0.25; done
+      mountpoint -q "$DATA/$sub" && die "$DATA/$sub 마운트가 풀리지 않았습니다"
+      olds+=("$(storage_dst "$kind" "$cur" "$sub")")
+    else
+      rm -rf --one-file-system "$DATA/.storage-old-$sub"
+      mv "$DATA/$sub" "$DATA/.storage-old-$sub"
+      olds+=("$DATA/.storage-old-$sub")
+    fi
+    if [[ -n "$new" ]]; then
+      dst="$(storage_dst "$kind" "$new" "$sub")"
+      [[ -d "$DATA/$sub" ]] || install -d -m 0755 "$DATA/$sub"
+      cat > "/etc/systemd/system/$unit" <<UNIT
+$MARK
+[Unit]
+Description=Rpanel storage: $DATA/$sub
+RequiresMountsFor=$dst
+Before=rpanel.service
+
+[Mount]
+What=$dst
+Where=$DATA/$sub
+Type=none
+Options=bind
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+      systemctl daemon-reload
+      systemctl enable --now "$unit" >&2 || die "$unit 을(를) 켜지 못했습니다 — 데이터는 $dst 에 있습니다"
+      for _ in $(seq 40); do mountpoint -q "$DATA/$sub" && break; sleep 0.25; done
+      mountpoint -q "$DATA/$sub" || die "$DATA/$sub 마운트가 보이지 않습니다"
+    else
+      rmdir "$DATA/$sub" 2>/dev/null || mv "$DATA/$sub" "$DATA/.storage-mnt-$sub"
+      mv "$DATA/.storage-$sub.new" "$DATA/$sub"
+    fi
+  done
+  systemctl daemon-reload
+
+  # 기록
+  install -d -m 0755 "$(dirname "$STORAGE_REG")"
+  { [[ -f $STORAGE_REG ]] && awk -v k="$kind" '$1!=k' "$STORAGE_REG"; [[ -n "$new" ]] && echo "$kind $new"; } > "$STORAGE_REG.tmp" || true
+  chmod 0644 "$STORAGE_REG.tmp"; mv "$STORAGE_REG.tmp" "$STORAGE_REG"
+
+  if (( ${#stopped[@]} )); then
+    echo "▶ 앱 다시 시작" >&2
+    systemctl start "${stopped[@]}" || echo "  (일부 앱을 시작하지 못했습니다 — 앱 화면에서 확인하세요)" >&2
+  fi
+  # 예전 위치 정리 (복사가 끝난 원본)
+  for d in "${olds[@]}"; do
+    echo "▶ 예전 위치 정리: $d" >&2
+    rm -rf --one-file-system "$d" || echo "  ($d 를 지우지 못했습니다 — 직접 지워도 됩니다)" >&2
+  done
+  rm -rf --one-file-system "$DATA"/.storage-mnt-* 2>/dev/null || true
+  [[ -n "$cur" && $kind == projects ]] && rmdir "$cur" 2>/dev/null || true
+  echo "✔ ${new:-$DATA (기본)}"
+}
+
 # ───────────────────────── main ─────────────────────────
 
 main() {
@@ -1559,6 +1733,7 @@ case "$cmd" in
   db-engine-downgrade) db_engine_downgrade "${1:-}" "${2:-}" ;;
   panel-access)        panel_access "${1:-}" ;;
   runtime-remove)  runtime_remove "${1:-}" "${2:-}" ;;
+  storage-set)     storage_set "${1:-}" "${2:-}" ;;
   purge-app)
     valid_slug "${1:-}"
     remove_all_crons "$1"
@@ -1572,7 +1747,7 @@ case "$cmd" in
     echo "purged $1"
     ;;
   *)
-    die "usage: rpanel-helper {prepare-app|install-unit|remove-unit|install-site|remove-site|purge-app} <slug> | svc {start|stop|restart} <slug> | status|journal <slug> | {install,remove,run}-cron|cron-status|cron-log <slug> <id> | db-{create,drop,password} <db> <user> | db-user-create <db> <user> <all|read> (pw stdin) | db-user-drop <db> <user> | db-user-password <db> <user> (pw stdin) | redis-user-set <user> <pattern> <rw|ro> (pw stdin) | redis-user-drop <user> | backup-db <slug> <db> <stamp> | backup-data <slug> <stamp> | restore-db <slug> <db> <file> | restore-data <slug> <file> | nginx-log <slug> access|error <lines> | site-create <slug> <user> <domain> <static|rust|python> | site-password <slug> (stdin) | site-account-create <slug> <user> <ssh|sftp> (pw stdin) | site-account-update <slug> <user> <ssh|sftp> <on|off> | site-account-password <slug> <user> (stdin) | site-account-keys <slug> <user> (stdin) | site-account-delete <slug> <user> | ssl-issue <slug> <email> <domain>... | ssl-custom|ssl-info|ssl-remove <slug> | backup-files <slug> <stamp> | restore-files <slug> <file> | backup-mongo <slug> <db> <stamp> | restore-mongo <slug> <db> <file> | runtime-install|runtime-remove <python|node> <version> | system-log <panel|nginx|ssh|mariadb|redis> <lines> | panel-domain-set <domain> <email> | panel-domain-remove | db-engine-upgrade|db-engine-downgrade <mariadb|mongodb|redis> <version> | panel-access <any|CIDR,...>"
+    die "usage: rpanel-helper {prepare-app|install-unit|remove-unit|install-site|remove-site|purge-app} <slug> | svc {start|stop|restart} <slug> | status|journal <slug> | {install,remove,run}-cron|cron-status|cron-log <slug> <id> | db-{create,drop,password} <db> <user> | db-user-create <db> <user> <all|read> (pw stdin) | db-user-drop <db> <user> | db-user-password <db> <user> (pw stdin) | redis-user-set <user> <pattern> <rw|ro> (pw stdin) | redis-user-drop <user> | backup-db <slug> <db> <stamp> | backup-data <slug> <stamp> | restore-db <slug> <db> <file> | restore-data <slug> <file> | nginx-log <slug> access|error <lines> | site-create <slug> <user> <domain> <static|rust|python> | site-password <slug> (stdin) | site-account-create <slug> <user> <ssh|sftp> (pw stdin) | site-account-update <slug> <user> <ssh|sftp> <on|off> | site-account-password <slug> <user> (stdin) | site-account-keys <slug> <user> (stdin) | site-account-delete <slug> <user> | ssl-issue <slug> <email> <domain>... | ssl-custom|ssl-info|ssl-remove <slug> | backup-files <slug> <stamp> | restore-files <slug> <file> | backup-mongo <slug> <db> <stamp> | restore-mongo <slug> <db> <file> | runtime-install|runtime-remove <python|node> <version> | system-log <panel|nginx|ssh|mariadb|redis> <lines> | panel-domain-set <domain> <email> | panel-domain-remove | db-engine-upgrade|db-engine-downgrade <mariadb|mongodb|redis> <version> | panel-access <any|CIDR,...> | storage-set <backups|projects> <path|default>"
     ;;
 esac
 }

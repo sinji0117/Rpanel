@@ -73,6 +73,11 @@ struct Running {
 }
 
 async fn take_lock(state: &AppState, key: &str) -> AppResult<String> {
+    if crate::storage::running() {
+        return Err(AppError::Conflict(
+            "저장 위치를 옮기는 중입니다. 끝난 뒤 백업하세요".into(),
+        ));
+    }
     let mut r = state.redis.clone();
     let lock = state.key(&["lock", "backup", key]);
     let got: Option<String> = redis::cmd("SET")

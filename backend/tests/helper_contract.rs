@@ -874,3 +874,51 @@ fn helper_db_engine_and_panel_access() {
     assert!(!s.contains("deny"), "{s}");
     let _ = std::fs::remove_file(&f);
 }
+
+#[test]
+fn helper_storage_path_rules() {
+    for ok in [
+        "/data/backups",
+        "/srv/rpanel",
+        "/mnt/hdd1/rp_files",
+        "/backup",
+    ] {
+        assert!(helper_fn(&format!("valid_storage_path '{ok}'")), "{ok}");
+    }
+    for bad in [
+        "",
+        "/",
+        "data",
+        "/data/",
+        "/data//x",
+        "/data/../etc",
+        "/data/./x",
+        "/etc/x",
+        "/var/lib/rpanel/x",
+        "/var",
+        "/home/me/b",
+        "/tmp/x",
+        "/usr",
+        "/data/a b",
+        "/data/$(id)",
+        "/root",
+        "/proc/1",
+    ] {
+        assert!(!helper_fn(&format!("valid_storage_path '{bad}'")), "{bad}");
+    }
+    assert!(!helper_fn("storage_subdirs etc"));
+    // 다른 종류 위치와 겹침
+    let dir = std::env::temp_dir().join(format!("rp-storage-{}", rand_id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let reg = dir.join("storage");
+    std::fs::write(&reg, "projects /data/projects\n").unwrap();
+    let with = |call: &str| helper_fn(&format!("STORAGE_REG='{}'; {call}", reg.display()));
+    assert!(!with("storage_no_overlap backups /data/projects/b"));
+    assert!(!with("storage_no_overlap backups /data"));
+    assert!(with("storage_no_overlap backups /data/projects2"));
+    assert!(with("[[ $(storage_get projects) == /data/projects ]]"));
+    // 같은 위치 · 기본 위치로 되돌리기(이미 기본)는 거부
+    assert!(!with("storage_set projects /data/projects"));
+    assert!(!with("storage_set backups default"));
+    std::fs::remove_dir_all(&dir).ok();
+}

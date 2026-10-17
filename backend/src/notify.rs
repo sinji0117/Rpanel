@@ -24,6 +24,7 @@ pub const EVENTS: &[(&str, &str, bool)] = &[
     ("update_available", "새 버전 알림", true),
     ("runtime_install", "런타임 설치 결과", true),
     ("db_engine", "데이터베이스 버전 변경 결과", true),
+    ("storage", "저장 위치 변경 결과", true),
     ("admin_login", "관리자 로그인", false),
 ];
 

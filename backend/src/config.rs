@@ -61,6 +61,8 @@ pub struct Config {
     pub files_bin: PathBuf,
     /// IPv6 로도 리스닝 (서버에 IPv6 가 없으면 install.sh 가 false 로 설정)
     pub ipv6: bool,
+    /// 저장 위치 기록 (helper 가 씀): "<backups|projects> <path>"
+    pub storage_reg: PathBuf,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
@@ -159,6 +161,9 @@ impl Config {
                 .unwrap_or_else(|| "/usr/local/lib/rpanel/rpanel-files".into())
                 .into(),
             ipv6: var("RPANEL_IPV6").map(|v| parse_bool(&v)).unwrap_or(true),
+            storage_reg: var("RPANEL_STORAGE_REG")
+                .unwrap_or_else(|| "/etc/rpanel/storage".into())
+                .into(),
         })
     }
 
@@ -194,6 +199,7 @@ impl Config {
             edge_mode: EdgeMode::Direct,
             files_bin: "/bin/false".into(),
             ipv6: true,
+            storage_reg: "/nonexistent/rpanel-storage".into(),
         }
     }
 }

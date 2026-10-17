@@ -16,6 +16,7 @@ pub mod runtimes;
 pub mod site_accounts;
 pub mod site_admin;
 pub mod sites;
+pub mod storage;
 pub mod system;
 pub mod users;
 pub mod ws;
@@ -130,6 +131,8 @@ pub fn router(state: AppState) -> Router {
             "/system/panel-access",
             get(panel_access::get).put(panel_access::set),
         )
+        .route("/system/storage", get(storage::get))
+        .route("/system/storage/{kind}", put(storage::set))
         .route("/db-engines", get(dbengines::list))
         .route("/db-engines/{engine}", post(dbengines::upgrade))
         // DB 웹 관리 (MariaDB)

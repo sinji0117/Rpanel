@@ -182,12 +182,8 @@ pub fn systemd_unit(i: &UnitInput) -> anyhow::Result<String> {
             let bin = app.binary_name.as_deref().unwrap_or(&app.slug);
             i.paths.current.join(bin).display().to_string()
         }
-        (AppKind::Rust | AppKind::Python, _) => {
-            let default = if kind == AppKind::Python {
-                PYTHON_DEFAULT_START
-            } else {
-                "./app"
-            };
+        (AppKind::Rust | AppKind::Python | AppKind::Node | AppKind::Java, source) => {
+            let default = kind.default_start(source);
             let cmd = app
                 .start_cmd
                 .as_deref()
@@ -198,7 +194,7 @@ pub fn systemd_unit(i: &UnitInput) -> anyhow::Result<String> {
         _ => anyhow::bail!("{} 앱은 systemd 유닛이 없습니다", kind.as_str()),
     };
     let (user, cwd, rw, protect_home) = unit_identity(app, i.paths, i.run_user);
-    // Python 확장 모듈(cffi 등)은 실행 가능한 메모리를 만들 수 있어 W^X 제한은 Rust 에만
+    // Python 확장 모듈(cffi 등)·Node.js·Java 의 JIT 는 실행 가능한 메모리를 만들어 W^X 제한은 Rust 에만
     let mdwe = if kind == AppKind::Rust {
         "MemoryDenyWriteExecute=true\n"
     } else {
@@ -392,7 +388,7 @@ fn site_body(i: &SiteInput) -> String {
     let app = i.app;
     let mut s = String::new();
     match (app.kind(), app.source()) {
-        (AppKind::Rust | AppKind::Python, _) => {
+        (AppKind::Rust | AppKind::Python | AppKind::Node | AppKind::Java, _) => {
             let port = app.port.unwrap_or(0);
             s.push_str(&format!(
                 "
@@ -846,6 +842,62 @@ mod tests {
         assert!(u.contains("WorkingDirectory=/home/beripick/htdocs/beripick.com\n"));
         assert!(u.contains("ReadWritePaths=/home/beripick\n"));
         assert!(!u.contains("ProtectHome"));
+    }
+
+    #[test]
+    fn node_and_java_units() {
+        let p = AppPaths::new(Path::new("/var/lib/rpanel"), "beripick-api");
+        for (kind, start) in [
+            ("node", "npm start"),
+            ("java", "java $$JAVA_OPTS -jar app.jar"),
+        ] {
+            let mut g = app(kind);
+            g.start_cmd = None;
+            let u = systemd_unit(&UnitInput {
+                app: &g,
+                paths: &p,
+                run_user: "rpanel-app",
+                path_env: "/opt/rpanel/runtimes/node/22/bin:/usr/bin",
+            })
+            .unwrap();
+            assert!(
+                u.contains(&format!("ExecStart=/bin/bash -c \"{start}\"")),
+                "{u}"
+            );
+            // JIT 가 실행 가능한 메모리를 만들므로 W^X 제한 없음
+            assert!(!u.contains("MemoryDenyWriteExecute"));
+            assert!(u.contains("Environment=PATH=/opt/rpanel/runtimes/node/22/bin:/usr/bin\n"));
+            assert!(u.contains("WorkingDirectory=/var/lib/rpanel/apps/beripick-api/current\n"));
+            let s = nginx_site(&SiteInput {
+                app: &g,
+                paths: &p,
+                trusted_proxy: "",
+                ipv6: false,
+            })
+            .unwrap();
+            assert!(s.contains("proxy_pass http://127.0.0.1:8101;"));
+        }
+        let mut f = files_app("java");
+        f.start_cmd = None;
+        let u = systemd_unit(&UnitInput {
+            app: &f,
+            paths: &p,
+            run_user: "rpanel-app",
+            path_env: "/usr/bin",
+        })
+        .unwrap();
+        assert!(u.contains("User=beripick\n"));
+        assert!(u.contains("java $$JAVA_OPTS App.java"), "{u}");
+        let mut n = files_app("node");
+        n.start_cmd = None;
+        let u = systemd_unit(&UnitInput {
+            app: &n,
+            paths: &p,
+            run_user: "rpanel-app",
+            path_env: "/usr/bin",
+        })
+        .unwrap();
+        assert!(u.contains("node server.js"), "{u}");
     }
 
     #[test]

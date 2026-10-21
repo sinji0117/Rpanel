@@ -3,13 +3,14 @@
 # 언어 버전 (런타임)
 
 Rpanel 은 언어마다 여러 버전을 설치해 두고, **기본 버전**과 **앱별 버전**을 고를 수 있습니다.
-왼쪽 메뉴 **시스템 → 런타임**에서 관리합니다. 화면 위 탭이 **언어**(Rust · Python · Node.js)와 **데이터베이스**(MariaDB · MongoDB · Redis)로 나뉩니다. 데이터베이스 서버 버전은 [데이터베이스 쓰기 → DB 버전 바꾸기](database.md#db-버전-바꾸기)를 보세요.
+왼쪽 메뉴 **시스템 → 런타임**에서 관리합니다. 화면 위 탭이 **언어**(Rust · Python · Node.js · Java)와 **데이터베이스**(MariaDB · MongoDB · Redis)로 나뉩니다. 데이터베이스 서버 버전은 [데이터베이스 쓰기 → DB 버전 바꾸기](database.md#db-버전-바꾸기)를 보세요.
 
 | 언어 | 어디에 쓰이나 | 처음 기본값 | 고를 수 있는 버전 (예) |
 |---|---|---|---|
 | **Rust** | Git 자동 배포로 빌드하는 Rust 앱 (`cargo build`) | 최신 안정판 `stable` | `stable` · `beta` · `nightly` · `1.85` · `1.85.0` … |
 | **Python** | Python 사이트·앱의 가상환경(`.venv`) | 서버 기본 (Ubuntu 24.04 는 3.12) | `3.10` ~ `3.14` |
-| **Node.js** | React·Vue 같은 화면을 Git 에서 빌드할 때 (`npm run build`) | 서버 기본 (설치 시 22) | `20` · `22` · `24` … |
+| **Node.js** | Node.js 사이트·앱 실행, React·Vue 같은 화면을 Git 에서 빌드할 때 (`npm run build`) | 서버 기본 (설치 시 22) | `20` · `22` · `24` … |
+| **Java** | Java 사이트·앱의 빌드(Maven·Gradle)와 실행 | 서버 기본 (`java` 가 없으면 설치 필요) | `11` · `17` · `21` · `25` … (8 도 가능) |
 
 > 내 컴퓨터에서 빌드해서 올리는 **업로드형 Rust 사이트**와 **HTML 사이트**는 서버에서 빌드하지 않으므로 버전을 고를 필요가 없습니다.
 
@@ -42,6 +43,9 @@ Rpanel 은 언어마다 여러 버전을 설치해 두고, **기본 버전**과 
 | Rust | `/var/lib/rpanel/.rustup` (패널 계정의 rustup) | `rustup toolchain install` |
 | Python | `/opt/rpanel/runtimes/python` | [uv](https://github.com/astral-sh/uv) 의 standalone Python |
 | Node.js | `/opt/rpanel/runtimes/node/<버전>` | nodejs.org 공식 파일 (SHA-256 확인) |
+| Java | `/opt/rpanel/runtimes/java/<버전>` | [Eclipse Temurin](https://adoptium.net) JDK (api.adoptium.net, SHA-256 확인) |
+
+Node.js · Java 는 고른 버전의 `bin` 폴더가 서비스·크론·빌드 명령의 `PATH` 맨 앞에 붙으므로, 시작 명령에는 그냥 `node`, `npm`, `java` 라고 쓰면 됩니다.
 
 ---
 

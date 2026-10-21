@@ -2,7 +2,7 @@
 
 [![license](https://img.shields.io/github/license/sinji0117/Rpanel?label=license&color=blue)](LICENSE)
 [![language](https://img.shields.io/badge/language-Rust-dea584?logo=rust&logoColor=white)](https://www.rust-lang.org/)
-[![python](https://img.shields.io/badge/apps-Rust%20%C2%B7%20Python-3776ab?logo=python&logoColor=white)](#이런-걸-할-수-있어요)
+[![apps](https://img.shields.io/badge/apps-Rust%20%C2%B7%20Python%20%C2%B7%20Node.js%20%C2%B7%20Java-3776ab)](#이런-걸-할-수-있어요)
 [![frontend](https://img.shields.io/badge/frontend-React%2019-61dafb?logo=react&logoColor=black)](frontend)
 [![os](https://img.shields.io/badge/OS-Ubuntu%2024.04-e95420?logo=ubuntu&logoColor=white)](#준비물)
 [![CI](https://github.com/sinji0117/Rpanel/actions/workflows/ci.yml/badge.svg)](https://github.com/sinji0117/Rpanel/actions/workflows/ci.yml)
@@ -10,7 +10,7 @@
 [![stars](https://img.shields.io/github/stars/sinji0117/Rpanel?label=stars&color=yellow)](https://github.com/sinji0117/Rpanel/stargazers)
 [![Buy Me a Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-%ED%9B%84%EC%9B%90%ED%95%98%EA%B8%B0-ffdd00?logo=buymeacoffee&logoColor=black)](https://buymeacoffee.com/bandiuri)
 
-**Rust·Python으로 만든 웹 서비스를 내 서버에 올리고 관리하는 무료 관리 화면(웹 패널)입니다.**
+**Rust·Python·Node.js·Java로 만든 웹 서비스를 내 서버에 올리고 관리하는 무료 관리 화면(웹 패널)입니다.**
 
 리눅스 명령어를 잘 몰라도 브라우저에서 클릭으로 사이트를 만들고, 프로그램을 올리고, https 자물쇠를 붙이고, 백업할 수 있습니다.
 누구나 무료로 쓰고 고칠 수 있는 오픈소스(MIT 라이선스)입니다.
@@ -27,9 +27,11 @@
 - **사이트 만들기**: 주소(도메인)만 넣으면 사이트가 생깁니다.
   - **Rust 프로그램**: 내 컴퓨터에서 빌드한 실행 파일을 올리면 서비스로 실행됩니다.
   - **Python 프로그램**: Flask·FastAPI·Django 등. 파일과 `requirements.txt`를 올리면 가상환경을 만들고 패키지를 설치해서 실행합니다.
+  - **Node.js 프로그램**: Express·Next.js 등. 파일과 `package.json`을 올리면 npm 패키지를 설치해서 실행합니다.
+  - **Java 프로그램**: Spring Boot 등. 빌드한 실행용 jar 를 올리면 실행합니다.
   - **HTML 사이트**: HTML·CSS·JS 파일을 올리면 바로 보입니다. React·Vue 등을 빌드한 결과물도 됩니다.
   - **연결(리버스 프록시)**: 다른 서버나 포트로 넘겨줍니다.
-- **Git 자동 배포**: GitHub·GitLab에 코드를 올리면 서버가 알아서 빌드(`cargo build`, Python은 패키지 설치)하고 새 버전으로 바꿉니다. 실패하면 이전 버전으로 되돌아갑니다.
+- **Git 자동 배포**: GitHub·GitLab에 코드를 올리면 서버가 알아서 빌드(`cargo build`, Python은 패키지 설치, Node.js는 `npm`, Java는 Maven·Gradle)하고 새 버전으로 바꿉니다. 실패하면 이전 버전으로 되돌아갑니다.
   - **프로젝트 화면**: 프런트 · 백엔드(API) · 관리자 화면을 한 화면에서 보고, 프런트의 `/api/`를 백엔드에 연결하고, 한 번에 배포합니다. 관리자 화면은 `admin.example.com`처럼 다른 도메인으로 붙입니다.
 - **파일 올리기**: 브라우저에서 끌어다 놓거나, FileZilla 같은 프로그램으로 올립니다.
 - **사이트 계정 (SSH · SFTP)**: 사이트마다 접속 계정을 여러 개 만들고, 수정·잠금·비밀번호 변경·삭제를 할 수 있습니다. 외주 개발자·디자이너에게 계정을 따로 줄 때 좋습니다.
@@ -48,14 +50,14 @@
 - **패널 도메인 · 접속 IP**: 패널을 `https://panel.example.com`처럼 도메인으로 열고 (인증서 자동 발급), 정해 둔 IP 에서만 열리게 할 수 있습니다.
 - **알림**: 배포·백업 실패, 사이트 응답 없음, 디스크·메모리 부족, 새 버전 등을 종 아이콘으로 알려 주고, Discord·Slack·Telegram·웹훅으로도 보냅니다. 알림 목록은 배포·백업·사이트·서버·시스템으로 나눠 봅니다.
 - **관리자 여러 명**: 패널에 로그인할 관리자 계정을 추가·수정·삭제합니다.
-- **언어 버전 고르기**: Rust 툴체인 · Python · Node.js 버전을 여러 개 설치해 두고, 기본 버전과 앱별 버전을 고릅니다.
+- **언어 버전 고르기**: Rust 툴체인 · Python · Node.js · Java(JDK) 버전을 여러 개 설치해 두고, 기본 버전과 앱별 버전을 고릅니다.
 - **버전 확인**: 지금 패널 버전과 GitHub 의 최신 버전을 대시보드에서 보여 주고, 새 버전이 나오면 알려 줍니다.
 - **낮·밤 화면, 22개 언어**: 화면 테마(낮·밤·자동)와 언어(한국어·English·Deutsch·Español·Français·日本語·中文 등 22개)를 고를 수 있습니다.
 
 사이트마다 별도의 리눅스 계정으로 나뉘어 있어서, 한 사이트에 문제가 생겨도 다른 사이트는 안전합니다.
 
-> **Rust와 Python 프로그램을 위한 패널입니다.** PHP(WordPress 등)나 Node.js 서버 프로그램은 실행하지 않습니다.
-> (React·Vue 같은 화면은 빌드한 HTML 파일로 올리면 됩니다.)
+> **Rust · Python · Node.js · Java 프로그램을 위한 패널입니다.** PHP(WordPress 등)는 실행하지 않습니다.
+> (React·Vue 같은 화면은 빌드한 HTML 파일로 올리거나, Git 에서 빌드하게 하면 됩니다.)
 
 ---
 
@@ -119,7 +121,7 @@ https://서버IP:8443
 | 처음이라면 | 관리 | 도움말 |
 |---|---|---|
 | [첫 사이트 만들기 (Rust)](docs/first-site.md) | [사이트 계정 (SSH · SFTP)](docs/site-accounts.md) | [자주 묻는 질문](docs/faq.md) |
-| [Python 프로그램 올리기](docs/python.md) | [데이터베이스 쓰기](docs/database.md) | [문제가 생겼을 때](docs/troubleshooting.md) |
+| [Python 프로그램 올리기](docs/python.md) · [Node.js · Java](docs/node-java.md) | [데이터베이스 쓰기](docs/database.md) | [문제가 생겼을 때](docs/troubleshooting.md) |
 | [Git으로 자동 배포하기](docs/git-deploy.md) | [백업과 복원](docs/backup.md) | [기술 문서](docs/ADVANCED.md) |
 | | [언어 버전 (런타임)](docs/runtimes.md) | |
 | | [모니터링과 로그](docs/monitoring-logs.md) | |

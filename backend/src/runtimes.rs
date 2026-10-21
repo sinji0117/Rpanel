@@ -1,11 +1,12 @@
-//! 언어 런타임 버전 관리 — Rust 툴체인(rustup) · Python · Node.js
+//! 언어 런타임 버전 관리 — Rust 툴체인(rustup) · Python · Node.js · Java
 //!
 //! - Rust: 패널 사용자(rpanel)의 rustup 으로 툴체인을 설치하고, 빌드할 때 `RUSTUP_TOOLCHAIN` 으로 고릅니다.
 //!   (`rustup default` 는 건드리지 않음 → 패널 자체 업데이트 빌드에 영향 없음)
 //! - Python · Node.js: helper(root)가 `/opt/rpanel/runtimes` 에 설치합니다 (모든 사이트 유저가 읽기 가능).
 //!   - Python: uv 로 standalone 빌드 설치 → `/opt/rpanel/runtimes/bin/python3.X`
 //!   - Node.js: nodejs.org 공식 tarball(SHA-256 확인) → `/opt/rpanel/runtimes/node/<major>/bin`
-//! - `system` 은 서버에 원래 있던 python3 / node 입니다.
+//!   - Java: Eclipse Temurin JDK(Adoptium, SHA-256 확인) → `/opt/rpanel/runtimes/java/<major>/bin`
+//! - `system` 은 서버에 원래 있던 python3 / node / java 입니다.
 //!
 //! 언어마다 기본 버전이 하나 있고, 앱은 따로 고르지 않으면 기본 버전을 씁니다.
 
@@ -33,16 +34,18 @@ pub enum Lang {
     Rust,
     Python,
     Node,
+    Java,
 }
 
 impl Lang {
-    pub const ALL: [Lang; 3] = [Lang::Rust, Lang::Python, Lang::Node];
+    pub const ALL: [Lang; 4] = [Lang::Rust, Lang::Python, Lang::Node, Lang::Java];
 
     pub fn as_str(self) -> &'static str {
         match self {
             Lang::Rust => "rust",
             Lang::Python => "python",
             Lang::Node => "node",
+            Lang::Java => "java",
         }
     }
 
@@ -51,6 +54,7 @@ impl Lang {
             "rust" => Some(Lang::Rust),
             "python" => Some(Lang::Python),
             "node" => Some(Lang::Node),
+            "java" => Some(Lang::Java),
             _ => None,
         }
     }
@@ -60,6 +64,7 @@ impl Lang {
             Lang::Rust => "Rust",
             Lang::Python => "Python",
             Lang::Node => "Node.js",
+            Lang::Java => "Java",
         }
     }
 
@@ -67,7 +72,7 @@ impl Lang {
     fn builtin(self) -> &'static str {
         match self {
             Lang::Rust => "stable",
-            Lang::Python | Lang::Node => "system",
+            Lang::Python | Lang::Node | Lang::Java => "system",
         }
     }
 }
@@ -76,6 +81,7 @@ static RUST_RE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"^(stable|beta|nightly|1\.[0-9]{1,3}(\.[0-9]{1,3})?)$").unwrap());
 static PY_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"^(system|3\.[0-9]{1,2})$").unwrap());
 static NODE_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"^(system|[1-9][0-9])$").unwrap());
+static JAVA_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"^(system|8|[1-9][0-9])$").unwrap());
 
 /// 버전 문자열 검사 (helper 도 같은 규칙으로 다시 검사)
 pub fn validate(lang: Lang, version: &str) -> Result<(), String> {
@@ -90,6 +96,13 @@ pub fn validate(lang: Lang, version: &str) -> Result<(), String> {
                 && (version == "system"
                     || version.parse::<u32>().is_ok_and(|m| (18..=40).contains(&m)))
         }
+        Lang::Java => {
+            JAVA_RE.is_match(version)
+                && (version == "system"
+                    || version
+                        .parse::<u32>()
+                        .is_ok_and(|m| m == 8 || (11..=40).contains(&m)))
+        }
     };
     if ok {
         Ok(())
@@ -100,6 +113,7 @@ pub fn validate(lang: Lang, version: &str) -> Result<(), String> {
             }
             Lang::Python => "Python 버전은 3.8 ~ 3.20 형식입니다 (예: 3.12)".into(),
             Lang::Node => "Node.js 버전은 주 버전 숫자입니다 (예: 22)".into(),
+            Lang::Java => "Java 버전은 주 버전 숫자입니다 (8 또는 11 이상, 예: 21)".into(),
         })
     }
 }
@@ -121,6 +135,9 @@ pub fn candidates(lang: Lang) -> Vec<String> {
             .map(String::from)
             .to_vec(),
         Lang::Node => ["system", "24", "22", "20"].map(String::from).to_vec(),
+        Lang::Java => ["system", "25", "21", "17", "11"]
+            .map(String::from)
+            .to_vec(),
     }
 }
 
@@ -132,11 +149,27 @@ pub fn latest_rust_minor(today: NaiveDate) -> i64 {
 
 /// 앱 종류 → 쓰는 런타임 (업로드형 Rust 사이트·HTML 사이트·프록시는 없음)
 pub fn lang_for(app: &App) -> Option<Lang> {
-    match (app.kind(), app.source()) {
+    lang_for_kind(app.kind(), app.source())
+}
+
+pub fn lang_for_kind(kind: AppKind, source: Source) -> Option<Lang> {
+    match (kind, source) {
         (AppKind::Rust, Source::Git) => Some(Lang::Rust),
         (AppKind::Python, _) => Some(Lang::Python),
+        (AppKind::Node, _) => Some(Lang::Node),
+        (AppKind::Java, _) => Some(Lang::Java),
         (AppKind::Static, Source::Git) => Some(Lang::Node),
         _ => None,
+    }
+}
+
+/// 이 런타임 버전을 쓰는 앱 종류 (지우기 전 사용 중인지 확인용)
+pub fn kinds_for(lang: Lang) -> &'static [&'static str] {
+    match lang {
+        Lang::Rust => &["rust"],
+        Lang::Python => &["python"],
+        Lang::Node => &["node", "static"],
+        Lang::Java => &["java"],
     }
 }
 
@@ -189,16 +222,53 @@ impl Resolved {
         }
     }
 
+    /// 설치한 Node.js · Java 의 bin 폴더 (서버 기본 버전이면 None)
+    pub fn bin_dir(&self) -> Option<String> {
+        bin_dir(self.lang, &self.version)
+    }
+
+    /// PATH 앞에 런타임 bin 을 붙임
+    pub fn path_with(&self, base_path: &str) -> String {
+        match self.bin_dir() {
+            Some(b) => format!("{b}:{base_path}"),
+            None => base_path.to_string(),
+        }
+    }
+
     /// 빌드 명령에 넣을 환경변수
     pub fn build_env(&self, base_path: &str) -> Vec<(String, String)> {
         match self.lang {
             Lang::Rust => vec![("RUSTUP_TOOLCHAIN".into(), self.version.clone())],
-            Lang::Node if self.version != "system" => vec![(
-                "PATH".into(),
-                format!("{RUNTIMES_DIR}/node/{}/bin:{base_path}", self.version),
-            )],
+            Lang::Node if self.version != "system" => {
+                vec![("PATH".into(), self.path_with(base_path))]
+            }
+            Lang::Java if self.version != "system" => vec![
+                ("PATH".into(), self.path_with(base_path)),
+                (
+                    "JAVA_HOME".into(),
+                    format!("{RUNTIMES_DIR}/java/{}", self.version),
+                ),
+            ],
             _ => vec![],
         }
+    }
+}
+
+fn bin_dir(lang: Lang, version: &str) -> Option<String> {
+    match lang {
+        Lang::Node | Lang::Java if version != "system" => {
+            Some(format!("{RUNTIMES_DIR}/{}/{version}/bin", lang.as_str()))
+        }
+        _ => None,
+    }
+}
+
+/// 서비스·크론·사이트 명령의 PATH — 앱이 쓰는 Node.js · Java 버전의 bin 을 앞에 붙임
+/// (런타임을 확인하지 못하면 base 그대로)
+pub async fn app_path(state: &AppState, app: &App, base: &str) -> String {
+    match resolve(state, app).await {
+        Ok(Some(r)) => r.path_with(base),
+        _ => base.to_string(),
     }
 }
 
@@ -247,6 +317,12 @@ async fn detect(state: &AppState, lang: Lang, version: &str) -> Option<String> {
             format!("{RUNTIMES_DIR}/node/{version}/bin/node"),
             &["--version"],
         ),
+        // java -version 은 stderr 로 출력 (JAVA_TOOL_OPTIONS 안내 줄이 먼저 나올 수 있음)
+        Lang::Java if version == "system" => CmdSpec::new("java", &["-version"]),
+        Lang::Java => CmdSpec::new(
+            format!("{RUNTIMES_DIR}/java/{version}/bin/java"),
+            &["-version"],
+        ),
     };
     let out = state
         .exec
@@ -256,7 +332,18 @@ async fn detect(state: &AppState, lang: Lang, version: &str) -> Option<String> {
     if !out.ok() {
         return None;
     }
-    parse_version(&format!("{}{}", out.stdout, out.stderr))
+    let text = format!("{}{}", out.stdout, out.stderr);
+    if lang == Lang::Java {
+        return parse_java_version(&text);
+    }
+    parse_version(&text)
+}
+
+/// `openjdk version "21.0.4" 2024-07-16` · `java version "1.8.0_412"` → "21.0.4" · "1.8.0_412"
+pub fn parse_java_version(s: &str) -> Option<String> {
+    static RE: Lazy<Regex> =
+        Lazy::new(|| Regex::new(r#"version "([0-9][0-9A-Za-z._+-]*)""#).unwrap());
+    RE.captures(s).map(|c| c[1].to_string())
 }
 
 /// "rustc 1.90.0 (…)" · "Python 3.12.3" · "v22.11.0" → 버전 숫자
@@ -425,7 +512,7 @@ async fn do_install(
             )
             .await?;
         }
-        Lang::Python | Lang::Node => {
+        Lang::Python | Lang::Node | Lang::Java => {
             if version == "system" {
                 bail!("서버 기본 버전은 설치할 수 없습니다");
             }
@@ -479,7 +566,7 @@ pub async fn uninstall(state: &AppState, lang: Lang, version: &str) -> anyhow::R
             )
             .await?;
         }
-        Lang::Python | Lang::Node => {
+        Lang::Python | Lang::Node | Lang::Java => {
             helper::call(state, &["runtime-remove", lang.as_str(), version], &log).await?;
         }
     }
@@ -510,6 +597,12 @@ mod tests {
         for bad in ["v22", "22.1", "16", "8", "lts"] {
             assert!(validate(Lang::Node, bad).is_err(), "{bad}");
         }
+        for ok in ["system", "8", "11", "17", "21", "25"] {
+            assert!(validate(Lang::Java, ok).is_ok(), "{ok}");
+        }
+        for bad in ["9", "10", "1.8", "21.0", "jdk21", "7", "41", ""] {
+            assert!(validate(Lang::Java, bad).is_err(), "{bad}");
+        }
     }
 
     #[test]
@@ -534,6 +627,13 @@ mod tests {
             Some("1.92.0-nightly")
         );
         assert_eq!(parse_version("command not found"), None);
+        let j = "Picked up JAVA_TOOL_OPTIONS: -Dhttps.proxyHost=127.0.0.1\nopenjdk version \"21.0.4\" 2024-07-16 LTS\n";
+        assert_eq!(parse_java_version(j).as_deref(), Some("21.0.4"));
+        assert_eq!(
+            parse_java_version("java version \"1.8.0_412\"").as_deref(),
+            Some("1.8.0_412")
+        );
+        assert_eq!(parse_java_version("bash: java: not found"), None);
     }
 
     #[test]
@@ -574,5 +674,28 @@ mod tests {
             rs.build_env("/x"),
             vec![("RUSTUP_TOOLCHAIN".into(), "1.85".into())]
         );
+        let j = Resolved {
+            lang: Lang::Java,
+            version: "21".into(),
+            detail: "21.0.4".into(),
+        };
+        assert_eq!(
+            j.build_env("/usr/bin"),
+            vec![
+                (
+                    "PATH".into(),
+                    "/opt/rpanel/runtimes/java/21/bin:/usr/bin".into()
+                ),
+                ("JAVA_HOME".into(), "/opt/rpanel/runtimes/java/21".into()),
+            ]
+        );
+        assert_eq!(j.path_with("/bin"), "/opt/rpanel/runtimes/java/21/bin:/bin");
+        let js = Resolved {
+            lang: Lang::Java,
+            version: "system".into(),
+            detail: String::new(),
+        };
+        assert!(js.build_env("/usr/bin").is_empty());
+        assert_eq!(js.path_with("/bin"), "/bin");
     }
 }

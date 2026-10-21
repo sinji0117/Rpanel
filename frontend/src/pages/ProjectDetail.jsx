@@ -9,8 +9,9 @@ import { useFetch, useInterval } from '../lib/useFetch'
 import { ProjectFormModal } from './Projects'
 import { t, tx } from '../i18n'
 import { confirmDialog } from '../components/Dialog'
+import { isServiceKind } from '../lib/kinds'
 
-const isBackend = (a) => a.kind === 'rust' || a.kind === 'python'
+const isBackend = (a) => isServiceKind(a.kind)
 const isAdminFront = (a) => a.kind === 'static' && roleOfApp(a) === 'admin'
 
 function roleOf(a) {
@@ -143,7 +144,7 @@ function ProjectOverview({ apps, reload, onAdd, projectName = '' }) {
     {
       id: 'back',
       title: t('백엔드 (API)'),
-      desc: t('Rust · Python 서비스 — 프런트엔드의 /api/ 가 여기로 연결됩니다'),
+      desc: t('Rust · Python · Node.js · Java 서비스 — 프런트엔드의 /api/ 가 여기로 연결됩니다'),
       accent: 'border-l-warn',
       list: backends,
       adds: [{ label: t('+ 백엔드'), preset: { role: 'back', kind: 'rust' } }],
@@ -249,8 +250,8 @@ export default function ProjectDetail() {
         title={p.name}
         subtitle={p.description}
         help={tx(
-          'Git 저장소에서 빌드하는 앱입니다. Rust(Axum) 백엔드는 {rust}, Flask·FastAPI·Django 는 {python}, React + Vite 프런트는 {static}으로 만들고, 프런트의 “/api/ 프록시 포트”에 백엔드 포트를 넣으면 한 도메인에서 프런트와 API 를 함께 서비스합니다. 빌드한 실행 파일·HTML 을 직접 올리는 사이트는 {sites} 메뉴에서 만드세요.',
-          { rust: <b>Rust</b>, python: <b>Python</b>, static: <b>Static</b>, sites: <b>{t('사이트')}</b> },
+          'Git 저장소에서 빌드하는 앱입니다. Rust(Axum) 백엔드는 {rust}, Flask·FastAPI·Django 는 {python}, Express·Next.js 는 {node}, Spring Boot 는 {java}, React + Vite 프런트는 {static}으로 만들고, 프런트의 “/api/ 프록시 포트”에 백엔드 포트를 넣으면 한 도메인에서 프런트와 API 를 함께 서비스합니다. 빌드한 실행 파일·HTML 을 직접 올리는 사이트는 {sites} 메뉴에서 만드세요.',
+          { rust: <b>Rust</b>, python: <b>Python</b>, node: <b>Node.js</b>, java: <b>Java</b>, static: <b>Static</b>, sites: <b>{t('사이트')}</b> },
         )}
         actions={
           <>

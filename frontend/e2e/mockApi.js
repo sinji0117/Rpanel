@@ -100,6 +100,7 @@ export function createMockBackend({ needsSetup = false } = {}) {
       { id: 901, lang: 'rust', version: 'stable', status: 'ready', is_default: true, is_system: true, detail: '1.90.0', log: null, updated_at: now() },
       { id: 902, lang: 'python', version: 'system', status: 'ready', is_default: true, is_system: true, detail: '3.12.3', log: null, updated_at: now() },
       { id: 903, lang: 'node', version: 'system', status: 'ready', is_default: true, is_system: true, detail: '22.11.0', log: null, updated_at: now() },
+      { id: 904, lang: 'java', version: 'system', status: 'ready', is_default: true, is_system: true, detail: '21.0.4', log: null, updated_at: now() },
     ],
     seq: 1,
   }
@@ -272,14 +273,14 @@ export function createMockBackend({ needsSetup = false } = {}) {
         }
       const usage = {}
       for (const a of db.apps) {
-        const lang = a.kind === 'python' ? 'python' : a.source === 'git' && a.kind === 'rust' ? 'rust' : a.source === 'git' && a.kind === 'static' ? 'node' : null
+        const lang = ['python', 'node', 'java'].includes(a.kind) ? a.kind : a.source === 'git' && a.kind === 'rust' ? 'rust' : a.source === 'git' && a.kind === 'static' ? 'node' : null
         if (!lang) continue
         const v = a.runtime_version ?? db.runtimes.find((r) => r.lang === lang && r.is_default)?.version
         usage[`${lang}:${v}`] = (usage[`${lang}:${v}`] ?? 0) + 1
       }
       return json(route, 200, {
         runtimes: db.runtimes,
-        candidates: { rust: ['stable', 'beta', 'nightly', '1.90', '1.89'], python: ['system', '3.14', '3.13', '3.12', '3.11'], node: ['system', '24', '22', '20'] },
+        candidates: { rust: ['stable', 'beta', 'nightly', '1.90', '1.89'], python: ['system', '3.14', '3.13', '3.12', '3.11'], node: ['system', '24', '22', '20'], java: ['system', '25', '21', '17', '11'] },
         usage,
       })
     }
@@ -404,7 +405,7 @@ export function createMockBackend({ needsSetup = false } = {}) {
         start_cmd: body.start_cmd || null,
         build_cmd: null,
         health_path: '/',
-        port: kind === 'rust' ? 8150 : null,
+        port: ['rust', 'python', 'node', 'java'].includes(kind) ? 8150 + db.apps.length : null,
         status: kind === 'rust' ? 'idle' : 'running',
         ssl_mode: 'none',
         force_https: false,
@@ -416,7 +417,7 @@ export function createMockBackend({ needsSetup = false } = {}) {
       }
       db.apps.push(a)
       db.env[a.id] = []
-      db.files[a.id] = { [`htdocs/${domains[0]}`]: kind === 'rust' ? { 'README.txt': 'cargo build --release' } : { 'index.html': '<h1>hi</h1>' } }
+      db.files[a.id] = { [`htdocs/${domains[0]}`]: kind === 'rust' ? { 'README.txt': 'cargo build --release' } : kind === 'node' ? { 'server.js': '// node' } : kind === 'java' ? { 'App.java': '// java' } : { 'index.html': '<h1>hi</h1>' } }
       return json(route, 201, { app: a, deployment_id: null, site_user: user, generated_password: body.password ? null : 'Gen3ratedPassw0rd' })
     }
 

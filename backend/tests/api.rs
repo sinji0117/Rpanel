@@ -1210,12 +1210,12 @@ async fn full_flow() {
     assert_eq!(r.status, StatusCode::CREATED, "{:?}", r.body);
     assert!(r.body["app"]["site_user"].is_null());
     let proxy_id = r.body["app"]["id"].as_u64().unwrap();
-    // Node.js 등 Rust 가 아닌 실행 사이트는 만들 수 없음
+    // 지원하지 않는 종류(PHP 등)는 만들 수 없음
     let r = ctx
         .post(
             "/api/sites",
             &t,
-            json!({"type":"node","domains":"node.example.com"}),
+            json!({"type":"php","domains":"php.example.com"}),
         )
         .await;
     assert_eq!(r.status, StatusCode::BAD_REQUEST);
@@ -1356,11 +1356,85 @@ async fn full_flow() {
         d["log"]
     );
 
+    // Node.js · Java 사이트: 기본 시작 명령, 포트 배정, 바로 적용
+    let mut site_ids = vec![];
+    for (ty, start, step) in [
+        ("node", "node server.js", "Node.js 패키지"),
+        ("java", "java $JAVA_OPTS App.java", "서비스"),
+    ] {
+        let r = ctx
+            .post(
+                "/api/sites",
+                &t,
+                json!({"type": ty, "domains": format!("{ty}.example.com")}),
+            )
+            .await;
+        assert_eq!(r.status, StatusCode::CREATED, "{:?}", r.body);
+        assert_eq!(r.body["app"]["kind"], ty);
+        assert_eq!(r.body["app"]["start_cmd"], start);
+        assert!(r.body["app"]["port"].as_u64().is_some());
+        site_ids.push(r.body["app"]["id"].as_u64().unwrap());
+        let d = wait_deploy(&ctx, &t, r.body["deployment_id"].as_u64().unwrap()).await;
+        assert_eq!(d["status"], "success", "{}", d["log"]);
+        assert!(d["log"].as_str().unwrap().contains(step), "{}", d["log"]);
+    }
+    let java_site = site_ids[1];
+
+    // Git Node.js · Java 앱: 기본 시작 명령, npm / Maven·Gradle 빌드
+    for (kind, start, build) in [
+        ("node", "npm start", "npm run build --if-present"),
+        ("java", "java $JAVA_OPTS -jar app.jar", "mvnw"),
+    ] {
+        let r = ctx
+            .post(
+                &format!("/api/projects/{pid}/apps"),
+                &t,
+                json!({"name": format!("Git {kind}"), "kind": kind, "git_url": "https://github.com/a/b.git",
+                       "domains": format!("git-{kind}.example.com"), "frontend_dir": "web"}),
+            )
+            .await;
+        assert_eq!(r.status, StatusCode::CREATED, "{:?}", r.body);
+        assert_eq!(r.body["start_cmd"], start);
+        assert_eq!(r.body["frontend_dir"], "web");
+        assert!(r.body["port"].as_u64().is_some());
+        let id = r.body["id"].as_u64().unwrap();
+        let r = ctx
+            .post(&format!("/api/apps/{id}/deploy"), &t, json!({}))
+            .await;
+        assert_eq!(r.status, StatusCode::ACCEPTED, "{:?}", r.body);
+        let d = wait_deploy(&ctx, &t, r.body["deployment_id"].as_u64().unwrap()).await;
+        assert_eq!(d["status"], "success", "{}", d["log"]);
+        let log = d["log"].as_str().unwrap();
+        assert!(log.contains(build), "{log}");
+        assert!(log.contains("프런트엔드 빌드"), "{log}");
+        let r = ctx
+            .req(
+                Method::DELETE,
+                &format!("/api/apps/{id}"),
+                Some(&t),
+                None,
+                None,
+            )
+            .await;
+        assert_eq!(r.status, StatusCode::NO_CONTENT, "{:?}", r.body);
+    }
+    // Java jar 경로는 .jar 로 끝나는 상대 경로만
+    for bad in ["../x.jar", "target/app.war", "/abs/app.jar"] {
+        let r = ctx
+            .post(
+                &format!("/api/projects/{pid}/apps"),
+                &t,
+                json!({"name":"Bad jar","kind":"java","git_url":"https://github.com/a/b.git","binary_name": bad}),
+            )
+            .await;
+        assert_eq!(r.status, StatusCode::BAD_REQUEST, "{bad}");
+    }
+
     // ── 런타임 버전 ──
     let r = ctx.get("/api/runtimes", &t).await;
     assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
     let rows = r.body["runtimes"].as_array().unwrap().clone();
-    assert_eq!(rows.len(), 3);
+    assert_eq!(rows.len(), 4);
     let default_of = |rows: &[Value], lang: &str| -> String {
         rows.iter()
             .find(|x| x["lang"] == lang && x["is_default"] == true)
@@ -1370,6 +1444,12 @@ async fn full_flow() {
     assert_eq!(default_of(&rows, "rust"), "stable");
     assert_eq!(default_of(&rows, "python"), "system");
     assert_eq!(default_of(&rows, "node"), "system");
+    assert_eq!(default_of(&rows, "java"), "system");
+    assert!(r.body["candidates"]["java"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|v| v == "21"));
     assert!(r.body["candidates"]["rust"]
         .as_array()
         .unwrap()
@@ -1387,6 +1467,8 @@ async fn full_flow() {
         json!({"lang":"node","version":"22; rm -rf /"}),
         json!({"lang":"rust","version":"1.85.0.1"}),
         json!({"lang":"node","version":"16"}),
+        json!({"lang":"java","version":"9"}),
+        json!({"lang":"java","version":"21.0"}),
     ] {
         assert_eq!(
             ctx.post("/api/runtimes", &t, body.clone()).await.status,
@@ -1434,6 +1516,45 @@ async fn full_flow() {
         )
         .await;
     assert_eq!(r.status, StatusCode::OK);
+    // Java 21 설치 → Java 사이트에 고르고 적용
+    let r = ctx
+        .post("/api/runtimes", &t, json!({"lang":"java","version":"21"}))
+        .await;
+    assert_eq!(r.status, StatusCode::ACCEPTED, "{:?}", r.body);
+    let j21 = r.body["id"].as_u64().unwrap();
+    for _ in 0..50 {
+        let rows = ctx.get("/api/runtimes", &t).await.body["runtimes"].clone();
+        if rows
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|x| x["id"] == j21 && x["status"] == "ready")
+        {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    let r = ctx
+        .req(
+            Method::PUT,
+            &format!("/api/apps/{java_site}/runtime"),
+            Some(&t),
+            None,
+            Some(json!({ "version": "21" })),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+    let r = ctx
+        .req(
+            Method::DELETE,
+            &format!("/api/runtimes/{j21}"),
+            Some(&t),
+            None,
+            None,
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::CONFLICT, "java 21 in use");
+
     // Rust 툴체인
     let r = ctx
         .post("/api/runtimes", &t, json!({"lang":"rust","version":"1.85"}))
@@ -1541,12 +1662,13 @@ async fn full_flow() {
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
     assert_eq!(del_rt(rust185).await, StatusCode::NO_CONTENT);
+    // 서버 기본 4개 + Java 사이트가 쓰는 Java 21
     assert_eq!(
         ctx.get("/api/runtimes", &t).await.body["runtimes"]
             .as_array()
             .unwrap()
             .len(),
-        3
+        5
     );
 
     // 지표 기록 (그래프)

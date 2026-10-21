@@ -8,6 +8,7 @@ import { bytes, dateTime } from '../lib/format'
 import { useFetch } from '../lib/useFetch'
 import { t, tx } from '../i18n'
 import { confirmDialog, promptDialog } from '../components/Dialog'
+import { isServiceKind } from '../lib/kinds'
 
 /** /home/<user>/htdocs/<domain> → htdocs/<domain> */
 export function relRoot(app) {
@@ -567,15 +568,17 @@ export function SiteSettings({ app, onSaved }) {
             <input id="s-webroot" className="input font-mono" value={v.web_root} onChange={set('web_root')} placeholder={t('(문서 루트 그대로)')} />
           </Field>
         )}
-        {(app.kind === 'rust' || app.kind === 'python') && (
+        {isServiceKind(app.kind) && (
           <div className="grid gap-4 sm:grid-cols-[1fr_180px]">
             <Field
               label={t('시작 명령')}
               htmlFor="s-start"
               hint={
-                app.kind === 'python'
-                  ? t('가상환경(.venv)이 켜진 상태로 실행 — 예: python app.py · gunicorn -b 127.0.0.1:$PORT app:app')
-                  : t('문서 루트에 올린 실행 파일 — 예: ./app · PORT·BIND_ADDR 가 자동 주입됩니다')
+                {
+                  python: t('가상환경(.venv)이 켜진 상태로 실행 — 예: python app.py · gunicorn -b 127.0.0.1:$PORT app:app'),
+                  node: t('고른 Node.js 버전으로 실행 — 예: node server.js · npm start'),
+                  java: t('고른 Java 버전으로 실행 — 예: java $JAVA_OPTS -jar app.jar (메모리 등은 환경변수 JAVA_OPTS)'),
+                }[app.kind] ?? t('문서 루트에 올린 실행 파일 — 예: ./app · PORT·BIND_ADDR 가 자동 주입됩니다')
               }
             >
               <input id="s-start" className="input font-mono" required value={v.start_cmd} onChange={set('start_cmd')} />
@@ -585,14 +588,16 @@ export function SiteSettings({ app, onSaved }) {
             </Field>
           </div>
         )}
-        {(app.kind === 'static' || app.kind === 'python') && (
+        {['static', 'python', 'node', 'java'].includes(app.kind) && (
           <Field
             label={t('적용 전 실행할 명령 (선택)')}
             htmlFor="s-build"
             hint={
-              app.kind === 'python'
-                ? t('패키지 설치 뒤 사이트 유저 권한으로 실행 — 예: python manage.py migrate && python manage.py collectstatic --noinput')
-                : t('사이트 유저 권한으로 문서 루트에서 실행 — 예: npm ci && npm run build')
+              {
+                python: t('패키지 설치 뒤 사이트 유저 권한으로 실행 — 예: python manage.py migrate && python manage.py collectstatic --noinput'),
+                node: t('npm 패키지 설치 뒤 사이트 유저 권한으로 실행 — 예: npm run build'),
+                java: t('사이트 유저 권한으로 문서 루트에서 실행 — 예: ./mvnw -q -DskipTests package && cp target/*.jar app.jar'),
+              }[app.kind] ?? t('사이트 유저 권한으로 문서 루트에서 실행 — 예: npm ci && npm run build')
             }
           >
             <input id="s-build" className="input font-mono" value={v.build_cmd} onChange={set('build_cmd')} />

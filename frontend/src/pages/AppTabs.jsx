@@ -9,6 +9,7 @@ import { ago, bytes, CRON_PRESETS, dateTime } from '../lib/format'
 import { useFetch, useInterval } from '../lib/useFetch'
 import { t } from '../i18n'
 import { confirmDialog } from '../components/Dialog'
+import { isServiceKind } from '../lib/kinds'
 
 export function Secret({ value }) {
   const [show, setShow] = useState(false)
@@ -333,7 +334,7 @@ export function BackupTab({ app }) {
         desc={
           <>
             {t('연결된 DB 덤프(.sql.gz)와 {v}/var/lib/rpanel/backups/{slug}/ 에 저장합니다. NAS·다른 서버가 이 폴더를 가져가도록(rsync 등) 해두면 오프사이트 백업이 됩니다.', {
-              v: app.site_user ? t('사이트 파일(htdocs, .tar.gz)을 ') : app.kind === 'rust' || app.kind === 'python' ? t('앱 data 디렉토리(.tar.gz)를 ') : '',
+              v: app.site_user ? t('사이트 파일(htdocs, .tar.gz)을 ') : isServiceKind(app.kind) ? t('앱 data 디렉토리(.tar.gz)를 ') : '',
               slug: app.slug,
             })}
             <br />

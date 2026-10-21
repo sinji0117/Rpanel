@@ -1,10 +1,11 @@
 import { useState } from 'react'
 import { Field } from './ui'
 import { t } from '../i18n'
+import { isServiceKind } from '../lib/kinds'
 
 /** 새 앱: 먼저 백엔드·프런트엔드를 고르고, 백엔드는 언어 · 프런트엔드는 화면 용도를 고름 */
 export const ROLES = [
-  { id: 'back', label: '백엔드 (API 서버)', desc: 'Rust·Python 으로 만든 API·웹 서버. 포트를 받아 서비스로 실행합니다', icon: '⚙' },
+  { id: 'back', label: '백엔드 (API 서버)', desc: 'Rust·Python·Node.js·Java 로 만든 API·웹 서버. 포트를 받아 서비스로 실행합니다', icon: '⚙' },
   { id: 'front', label: '프런트엔드 (웹 화면)', desc: 'React·Vue 등을 npm run build 로 빌드해 정적 파일로 서비스합니다', icon: '▣' },
 ]
 
@@ -16,7 +17,7 @@ export const SCREENS = [
 
 /** 'back' | 'front' | 'admin' — app_role 이 없던 옛 앱은 이름·도메인으로 추정 */
 export function roleOfApp(a) {
-  if (!a?.kind || a.kind === 'rust' || a.kind === 'python') return 'back'
+  if (!a?.kind || isServiceKind(a.kind)) return 'back'
   if (a.app_role === 'admin' || a.app_role === 'front') return a.app_role
   return /admin|관리/i.test(`${a.name ?? ''} ${a.slug ?? ''} ${a.domains ?? ''}`) ? 'admin' : 'front'
 }
@@ -24,6 +25,8 @@ export function roleOfApp(a) {
 export const KINDS = [
   { id: 'rust', label: 'Rust', desc: 'cargo build → systemd 서비스 (Axum 등)' },
   { id: 'python', label: 'Python', desc: 'venv + requirements.txt → systemd 서비스' },
+  { id: 'node', label: 'Node.js', desc: 'npm ci → npm run build → systemd 서비스 (Express·Next.js 등)' },
+  { id: 'java', label: 'Java', desc: 'Maven·Gradle 로 jar 빌드 → systemd 서비스 (Spring Boot 등)' },
   { id: 'static', label: 'Static', desc: 'npm run build → Nginx 정적 (React·Vite)' },
 ]
 
@@ -77,6 +80,20 @@ const BUILD_PLACEHOLDER = {
   rust: 'cargo build --release',
   python: '(선택) python manage.py collectstatic --noinput',
   static: 'npm run build',
+  node: 'npm run build --if-present',
+  java: '(자동) ./mvnw package 또는 ./gradlew build',
+}
+
+const START_PLACEHOLDER = {
+  python: 'gunicorn -b 127.0.0.1:$PORT app:app',
+  node: 'npm start',
+  java: 'java $JAVA_OPTS -jar app.jar',
+}
+
+const START_HINT = {
+  python: '가상환경(.venv)이 켜진 상태로 실행 · PORT 환경변수의 포트로 127.0.0.1 에서 열어야 합니다',
+  node: '릴리스 폴더(빌드한 저장소 + node_modules)에서 실행 · PORT 환경변수의 포트로 127.0.0.1 에서 열어야 합니다',
+  java: '빌드한 jar 를 app.jar 로 복사해 실행 · 메모리 등은 환경변수 JAVA_OPTS (예: -Xmx512m) · PORT 환경변수의 포트로 127.0.0.1 에서 열어야 합니다',
 }
 
 export default function AppForm({ initial, mode = 'create', onSubmit, submitting, backends = [] }) {
@@ -246,12 +263,17 @@ export default function AppForm({ initial, mode = 'create', onSubmit, submitting
           <input id="app-bin" className="input font-mono" value={v.binary_name ?? ''} onChange={set('binary_name')} placeholder={v.slug || 'hello-api'} />
         </Field>
       )}
-      {v.kind === 'python' && (
-        <Field label={t('시작 명령')} htmlFor="app-start" hint={t('가상환경(.venv)이 켜진 상태로 실행 · PORT 환경변수의 포트로 127.0.0.1 에서 열어야 합니다')}>
-          <input id="app-start" className="input font-mono" value={v.start_cmd ?? ''} onChange={set('start_cmd')} placeholder="gunicorn -b 127.0.0.1:$PORT app:app" />
+      {v.kind === 'java' && (
+        <Field label={t('jar 파일')} htmlFor="app-jar" hint={t('앱 폴더 기준 경로 — 비우면 target/ · build/libs/ 에서 실행용 jar 를 자동으로 찾습니다')}>
+          <input id="app-jar" className="input font-mono" value={v.binary_name ?? ''} onChange={set('binary_name')} placeholder="target/app.jar" />
         </Field>
       )}
-      {(v.kind === 'rust' || v.kind === 'python') && (
+      {START_HINT[v.kind] && (
+        <Field label={t('시작 명령')} htmlFor="app-start" hint={t(START_HINT[v.kind])}>
+          <input id="app-start" className="input font-mono" value={v.start_cmd ?? ''} onChange={set('start_cmd')} placeholder={START_PLACEHOLDER[v.kind]} />
+        </Field>
+      )}
+      {isServiceKind(v.kind) && (
         <div className="rounded-lg border border-ink-700 p-4">
           <p className="text-sm font-medium">{t('프런트엔드 (npm 빌드, 선택)')}</p>
           <p className="mt-1 text-xs text-ink-400">

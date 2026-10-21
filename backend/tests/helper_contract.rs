@@ -634,6 +634,12 @@ fn helper_rejects_bad_runtime_args() {
         ("node", "8"),
         ("node", "22/../../etc"),
         ("node", "lts"),
+        ("java", "9"),
+        ("java", "1.8"),
+        ("java", "21;id"),
+        ("java", "../21"),
+        ("java", "jdk21"),
+        ("java", "41"),
         ("ruby", "3.3"),
         ("rust", "1.85"),
         ("", ""),
@@ -646,6 +652,16 @@ fn helper_rejects_bad_runtime_args() {
     // 정상 인자로 지우기는 (없어도) 성공하고, 지정 폴더 밖은 건드리지 않음
     std::fs::create_dir_all(tmp.join("node/22/bin")).unwrap();
     std::fs::create_dir_all(tmp.join("node/20/bin")).unwrap();
+    std::fs::create_dir_all(tmp.join("java/21/bin")).unwrap();
+    std::fs::create_dir_all(tmp.join("java/17/bin")).unwrap();
+    let out = run(&["runtime-remove", "java", "21"]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(!tmp.join("java/21").exists());
+    assert!(tmp.join("java/17").exists());
     let out = run(&["runtime-remove", "node", "22"]);
     assert!(
         out.status.success(),

@@ -54,7 +54,7 @@ MariaDB 메뉴에서 그 DB 에 계정을 하나 더 만들고(필요하면 읽�
 **배포하면 `could not read Username for 'https://github.com'` 오류가 나요.**
 비공개 저장소를 https 주소로 넣었을 때 나는 오류입니다. Git 주소를 SSH 주소로 바꾸고 Deploy key 를 등록하세요. ([Git으로 자동 배포하기 → 비공개 저장소](git-deploy.md#비공개private-저장소))
 
-**Python 3.13 (또는 다른 Rust·Node.js 버전)을 쓰고 싶어요.**
+**Python 3.13 (또는 다른 Rust·Node.js·Java 버전)을 쓰고 싶어요.**
 왼쪽 메뉴 **런타임**에서 설치하고 기본 버전으로 정하거나, 앱마다 **설정** 탭에서 고릅니다. ([언어 버전 (런타임)](runtimes.md))
 
 **지금 쓰는 패널 버전과 최신 버전을 알고 싶어요.**

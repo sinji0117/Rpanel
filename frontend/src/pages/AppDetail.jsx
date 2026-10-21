@@ -14,6 +14,7 @@ import { AppRuntimePicker } from './Runtimes'
 import { FileManager, SiteSettings, SslTab } from './SiteTabs'
 import { t, tx } from '../i18n'
 import { confirmDialog } from '../components/Dialog'
+import { isServiceKind } from '../lib/kinds'
 
 export default function AppDetail() {
   const { id } = useParams()
@@ -31,7 +32,7 @@ export default function AppDetail() {
   if (app.loading) return <Spinner className="text-ink-400" />
   if (app.error) return <ErrorBox error={app.error} />
   const a = app.data
-  const isService = a.kind === 'rust' || a.kind === 'python'
+  const isService = isServiceKind(a.kind)
   const isGit = a.source === 'git'
   const isFiles = a.source === 'files'
   const tab = tabState ?? (isGit ? 'deployments' : isFiles ? 'files' : 'settings')

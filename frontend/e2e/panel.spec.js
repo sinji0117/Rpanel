@@ -297,7 +297,6 @@ test('Rust 사이트 만들기 → 접속 정보 → 실행 파일 업로드·�
   await dialog.getByText('고급 설정 (선택)').click()
   await expect(dialog.getByLabel('사이트 유저')).toHaveValue('shop')
   await expect(dialog.getByLabel('시작 명령')).toHaveValue('./app')
-  await expect(dialog.getByRole('radio', { name: /Node/ })).toHaveCount(0)
   await dialog.getByRole('button', { name: '사이트 만들기' }).click()
 
   const done = page.getByRole('dialog', { name: '사이트를 만들었습니다' })
@@ -540,6 +539,63 @@ test('테마 낮·밤 전환과 영어 전환', async ({ page }) => {
   await page.getByTestId('lang-picker').first().click()
   await page.getByRole('option', { name: /한국어/ }).click()
   await expect(menu(page).getByRole('link', { name: '사이트' })).toBeVisible()
+})
+
+test('Node.js · Java 사이트와 Git 앱 만들기, Java 런타임 설치', async ({ page }) => {
+  const backend = seededBackend()
+  await backend.install(page)
+  await acceptPopups(page)
+
+  // Node.js 사이트
+  await page.goto('/sites')
+  await page.getByRole('button', { name: /사이트 추가/ }).first().click()
+  let dialog = page.getByRole('dialog', { name: '사이트 추가' })
+  await dialog.getByLabel('도메인').fill('node.example.com')
+  await dialog.getByRole('radio', { name: /^Node\.js/ }).click()
+  await expect(dialog.getByTestId('site-summary')).toContainText('node server.js')
+  await dialog.getByRole('button', { name: '사이트 만들기' }).click()
+  let done = page.getByRole('dialog', { name: '사이트를 만들었습니다' })
+  await expect(done.getByTestId('node-next')).toContainText('package.json')
+  const nodeSite = backend.db.apps.find((a) => a.domains === 'node.example.com')
+  expect(nodeSite.kind).toBe('node')
+  expect(nodeSite.start_cmd).toBe('node server.js')
+  await done.getByRole('button', { name: '닫기' }).first().click().catch(() => page.keyboard.press('Escape'))
+
+  // Java 사이트
+  await page.goto('/sites')
+  await page.getByRole('button', { name: /사이트 추가/ }).first().click()
+  dialog = page.getByRole('dialog', { name: '사이트 추가' })
+  await dialog.getByLabel('도메인').fill('java.example.com')
+  await dialog.getByRole('radio', { name: /^Java/ }).click()
+  await dialog.getByText('고급 설정 (선택)').click()
+  await expect(dialog.getByLabel('시작 명령')).toHaveValue('java $JAVA_OPTS App.java')
+  await dialog.getByRole('button', { name: '사이트 만들기' }).click()
+  done = page.getByRole('dialog', { name: '사이트를 만들었습니다' })
+  await expect(done.getByTestId('java-next')).toContainText('java $JAVA_OPTS -jar app.jar')
+  expect(backend.db.apps.find((a) => a.domains === 'java.example.com').kind).toBe('java')
+
+  // Git Java 앱 (백엔드 → Java)
+  await page.goto('/projects/1')
+  await page.getByRole('button', { name: '+ 백엔드' }).first().click()
+  const form = page.getByRole('dialog')
+  await form.getByRole('radio', { name: /^Java/ }).click()
+  await form.getByLabel('이름').fill('Spring API')
+  await form.getByLabel('Git 저장소').fill('https://github.com/me/spring-api.git')
+  await form.getByLabel('jar 파일').fill('build/libs/api.jar')
+  await expect(form.getByLabel('시작 명령')).toHaveAttribute('placeholder', 'java $JAVA_OPTS -jar app.jar')
+  await expect(form.getByLabel('프런트엔드 폴더')).toBeVisible()
+  await form.getByRole('button', { name: /만들기|추가|저장/ }).last().click()
+  await expect.poll(() => backend.db.apps.find((a) => a.name === 'Spring API')?.kind).toBe('java')
+  expect(backend.db.apps.find((a) => a.name === 'Spring API').binary_name).toBe('build/libs/api.jar')
+
+  // 런타임: Java 21 설치
+  await page.goto('/runtimes')
+  await expect(page.getByRole('tab', { name: '언어 (Rust · Python · Node.js · Java)' })).toBeVisible()
+  const jv = page.getByRole('group', { name: 'Java 버전 고르기' })
+  await jv.getByLabel('Java 버전').selectOption('21')
+  await jv.getByRole('button', { name: '설치만' }).click()
+  const jvRows = page.getByRole('table', { name: 'Java 설치된 버전' })
+  await expect(jvRows.getByRole('row', { name: /21\.0/ }).getByText('사용 가능')).toBeVisible({ timeout: 10000 })
 })
 
 test('버전 표시 (지금 · GitHub) 와 런타임 버전 설치·기본 변경·앱별 선택', async ({ page }) => {

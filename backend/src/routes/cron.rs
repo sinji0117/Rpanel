@@ -181,11 +181,12 @@ async fn sync(state: &AppState, app: &App, job: &CronJob) -> AppResult<()> {
     }
     let paths = AppPaths::new(&state.cfg.data_dir, &app.slug);
     let (svc, tmr) = templates::cron_staging(&state.cfg.data_dir, &app.slug, job.id);
+    let path_env = crate::runtimes::app_path(state, app, PATH_ENV).await;
     state
         .exec
         .write_file(
             &svc,
-            &templates::cron_service(app, &paths, job, RUN_USER, PATH_ENV),
+            &templates::cron_service(app, &paths, job, RUN_USER, &path_env),
             0o644,
             &log,
         )

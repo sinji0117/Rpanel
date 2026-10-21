@@ -501,12 +501,20 @@ async fn run(
 
     // Rust·Python 앱 안의 프런트엔드(React·Vue 등): 백엔드보다 먼저 npm 으로 빌드
     let frontend = match (kind, app.frontend_dir.as_deref()) {
-        (AppKind::Rust | AppKind::Python, Some(d)) if !d.is_empty() => Some(d.to_string()),
+        (AppKind::Rust | AppKind::Python | AppKind::Node | AppKind::Java, Some(d))
+            if !d.is_empty() =>
+        {
+            Some(d.to_string())
+        }
         _ => None,
     };
     if let Some(fdir) = &frontend {
         log.step(&format!("프런트엔드 빌드 (npm · {fdir})")).await;
-        let node = crate::runtimes::resolve_lang(state, crate::runtimes::Lang::Node, None).await?;
+        // Node.js 앱은 앱에 고른 Node.js 버전, 나머지는 기본 버전
+        let node = match &runtime {
+            Some(r) if r.lang == crate::runtimes::Lang::Node => r.clone(),
+            _ => crate::runtimes::resolve_lang(state, crate::runtimes::Lang::Node, None).await?,
+        };
         log.line(format!("런타임: {}", node.describe())).await;
         let fwork = work.join(fdir);
         if !exec.is_dry_run() && !fwork.join("package.json").is_file() {
@@ -545,7 +553,101 @@ async fn run(
 
     match kind {
         AppKind::Proxy => {
-            bail!("Git 배포는 rust / python / static 만 지원합니다")
+            bail!("Git 배포는 rust / python / node / java / static 만 지원합니다")
+        }
+        AppKind::Node => {
+            // 저장소에서 npm 설치·빌드 후 node_modules 까지 릴리스 폴더로 복사 (릴리스마다 독립 → 롤백 안전)
+            if !exec.is_dry_run() && !work.join("package.json").is_file() {
+                bail!("package.json 이 없습니다. 앱 설정의 '앱 폴더'를 확인하세요");
+            }
+            run_ok(exec, bash("node --version && npm --version"), log)
+                .await
+                .map_err(|e| anyhow!("Node.js / npm 을 찾지 못했습니다 — 런타임 메뉴에서 Node.js 를 설치하세요 ({e})"))?;
+            let has_lock = exec.is_dry_run() || work.join("package-lock.json").is_file();
+            run_ok(
+                exec,
+                bash(if has_lock {
+                    "npm ci --no-audit --no-fund"
+                } else {
+                    "npm install --no-audit --no-fund"
+                })
+                .timeout(1800),
+                log,
+            )
+            .await?;
+            let cmd = app
+                .build_cmd
+                .clone()
+                .filter(|s| !s.trim().is_empty())
+                .unwrap_or_else(|| NODE_DEFAULT_BUILD.into());
+            run_ok(exec, bash(&cmd).timeout(1800), log).await?;
+            release_dir = paths.releases_dir.join(&release_id);
+            exec.mkdirs(&release_dir, log).await?;
+            run_ok(
+                exec,
+                CmdSpec::new(
+                    "rsync",
+                    &[
+                        "-a",
+                        "--delete",
+                        "--exclude",
+                        ".git",
+                        &format!("{work_s}/"),
+                        &format!("{}/", release_dir.display()),
+                    ],
+                )
+                .timeout(900),
+                log,
+            )
+            .await?;
+            run_ok(
+                exec,
+                CmdSpec::new("chmod", &["-R", "a+rX", &release_dir.display().to_string()]),
+                log,
+            )
+            .await?;
+        }
+        AppKind::Java => {
+            // Maven · Gradle 로 jar 를 만든 뒤 릴리스 폴더에 app.jar 로 복사
+            let cache = state.cfg.data_dir.join("cache");
+            let m2 = cache.join("m2");
+            let gradle = cache.join("gradle");
+            exec.mkdirs(&m2, log).await?;
+            exec.mkdirs(&gradle, log).await?;
+            let cmd = app
+                .build_cmd
+                .clone()
+                .filter(|s| !s.trim().is_empty())
+                .unwrap_or_else(|| JAVA_DEFAULT_BUILD.into());
+            run_ok(exec, bash("java -version"), log)
+                .await
+                .map_err(|e| {
+                    anyhow!("Java 를 찾지 못했습니다 — 런타임 메뉴에서 Java 를 설치하세요 ({e})")
+                })?;
+            run_ok(
+                exec,
+                bash(&cmd)
+                    .env("MAVEN_OPTS", format!("-Dmaven.repo.local={}", m2.display()))
+                    .env("GRADLE_USER_HOME", gradle.display().to_string())
+                    .timeout(3600),
+                log,
+            )
+            .await?;
+            let jar = if exec.is_dry_run() {
+                work.join("target").join("app.jar")
+            } else {
+                find_jar(&work, app.binary_name.as_deref())?
+            };
+            log.line(format!("jar: {}", jar.display())).await;
+            release_dir = paths.releases_dir.join(&release_id);
+            exec.mkdirs(&release_dir, log).await?;
+            let dst = release_dir.join("app.jar").display().to_string();
+            run_ok(
+                exec,
+                CmdSpec::new("install", &["-m", "0644", &jar.display().to_string(), &dst]),
+                log,
+            )
+            .await?;
         }
         AppKind::Python => {
             // 소스를 릴리스 폴더로 복사한 뒤 그 안에 가상환경을 만듦 (릴리스마다 독립 → 롤백 안전)
@@ -782,11 +884,12 @@ async fn run(
             vars.len()
         ))
         .await;
+        let path_env = crate::runtimes::app_path(state, &app, SERVICE_PATH).await;
         let unit = templates::systemd_unit(&templates::UnitInput {
             app: &app,
             paths: &paths,
             run_user: RUN_USER,
-            path_env: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+            path_env: &path_env,
         })?;
         exec.write_file(&paths.staging_unit, &unit, 0o644, log)
             .await?;
@@ -962,12 +1065,35 @@ async fn apply_site(
             }
             crate::files::run_command(state, app, &python_setup_site(&python), vars, log).await?;
         }
+        // Node.js · Java 사이트: 고른 버전의 bin 을 PATH 앞에
+        let rt_prefix = match kind {
+            AppKind::Node | AppKind::Java => crate::runtimes::resolve(state, app)
+                .await?
+                .and_then(|r| r.bin_dir())
+                .map(|b| format!("export PATH=\"{b}:$PATH\";"))
+                .unwrap_or_default(),
+            _ => String::new(),
+        };
+        if kind == AppKind::Node {
+            log.step("Node.js 패키지 (package.json)").await;
+            if let Some(r) = crate::runtimes::resolve(state, app).await? {
+                log.line(format!("런타임: {}", r.describe())).await;
+            }
+            crate::files::run_command(
+                state,
+                app,
+                &format!("{rt_prefix} {NODE_SITE_SETUP}"),
+                vars,
+                log,
+            )
+            .await?;
+        }
         if let Some(cmd) = app.build_cmd.as_deref().filter(|c| !c.trim().is_empty()) {
             log.step("빌드 명령 (사이트 유저 권한)").await;
-            let cmd = if kind == AppKind::Python {
-                format!("{PYTHON_ACTIVATE} {cmd}")
-            } else {
-                cmd.to_string()
+            let cmd = match kind {
+                AppKind::Python => format!("{PYTHON_ACTIVATE} {cmd}"),
+                AppKind::Node | AppKind::Java => format!("{rt_prefix} {cmd}"),
+                _ => cmd.to_string(),
             };
             crate::files::run_command(state, app, &cmd, vars, log).await?;
         }
@@ -1001,11 +1127,12 @@ async fn apply_site(
 
     if kind.is_service() {
         log.step("서비스").await;
+        let path_env = crate::runtimes::app_path(state, app, SERVICE_PATH).await;
         let unit = templates::systemd_unit(&templates::UnitInput {
             app,
             paths,
             run_user: RUN_USER,
-            path_env: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+            path_env: &path_env,
         })?;
         exec.write_file(&paths.staging_unit, &unit, 0o644, log)
             .await?;
@@ -1037,6 +1164,50 @@ async fn apply_site(
 
 /// Git Python 앱: 릴리스 폴더 안에 가상환경을 만들고 requirements.txt 설치
 /// (`python` 은 runtimes::Resolved::python() — "python3" 또는 /opt/rpanel/runtimes/bin/python3.X)
+/// 서비스 기본 PATH (Node.js · Java 앱은 고른 버전의 bin 이 앞에 붙음)
+pub const SERVICE_PATH: &str = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
+
+/// Node.js 앱 기본 빌드 (package.json 에 build 스크립트가 있을 때만)
+pub const NODE_DEFAULT_BUILD: &str = "npm run build --if-present";
+
+/// Java 앱 기본 빌드: Maven(래퍼 우선) → Gradle(래퍼 우선), 테스트는 건너뜀
+pub const JAVA_DEFAULT_BUILD: &str = "if [ -f mvnw ]; then sh ./mvnw -B -q -DskipTests package; \
+elif [ -f pom.xml ]; then mvn -B -q -DskipTests package; \
+elif [ -f gradlew ]; then sh ./gradlew --no-daemon -q build -x test; \
+elif [ -f build.gradle ] || [ -f build.gradle.kts ]; then gradle --no-daemon -q build -x test; \
+else echo 'pom.xml 또는 build.gradle 이 없습니다 — 빌드 명령을 직접 입력하세요' >&2; exit 1; fi";
+
+/// 빌드한 jar 찾기 — 지정한 경로, 없으면 target/ · build/libs/ 에서 가장 큰 실행용 jar
+pub fn find_jar(work: &std::path::Path, chosen: Option<&str>) -> anyhow::Result<PathBuf> {
+    if let Some(c) = chosen.filter(|c| !c.trim().is_empty()) {
+        let p = work.join(c.trim());
+        if !p.is_file() {
+            bail!("jar 파일 {c} 이(가) 없습니다. 앱 설정의 'jar 파일' 경로를 확인하세요");
+        }
+        return Ok(p);
+    }
+    let mut found: Vec<(u64, PathBuf)> = Vec::new();
+    for dir in ["target", "build/libs"] {
+        let Ok(rd) = std::fs::read_dir(work.join(dir)) else {
+            continue;
+        };
+        for e in rd.flatten() {
+            let p = e.path();
+            let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
+            let skip = ["-plain.jar", "-sources.jar", "-javadoc.jar", "-tests.jar"]
+                .iter()
+                .any(|s| name.ends_with(s));
+            if name.ends_with(".jar") && !skip && p.is_file() {
+                found.push((e.metadata().map(|m| m.len()).unwrap_or(0), p));
+            }
+        }
+    }
+    found.sort();
+    found.pop().map(|(_, p)| p).ok_or_else(|| {
+        anyhow!("빌드한 jar 를 찾지 못했습니다 (target/*.jar, build/libs/*.jar). 앱 설정의 'jar 파일' 경로를 입력하세요")
+    })
+}
+
 fn python_setup_git(python: &str) -> String {
     format!(
         "{python} -m venv .venv && \
@@ -1060,6 +1231,12 @@ fn python_setup_site(python: &str) -> String {
          else echo 'requirements.txt 없음 — 패키지 설치 생략'; fi"
     )
 }
+
+/// 파일 Node.js 사이트: package.json 이 있으면 패키지 설치
+const NODE_SITE_SETUP: &str = "if [ -f package.json ]; then \
+if [ -f package-lock.json ]; then npm ci --no-audit --no-fund; \
+else npm install --no-audit --no-fund; fi; \
+else echo 'package.json 없음 — 패키지 설치 생략'; fi";
 
 /// 사이트 유저로 실행하는 명령 앞에 붙여 가상환경을 켬
 const PYTHON_ACTIVATE: &str = "export VIRTUAL_ENV=\"$PWD/.venv\" PATH=\"$PWD/.venv/bin:$PATH\";";
@@ -1258,5 +1435,27 @@ mod tests {
             l.local_addr().unwrap().port()
         };
         assert!(http_status(port, "/").await.is_err());
+    }
+
+    #[test]
+    fn find_jar_picks_runnable_jar() {
+        let d = std::env::temp_dir().join(format!("rpanel-jar-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(d.join("build/libs")).unwrap();
+        std::fs::write(d.join("build/libs/demo-0.1-plain.jar"), vec![0u8; 5000]).unwrap();
+        std::fs::write(d.join("build/libs/demo-0.1.jar"), vec![0u8; 100]).unwrap();
+        assert!(find_jar(&d, None)
+            .unwrap()
+            .ends_with("build/libs/demo-0.1.jar"));
+        std::fs::create_dir_all(d.join("target")).unwrap();
+        std::fs::write(d.join("target/big.jar"), vec![0u8; 300]).unwrap();
+        std::fs::write(d.join("target/big-sources.jar"), vec![0u8; 900]).unwrap();
+        assert!(find_jar(&d, None).unwrap().ends_with("target/big.jar"));
+        assert!(find_jar(&d, Some("build/libs/demo-0.1.jar"))
+            .unwrap()
+            .ends_with("demo-0.1.jar"));
+        assert!(find_jar(&d, Some("target/none.jar")).is_err());
+        std::fs::remove_dir_all(&d).unwrap();
+        assert!(find_jar(&d, None).is_err());
     }
 }

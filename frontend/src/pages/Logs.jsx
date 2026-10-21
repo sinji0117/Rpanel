@@ -8,6 +8,7 @@ import { dateTime, duration, shortSha } from '../lib/format'
 import { useFetch, useInterval } from '../lib/useFetch'
 import { JournalTab } from './AppDetail'
 import { NginxLogTab } from './AppTabs'
+import { isServiceKind } from '../lib/kinds'
 
 // label·desc 는 한국어 원문 (화면에서 t())
 const TABS = [
@@ -233,7 +234,7 @@ export default function LogsPage() {
   const [params, setParams] = useSearchParams()
   const tab = TABS.some((x) => x.id === params.get('tab')) ? params.get('tab') : 'audit'
   const apps = useFetch(() => get('/apps'), [])
-  const isService = (a) => (a.kind === 'rust' || a.kind === 'python') && a.port
+  const isService = (a) => isServiceKind(a.kind) && a.port
   const hasNginx = (a) => !!a.domains
   const hasCron = (a) => a.kind !== 'proxy'
 
@@ -248,7 +249,7 @@ export default function LogsPage() {
       {tab === 'audit' && <AuditLog />}
       {tab === 'deployments' && <DeploymentLog />}
       {tab === 'service' && (
-        <PerApp apps={apps.data} filter={isService} label={t('앱 선택')} empty={t('실행 중인 Rust·Python 앱이 없습니다')} render={(a) => <JournalTab app={a} />} />
+        <PerApp apps={apps.data} filter={isService} label={t('앱 선택')} empty={t('실행 중인 서비스 앱(Rust·Python·Node.js·Java)이 없습니다')} render={(a) => <JournalTab app={a} />} />
       )}
       {tab === 'nginx' && (
         <PerApp apps={apps.data} filter={hasNginx} label={t('사이트 선택')} empty={t('도메인이 있는 사이트가 없습니다')} render={(a) => <NginxLogTab app={a} />} />

@@ -3,15 +3,18 @@ import { Link, useNavigate } from 'react-router'
 import { post } from '../lib/api'
 import { CopyButton, ErrorBox, Field, Modal } from './ui'
 import { t, tx } from '../i18n'
+import { isServiceKind } from '../lib/kinds'
 
 export const SITE_TYPES = [
   { id: 'rust', label: 'Rust', desc: '빌드한 실행 파일을 올리면 서비스로 실행' },
   { id: 'python', label: 'Python', desc: 'Flask·FastAPI·Django 등 — 가상환경 자동' },
+  { id: 'node', label: 'Node.js', desc: 'Express·Next.js 등 — npm 패키지 자동 설치' },
+  { id: 'java', label: 'Java', desc: 'Spring Boot 등 — 빌드한 jar 를 올리면 실행' },
   { id: 'html', label: 'HTML', desc: '정적 사이트 — 파일을 올리면 바로 서비스' },
   { id: 'proxy', label: '리버스 프록시', desc: '다른 주소(내부 서버·포트)로 연결' },
 ]
 
-export const DEFAULT_START = { rust: './app', python: 'python app.py' }
+export const DEFAULT_START = { rust: './app', python: 'python app.py', node: 'node server.js', java: 'java $JAVA_OPTS App.java' }
 
 /** 서버와 같은 규칙: www.beripick.co.kr → beripick */
 export function userFromDomain(domain) {
@@ -69,7 +72,7 @@ export default function CreateSiteModal({ open, onClose }) {
         if (v.site_user) body.site_user = v.site_user
         if (v.password) body.password = v.password
       }
-      if (type === 'rust' || type === 'python') body.start_cmd = v.start_cmd
+      if (isServiceKind(type)) body.start_cmd = v.start_cmd
       if (type === 'proxy') body.proxy_target = v.proxy_target
       const r = await post('/sites', body)
       setDone(r)
@@ -122,6 +125,27 @@ export default function CreateSiteModal({ open, onClose }) {
                   venv: <span className="font-mono">.venv</span>,
                 },
               )}
+            </p>
+          )}
+          {done.app.kind === 'node' && (
+            <p className="rounded-lg border border-signal/30 bg-signal/5 p-3 text-xs leading-relaxed text-ink-300" data-testid="node-next">
+              {tx('예시 {app} 가 실행 중입니다. 내 프로그램 파일과 {pkg} 를 {files} 탭(또는 SFTP)으로 올리고, 필요하면 설정 탭에서 시작 명령을 바꾼 뒤 {apply}을 누르세요. 적용할 때마다 npm 패키지를 설치합니다.', {
+                app: <span className="font-mono">server.js</span>,
+                pkg: <span className="font-mono">package.json</span>,
+                files: <b>{t('파일')}</b>,
+                apply: <b>{t('적용')}</b>,
+              })}
+            </p>
+          )}
+          {done.app.kind === 'java' && (
+            <p className="rounded-lg border border-signal/30 bg-signal/5 p-3 text-xs leading-relaxed text-ink-300" data-testid="java-next">
+              {tx('예시 {app} 가 실행 중입니다. 내 컴퓨터에서 만든 실행용 jar 를 {files} 탭(또는 SFTP)으로 {jar} 이름으로 올리고, 설정 탭의 시작 명령을 {cmd} 로 바꾼 뒤 {apply}을 누르세요.', {
+                app: <span className="font-mono">App.java</span>,
+                files: <b>{t('파일')}</b>,
+                jar: <span className="font-mono">app.jar</span>,
+                cmd: <span className="font-mono">java $JAVA_OPTS -jar app.jar</span>,
+                apply: <b>{t('적용')}</b>,
+              })}
             </p>
           )}
           {done.site_user && (
@@ -189,7 +213,7 @@ export default function CreateSiteModal({ open, onClose }) {
 
         <div>
           <span className="label">{t('2. 종류')}</span>
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4" role="radiogroup" aria-label={t('사이트 종류')}>
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3" role="radiogroup" aria-label={t('사이트 종류')}>
             {SITE_TYPES.map((st) => (
               <button
                 type="button"
@@ -215,7 +239,7 @@ export default function CreateSiteModal({ open, onClose }) {
         {type !== 'proxy' && (
           <p className="rounded-lg border border-ink-700 bg-ink-950 px-3 py-2 text-xs text-ink-300" data-testid="site-summary">
             {tx('사이트 계정 {user} 과(와) 폴더가 자동으로 만들어집니다.', { user: <b className="font-mono">{v.site_user || '…'}</b> })}
-            {(type === 'rust' || type === 'python') && <> {tx('시작 명령: {cmd}', { cmd: <span className="font-mono">{v.start_cmd}</span> })}</>}{' '}
+            {isServiceKind(type) && <> {tx('시작 명령: {cmd}', { cmd: <span className="font-mono">{v.start_cmd}</span> })}</>}{' '}
             {tx('나중에 사이트의 {tab} 탭에서 계정을 더 만들거나 바꿀 수 있습니다.', { tab: <b>{t('사이트 계정')}</b> })}
           </p>
         )}
@@ -261,12 +285,22 @@ export default function CreateSiteModal({ open, onClose }) {
                   <input id="site-start" className="input font-mono" required value={v.start_cmd} onChange={set('start_cmd')} />
                 </Field>
               )}
+              {type === 'node' && (
+                <Field label={t('시작 명령')} htmlFor="site-start" hint={t('예: node server.js · npm start — package.json 의 패키지는 적용할 때 자동 설치')}>
+                  <input id="site-start" className="input font-mono" required value={v.start_cmd} onChange={set('start_cmd')} />
+                </Field>
+              )}
+              {type === 'java' && (
+                <Field label={t('시작 명령')} htmlFor="site-start" hint={t('예: java $JAVA_OPTS -jar app.jar — 처음에는 예시 App.java 를 바로 실행합니다')}>
+                  <input id="site-start" className="input font-mono" required value={v.start_cmd} onChange={set('start_cmd')} />
+                </Field>
+              )}
             </div>
           </details>
         )}
 
         <p className="text-xs text-ink-400">
-          {tx('Git 저장소에서 서버가 직접 빌드하게 하려면(cargo build · pip · npm run build) {link}에서 만듭니다.', {
+          {tx('Git 저장소에서 서버가 직접 빌드하게 하려면(cargo build · pip · npm · Maven·Gradle) {link}에서 만듭니다.', {
             link: (
               <Link to="/projects" className="text-signal hover:underline" onClick={close}>
                 {t('프로젝트')}

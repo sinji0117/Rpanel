@@ -43,6 +43,8 @@ pub struct Project {
 pub enum AppKind {
     Rust,
     Python,
+    Node,
+    Java,
     Static,
     Proxy,
 }
@@ -52,6 +54,8 @@ impl AppKind {
         match self {
             AppKind::Rust => "rust",
             AppKind::Python => "python",
+            AppKind::Node => "node",
+            AppKind::Java => "java",
             AppKind::Static => "static",
             AppKind::Proxy => "proxy",
         }
@@ -60,6 +64,8 @@ impl AppKind {
         match s {
             "rust" => Some(Self::Rust),
             "python" => Some(Self::Python),
+            "node" => Some(Self::Node),
+            "java" => Some(Self::Java),
             "static" => Some(Self::Static),
             "proxy" => Some(Self::Proxy),
             _ => None,
@@ -67,7 +73,22 @@ impl AppKind {
     }
     /// systemd 서비스로 상주하는 앱인가 (포트 필요)
     pub fn is_service(&self) -> bool {
-        matches!(self, AppKind::Rust | AppKind::Python)
+        matches!(
+            self,
+            AppKind::Rust | AppKind::Python | AppKind::Node | AppKind::Java
+        )
+    }
+
+    /// 시작 명령으로 실행하는 서비스 앱의 기본 시작 명령
+    pub fn default_start(&self, source: Source) -> &'static str {
+        match (self, source) {
+            (AppKind::Python, _) => crate::deploy::templates::PYTHON_DEFAULT_START,
+            (AppKind::Node, Source::Git) => "npm start",
+            (AppKind::Node, _) => "node server.js",
+            (AppKind::Java, Source::Git) => "java $JAVA_OPTS -jar app.jar",
+            (AppKind::Java, _) => "java $JAVA_OPTS App.java",
+            _ => "./app",
+        }
     }
 }
 

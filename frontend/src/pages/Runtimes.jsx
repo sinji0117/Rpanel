@@ -12,7 +12,8 @@ import { confirmDialog } from '../components/Dialog'
 export const LANGS = [
   { id: 'rust', label: 'Rust', desc: 'Git 자동 배포로 빌드하는 Rust 앱에 쓰입니다 (rustup 툴체인). 직접 빌드해서 올리는 Rust 사이트와는 상관없습니다.' },
   { id: 'python', label: 'Python', desc: 'Python 사이트와 Python 앱의 가상환경(.venv)을 이 버전으로 만듭니다.' },
-  { id: 'node', label: 'Node.js', desc: 'React·Vue 같은 화면을 Git 에서 빌드(npm run build)할 때 쓰입니다.' },
+  { id: 'node', label: 'Node.js', desc: 'Node.js 앱·사이트를 실행하고, React·Vue 같은 화면을 Git 에서 빌드(npm run build)할 때 쓰입니다.' },
+  { id: 'java', label: 'Java', desc: 'Java 앱·사이트를 빌드(Maven·Gradle)하고 실행합니다. Eclipse Temurin JDK 를 설치합니다.' },
 ]
 
 /** 화면에 보일 버전 이름 */
@@ -99,7 +100,7 @@ function LangSection({ lang, rows, candidates, usage, onChanged }) {
             <input
               className="input w-32 font-mono"
               aria-label={t('{lang} 버전 직접 입력', { lang: lang.label })}
-              placeholder={lang.id === 'rust' ? '1.85' : lang.id === 'python' ? '3.12' : '22'}
+              placeholder={{ rust: '1.85', python: '3.12', node: '22', java: '21' }[lang.id]}
               value={custom}
               onChange={(e) => setCustom(e.target.value)}
             />
@@ -222,7 +223,7 @@ export default function RuntimesPage() {
       />
       <Tabs
         tabs={[
-          { id: 'lang', label: t('언어 (Rust · Python · Node.js)') },
+          { id: 'lang', label: t('언어 (Rust · Python · Node.js · Java)') },
           { id: 'db', label: t('데이터베이스 (MariaDB · MongoDB · Redis)') },
         ]}
         active={tab}
@@ -316,6 +317,8 @@ export function AppRuntimePicker({ app, onSaved }) {
 /** 앱이 쓰는 언어 (업로드형 Rust·HTML·프록시는 없음) */
 export function runtimeLang(app) {
   if (app.kind === 'python') return 'python'
+  if (app.kind === 'node') return 'node'
+  if (app.kind === 'java') return 'java'
   if (app.source === 'git' && app.kind === 'rust') return 'rust'
   if (app.source === 'git' && app.kind === 'static') return 'node'
   return null

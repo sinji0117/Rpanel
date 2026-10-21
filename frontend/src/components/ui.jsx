@@ -27,7 +27,7 @@ export function StatusBadge({ status, deployment = false }) {
 }
 
 export function KindBadge({ kind, source }) {
-  const map = { rust: 'Rust', python: 'Python', static: source === 'files' ? 'HTML' : 'Static', proxy: 'Proxy' }
+  const map = { rust: 'Rust', python: 'Python', node: 'Node.js', java: 'Java', static: source === 'files' ? 'HTML' : 'Static', proxy: 'Proxy' }
   return <span className="kbd uppercase">{map[kind] || kind}</span>
 }
 

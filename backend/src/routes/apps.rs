@@ -109,7 +109,15 @@ fn clean(input: &AppInput, kind: AppKind) -> AppResult<Clean> {
     }
     let binary_name = opt(&input.binary_name);
     if let Some(b) = &binary_name {
-        validate::binary_name(b).map_err(bad)?;
+        if kind == AppKind::Java {
+            // Java: 빌드한 jar 경로 (앱 폴더 기준, 비우면 자동으로 찾음)
+            validate::rel_path(b).map_err(bad)?;
+            if !b.ends_with(".jar") {
+                return Err(AppError::bad("jar 파일 경로는 .jar 로 끝나야 합니다"));
+            }
+        } else {
+            validate::binary_name(b).map_err(bad)?;
+        }
     }
     let output_dir = opt(&input.output_dir)
         .unwrap_or_else(|| "dist".into())
@@ -117,7 +125,7 @@ fn clean(input: &AppInput, kind: AppKind) -> AppResult<Clean> {
         .to_string();
     validate::rel_path(&output_dir).map_err(bad)?;
     let frontend_dir = match kind {
-        AppKind::Rust | AppKind::Python => opt(&input.frontend_dir)
+        AppKind::Rust | AppKind::Python | AppKind::Node | AppKind::Java => opt(&input.frontend_dir)
             .map(|d| d.trim_matches('/').to_string())
             .filter(|d| !d.is_empty()),
         _ => None,
@@ -151,13 +159,13 @@ fn clean(input: &AppInput, kind: AppKind) -> AppResult<Clean> {
         git_branch,
         root_dir,
         build_cmd,
-        // Git Python 앱만 시작 명령을 씀 (Rust 는 빌드한 바이너리를 바로 실행)
-        start_cmd: if kind == AppKind::Python {
-            Some(start_cmd.unwrap_or_else(|| crate::deploy::templates::PYTHON_DEFAULT_START.into()))
+        // Git Python · Node.js · Java 앱은 시작 명령을 씀 (Rust 는 빌드한 바이너리를 바로 실행)
+        start_cmd: if matches!(kind, AppKind::Python | AppKind::Node | AppKind::Java) {
+            Some(start_cmd.unwrap_or_else(|| kind.default_start(Source::Git).into()))
         } else {
             None
         },
-        binary_name: if kind == AppKind::Rust {
+        binary_name: if matches!(kind, AppKind::Rust | AppKind::Java) {
             binary_name
         } else {
             None
@@ -280,9 +288,14 @@ pub async fn create(
         .kind
         .as_deref()
         .and_then(AppKind::parse)
-        .filter(|k| matches!(k, AppKind::Rust | AppKind::Python | AppKind::Static))
+        .filter(|k| {
+            matches!(
+                k,
+                AppKind::Rust | AppKind::Python | AppKind::Node | AppKind::Java | AppKind::Static
+            )
+        })
         .ok_or_else(|| {
-            AppError::bad("Git 앱의 kind 는 rust / python / static 중 하나입니다 (업로드형 사이트·프록시는 사이트 만들기에서)")
+            AppError::bad("Git 앱의 kind 는 rust / python / node / java / static 중 하나입니다 (업로드형 사이트·프록시는 사이트 만들기에서)")
         })?;
     let c = clean(&input, kind)?;
     let slug = match opt(&input.slug) {
@@ -425,7 +438,7 @@ async fn update_site(
         validate::command(c).map_err(bad)?;
     }
     let start_cmd = match app.kind() {
-        AppKind::Rust | AppKind::Python => {
+        AppKind::Rust | AppKind::Python | AppKind::Node | AppKind::Java => {
             let c = opt(&input.start_cmd).ok_or_else(|| AppError::bad("시작 명령이 필요합니다"))?;
             validate::command(&c).map_err(bad)?;
             Some(c)

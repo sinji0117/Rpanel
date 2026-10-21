@@ -9,6 +9,8 @@
    - **백엔드 (API 서버)** → 언어를 고릅니다.
      - **Rust**: **바이너리 이름**(`Cargo.toml`의 `name`)을 넣습니다.
      - **Python**: **시작 명령**을 넣습니다 ([Python 시작 명령 예](python.md) 참고). 배포할 때마다 새 가상환경에 `requirements.txt`를 설치합니다.
+     - **Node.js**: `npm ci`(lock 파일이 없으면 `npm install`) → 빌드 명령(기본 `npm run build --if-present`) → **시작 명령**(기본 `npm start`). [Node.js · Java](node-java.md) 참고.
+     - **Java**: Maven·Gradle 로 jar 를 만들고(래퍼 `mvnw`·`gradlew` 우선, 테스트는 건너뜀) `app.jar` 로 복사해 **시작 명령**(기본 `java $JAVA_OPTS -jar app.jar`)으로 실행합니다. jar 가 여러 개면 **jar 파일**에 경로를 넣으세요.
    - **프런트엔드 (웹 화면)**: React·Vue 등. 서버가 `npm ci` → `npm run build` 로 빌드하고 결과물 폴더(기본 `dist`)를 사이트로 보여 줍니다. **API 연결**에서 같은 프로젝트의 백엔드를 고르면 `/api/` 요청이 그 백엔드로 갑니다.
      - **화면 용도**: **사용자 화면**(예: `example.com`) 또는 **관리자 화면**(예: `admin.example.com`). 빌드·서비스 방식은 같고, 프로젝트 화면에서 어느 묶음에 보일지만 정합니다. 나중에 앱 **설정** 탭에서 바꿀 수 있습니다.
 3. 비공개 저장소라면 앱의 **Git · 웹훅** 탭에 나오는 **Deploy key**를 GitHub/GitLab 저장소 설정에 등록합니다.
@@ -17,11 +19,11 @@
 
 첫 빌드는 몇 분 걸릴 수 있습니다. 다음부터는 빌드 결과를 재사용해서 빨라집니다.
 
-빌드에 쓰는 Rust 툴체인 · Python · Node.js 버전은 [언어 버전 (런타임)](runtimes.md)에서 고릅니다.
+빌드에 쓰는 Rust 툴체인 · Python · Node.js · Java 버전은 [언어 버전 (런타임)](runtimes.md)에서 고릅니다.
 
 ## 백엔드 + 프런트엔드가 한 저장소에 있을 때 (npm 빌드)
 
-Rust(또는 Python) 프로그램과 React·Vue 화면이 같은 저장소에 있다면, 앱 설정의 **프런트엔드 폴더**에 화면 폴더(예: `frontend`)를 넣으세요.
+Rust · Python · Node.js · Java 프로그램과 React·Vue 화면이 같은 저장소에 있다면, 앱 설정의 **프런트엔드 폴더**에 화면 폴더(예: `frontend`)를 넣으세요.
 
 ```
 저장소/
@@ -35,7 +37,7 @@ Rust(또는 Python) 프로그램과 React·Vue 화면이 같은 저장소에 있
 배포할 때 이렇게 합니다.
 
 1. `frontend` 폴더에서 `npm ci`(package-lock.json 이 없으면 `npm install`) → `npm run build`
-2. Rust 는 `cargo build --release`, Python 은 가상환경·패키지 설치
+2. Rust 는 `cargo build --release`, Python 은 가상환경·패키지 설치, Node.js 는 `npm ci` → 빌드, Java 는 Maven·Gradle 빌드
 3. 빌드 결과(`frontend/dist`)를 프로그램 옆 같은 경로로 복사합니다. 프로그램은 작업 폴더 기준 `frontend/dist` 경로로 읽으면 됩니다.
    ```rust
    // axum 예: 화면 파일 + API 를 한 프로그램에서
@@ -71,7 +73,7 @@ fatal: could not read Username for 'https://github.com': terminal prompts disabl
 
 | 할 일 | 방법 |
 |---|---|
-| 백엔드 만들기 | **백엔드 (API)** 묶음의 `+ 백엔드` → Rust 또는 Python, 도메인은 비워 둬도 됩니다 (포트가 자동으로 정해집니다) |
+| 백엔드 만들기 | **백엔드 (API)** 묶음의 `+ 백엔드` → Rust · Python · Node.js · Java, 도메인은 비워 둬도 됩니다 (포트가 자동으로 정해집니다) |
 | 프런트 만들기 | **프런트엔드** 묶음의 `+ 사용자 화면` → Static(React·Vite), 도메인 `example.com` |
 | 프런트 ↔ 백엔드 연결 | 프런트 카드의 **/api/ 연결**에서 백엔드를 고릅니다 → `example.com/api/…` 요청이 백엔드로 갑니다 |
 | 관리자 화면 | **프런트엔드** 묶음의 `+ 관리자 화면` → Static, 도메인 `admin.example.com`, **/api/ 연결**도 같은 백엔드로 |

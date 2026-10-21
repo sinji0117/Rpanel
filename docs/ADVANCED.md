@@ -20,7 +20,7 @@
                                     └─ /api, ws → 127.0.0.1:8090 (rpanel, 일반 사용자 권한)
                                                    │ sudo rpanel-helper  (검증된 시스템 작업만)
                                                    │ sudo -u <사이트유저> rpanel-files  (사이트 파일만)
- 방문자 ──▶ :80 / :443 (Nginx, 사이트별 설정) ─┬─ Rust·Python 앱 → 127.0.0.1:81xx (systemd 서비스)
+ 방문자 ──▶ :80 / :443 (Nginx, 사이트별 설정) ─┬─ Rust·Python·Node.js·Java 앱 → 127.0.0.1:81xx (systemd 서비스)
                                                ├─ HTML 사이트   → /home/<사이트유저>/htdocs/<도메인>
                                                └─ 리버스 프록시  → 지정한 주소
 ```
@@ -72,7 +72,7 @@
 
 이미 MariaDB·Redis 를 쓰고 있는 서버에서 실행해도 기존 데이터와 Redis 비밀번호는 유지되고, 패널용 DB·설정만 추가됩니다.
 
-실행하는 서버 프로그램은 Rust 와 Python 입니다. PHP·Node.js 런타임은 지원하지 않습니다 (Node.js 는 프런트 빌드 도구로만 사용). 다른 언어의 서비스는 다른 서버에 두고 리버스 프록시 사이트로 연결할 수 있습니다.
+실행하는 서버 프로그램은 Rust · Python · Node.js · Java 입니다. PHP 런타임은 지원하지 않습니다. 다른 언어의 서비스는 다른 서버에 두고 리버스 프록시 사이트로 연결할 수 있습니다.
 
 ## 보안 모델
 
@@ -99,19 +99,21 @@
 - SFTP 클라이언트가 원래 파일 권한(0644 등)을 그대로 보내면 다른 계정이 그 파일을 고칠 수 없습니다. 이럴 땐 패널 파일 관리자로 고치거나 클라이언트에서 권한 유지를 끄세요.
 - 설치 스크립트가 `acl` 패키지와 두 그룹, sshd 설정을 준비합니다 (`sshd -t` 검사 후 reload).
 
-## Rust·Python 앱의 프런트엔드 (npm)
+## 서비스 앱(Rust·Python·Node.js·Java)의 프런트엔드 (npm)
 
-- `apps.frontend_dir`(앱 폴더 기준, `..`·절대경로 불가)가 있으면 빌드 단계 전에 그 폴더에서 `npm ci|install` → `npm run build`(Node.js 기본 런타임, `node_modules` 는 빌드 폴더에 남겨 재사용).
+- `apps.frontend_dir`(앱 폴더 기준, `..`·절대경로 불가)가 있으면 빌드 단계 전에 그 폴더에서 `npm ci|install` → `npm run build`(Node.js 기본 런타임 — Node.js 앱은 앱에 고른 버전, `node_modules` 는 빌드 폴더에 남겨 재사용).
 - 결과 `<frontend_dir>/<output_dir>` 를 릴리스의 같은 경로로 rsync → 서비스 `WorkingDirectory`(current) 기준 상대 경로가 그대로 맞습니다. Python 릴리스 복사는 `node_modules` 를 제외합니다.
 
 ## 언어 런타임 버전
 
 - 테이블 `runtimes(lang, version, status, is_default, is_system, detail, log)`, 앱별 선택은 `apps.runtime_version` (NULL = 기본 버전).
-- 처음 조회할 때 서버에 있던 것을 기본으로 등록: Rust `stable`, Python·Node.js `system`(apt 의 python3 / 설치 스크립트의 node).
+- 처음 조회할 때 서버에 있던 것을 기본으로 등록: Rust `stable`, Python·Node.js·Java `system`(apt 의 python3 / 설치 스크립트의 node / 서버의 java).
 - **Rust**: 패널 계정(rpanel)의 rustup 으로 `rustup toolchain install <v> --profile minimal`. 빌드할 때 `RUSTUP_TOOLCHAIN=<v>` 로 고릅니다 (`rustup default` 는 그대로 → 패널 자체 업데이트 빌드에 영향 없음).
 - **Python**: helper 가 [uv](https://github.com/astral-sh/uv)(SHA-256 확인)로 standalone CPython 을 `/opt/rpanel/runtimes/python` 에 설치하고 `/opt/rpanel/runtimes/bin/python3.X` 링크. 가상환경을 이 실행 파일로 만듭니다. 파일 사이트는 `.venv` 의 버전이 고른 버전과 다르면 새로 만듭니다.
 - **Node.js**: helper 가 nodejs.org 의 `node-vX.Y.Z-linux-<arch>.tar.xz` 를 `SHASUMS256.txt` 로 확인한 뒤 `/opt/rpanel/runtimes/node/<major>` 에 풉니다. 빌드 PATH 맨 앞에 `…/node/<major>/bin`.
-- `/opt/rpanel/runtimes` 는 root 소유 0755 (사이트 유저도 실행 가능). helper 는 버전 문자열을 `python 3.8~3.20`, `node 18~40` 로만 받습니다.
+- **Java**: helper 가 `api.adoptium.net/v3/assets/latest/<major>/hotspot` 에서 Eclipse Temurin JDK 주소·SHA-256 을 받아 내려받고 확인한 뒤 `/opt/rpanel/runtimes/java/<major>` 에 풉니다 (주소는 `github.com/adoptium/…` 만 허용). 빌드에는 `PATH` 앞에 `…/java/<major>/bin`, `JAVA_HOME` 을 넣습니다.
+- Node.js · Java 앱(사이트)의 서비스·크론 유닛 `Environment=PATH=` 와 파일 사이트의 빌드 명령 앞에 고른 버전의 `bin` 을 붙입니다 (서버 기본이면 그대로).
+- `/opt/rpanel/runtimes` 는 root 소유 0755 (사이트 유저도 실행 가능). helper 는 버전 문자열을 `python 3.8~3.20`, `node 18~40`, `java 8 · 11~40` 로만 받습니다.
 - 설치는 백그라운드 작업이고 출력은 `runtimes.log` 에 남습니다. 서버 기본·현재 기본·앱이 쓰는 버전은 지울 수 없습니다.
 
 ## 버전 확인 (GitHub)
@@ -181,6 +183,14 @@
    - 적용할 때 `chmod u+x` 를 자동으로 하고, systemd 서비스(사이트 유저, `NoNewPrivileges`, `MemoryDenyWriteExecute`)로 실행한 뒤 헬스체크
 4. 프로그램은 `PORT` 환경변수의 포트로 127.0.0.1 에서 열어야 합니다 (`BIND_ADDR=127.0.0.1:<포트>` 도 함께 들어감). 데이터베이스·Redis 를 만들면 접속 URL 이 환경변수로 자동 추가됩니다.
 
+## Node.js · Java 앱
+
+- **파일 사이트**: 사이트 추가 → Node.js / Java. 예시 `server.js` / `App.java`(JDK 11+ 단일 파일 실행)와 `README.txt` 를 만듭니다. 기본 시작 명령은 `node server.js` / `java $JAVA_OPTS App.java`.
+  Node.js 사이트는 적용할 때마다 사이트 유저 권한으로 `package.json` 이 있으면 `npm ci`(lock 없으면 `npm install`) 후 (선택) 빌드 명령을 실행합니다.
+- **Git Node.js 앱**: 빌드 폴더에서 `npm ci|install` → 빌드 명령(기본 `npm run build --if-present`) → `.git` 을 뺀 전체(`node_modules` 포함)를 릴리스 폴더로 rsync. 시작 명령 기본 `npm start`.
+- **Git Java 앱**: 빌드 명령(기본: `mvnw` → `pom.xml`(mvn) → `gradlew` → `build.gradle`(gradle), 테스트 생략)을 `MAVEN_OPTS=-Dmaven.repo.local=/var/lib/rpanel/cache/m2`, `GRADLE_USER_HOME=/var/lib/rpanel/cache/gradle` 로 실행. jar 는 `binary_name`(jar 경로, 선택) 또는 `target/*.jar` · `build/libs/*.jar` 중 가장 큰 실행용 jar(`-plain`·`-sources`·`-javadoc`·`-tests` 제외)를 릴리스의 `app.jar` 로 복사. 시작 명령 기본 `java $JAVA_OPTS -jar app.jar`.
+- Node.js · Java 서비스에도 JIT 때문에 `MemoryDenyWriteExecute` 를 걸지 않습니다.
+
 ## Python 앱
 
 - **파일 사이트**: 사이트 추가 → Python. 문서 루트에 예시 `app.py`·`requirements.txt`·`README.txt` 를 만듭니다. 적용할 때마다 사이트 유저 권한으로 `<고른 Python> -m venv .venv`(없거나 버전이 다를 때만) → `.venv/bin/pip install -r requirements.txt` → (선택) 빌드 명령 → systemd 서비스 → 헬스체크.
@@ -232,6 +242,7 @@
   backups/_panel/                          업데이트 전 패널 DB 덤프·이전 바이너리
   backups/_databases/                      앱에 연결하지 않은 DB 의 백업
   cache/pip/                               Git Python 앱 pip 캐시
+  cache/m2/ · cache/gradle/                Git Java 앱 Maven · Gradle 캐시
 /home/<사이트유저>/htdocs/<도메인>/.venv/    Python 사이트 가상환경
   acme/                                    Let's Encrypt 확인 경로
 ```

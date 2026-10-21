@@ -212,10 +212,12 @@ pub async fn create(
         "html" | "static" => (AppKind::Static, Source::Files),
         "rust" => (AppKind::Rust, Source::Files),
         "python" => (AppKind::Python, Source::Files),
+        "node" => (AppKind::Node, Source::Files),
+        "java" => (AppKind::Java, Source::Files),
         "proxy" => (AppKind::Proxy, Source::None),
         _ => {
             return Err(AppError::bad(
-                "type 은 rust / python / html / proxy 중 하나입니다",
+                "type 은 rust / python / node / java / html / proxy 중 하나입니다",
             ))
         }
     };
@@ -233,11 +235,7 @@ pub async fn create(
     validate::name(&name).map_err(AppError::BadRequest)?;
 
     let start_cmd = if kind.is_service() {
-        let default = if kind == AppKind::Python {
-            crate::deploy::templates::PYTHON_DEFAULT_START
-        } else {
-            "./app"
-        };
+        let default = kind.default_start(Source::Files);
         let c = opt(&b.start_cmd).unwrap_or_else(|| default.into());
         validate::command(&c).map_err(AppError::BadRequest)?;
         Some(c)
@@ -315,6 +313,8 @@ pub async fn create(
             let helper_kind = match kind {
                 AppKind::Rust => "rust",
                 AppKind::Python => "python",
+                AppKind::Node => "node",
+                AppKind::Java => "java",
                 _ => "static",
             };
             if let Err(e) = helper::call(&state, &["site-create", &slug, u, &primary, helper_kind], &log).await {

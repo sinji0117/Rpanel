@@ -88,7 +88,7 @@ pub async fn install(
 ) -> AppResult<(StatusCode, Json<Runtime>)> {
     user.require_admin()?;
     let lang = Lang::parse(&input.lang)
-        .ok_or_else(|| AppError::bad("언어는 rust · python · node 중 하나입니다"))?;
+        .ok_or_else(|| AppError::bad("언어는 rust · python · node · java 중 하나입니다"))?;
     let version = input.version.trim().to_string();
     runtimes::validate(lang, &version).map_err(AppError::BadRequest)?;
     runtimes::ensure_seeded(&state).await?;
@@ -210,16 +210,16 @@ pub async fn delete(
         return Err(AppError::Conflict("설치 중에는 지울 수 없습니다".into()));
     }
     let lang = Lang::parse(&r.lang).ok_or(AppError::NotFound)?;
-    let (n,): (i64,) =
-        sqlx::query_as("SELECT COUNT(*) FROM apps WHERE runtime_version = ? AND kind = ?")
-            .bind(&r.version)
-            .bind(match lang {
-                Lang::Rust => "rust",
-                Lang::Python => "python",
-                Lang::Node => "static",
-            })
-            .fetch_one(&state.db)
-            .await?;
+    let kinds = runtimes::kinds_for(lang);
+    let sql = format!(
+        "SELECT COUNT(*) FROM apps WHERE runtime_version = ? AND kind IN ({})",
+        vec!["?"; kinds.len()].join(", ")
+    );
+    let mut q = sqlx::query_as::<_, (i64,)>(&sql).bind(&r.version);
+    for k in kinds {
+        q = q.bind(*k);
+    }
+    let (n,) = q.fetch_one(&state.db).await?;
     if n > 0 {
         return Err(AppError::Conflict(format!(
             "앱 {n}개가 이 버전을 쓰고 있습니다 — 앱 설정에서 버전을 바꾼 뒤 지우세요"

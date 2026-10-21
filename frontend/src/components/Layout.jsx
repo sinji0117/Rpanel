@@ -207,7 +207,7 @@ const THEME_OPTIONS = [
 ]
 
 /** 테마(낮·밤·자동) 와 언어를 바로 바꾸는 작은 스위치 */
-export function ThemeLangSwitch({ compact = false, up = true, right = false }) {
+export function ThemeLangSwitch({ compact = false, up = true, right = false, lang = true }) {
   useLang()
   const [theme, setThemeState] = useState(getTheme())
   return (
@@ -231,7 +231,7 @@ export function ThemeLangSwitch({ compact = false, up = true, right = false }) {
           </button>
         ))}
       </div>
-      <LangPicker up={up} right={right} />
+      {lang && <LangPicker up={up} right={right} />}
     </div>
   )
 }
@@ -251,7 +251,7 @@ export default function Layout() {
         </div>
         {nav}
         <div className="mt-auto space-y-3 border-t border-ink-800 px-2 pt-4">
-          <ThemeLangSwitch compact />
+          <ThemeLangSwitch compact lang={false} />
           <VersionBadge />
           <p className="truncate text-xs text-ink-400" title={user?.email}>
             {user?.email}
@@ -262,6 +262,7 @@ export default function Layout() {
             </button>
             <DonateLink />
           </div>
+          <LangPicker />
         </div>
       </aside>
 
@@ -278,13 +279,16 @@ export default function Layout() {
         <div className="border-b border-ink-800 px-3 py-3 md:hidden">
           {nav}
           <div className="mt-3 px-3">
-            <ThemeLangSwitch up={false} />
+            <ThemeLangSwitch lang={false} />
           </div>
           <div className="mt-2 flex items-center justify-between px-3">
             <button className="text-sm text-ink-400" onClick={logout}>
               {t('로그아웃')}
             </button>
             <DonateLink />
+          </div>
+          <div className="mt-3 px-3">
+            <LangPicker up={false} />
           </div>
         </div>
       )}

@@ -23,15 +23,6 @@ jobs:
         image: redis:7
         ports: ["6379:6379"]
         options: --health-cmd="redis-cli ping" --health-interval=5s --health-timeout=3s --health-retries=20
-      mongo:
-        image: mongo:8.0
-        env:
-          MONGO_INITDB_ROOT_USERNAME: root
-          MONGO_INITDB_ROOT_PASSWORD: rootpw
-        ports: ["27017:27017"]
-        options: >-
-          --health-cmd="mongosh -u root -p rootpw --quiet --eval 'db.adminCommand({ping:1}).ok'"
-          --health-interval=5s --health-timeout=5s --health-retries=20
     defaults:
       run:
         working-directory: backend
@@ -43,6 +34,21 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: backend
+      # MongoDB 는 서비스 컨테이너 대신 직접 띄움 — 시작에 실패하면 컨테이너 로그를 annotation 으로 남김
+      - name: MongoDB
+        shell: bash
+        run: |
+          docker run -d --name mongo -p 27017:27017 \
+            -e MONGO_INITDB_ROOT_USERNAME=root -e MONGO_INITDB_ROOT_PASSWORD=rootpw mongo:8.0
+          for i in $(seq 60); do
+            if docker exec mongo mongosh -u root -p rootpw --quiet --eval 'db.adminCommand({ping:1}).ok' >/dev/null 2>&1; then
+              echo "MongoDB ready"; exit 0
+            fi
+            [ "$(docker inspect -f '{{.State.Running}}' mongo)" = true ] || break
+            sleep 2
+          done
+          docker logs mongo 2>&1 | tail -30 | sed 's/%/%25/g' | while IFS= read -r l; do echo "::error::$l"; done
+          exit 1
       - run: cargo fmt --check
       - run: cargo clippy --all-targets -- -D warnings
       - name: cargo test

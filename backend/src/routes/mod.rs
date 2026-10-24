@@ -232,6 +232,7 @@ pub fn router(state: AppState) -> Router {
         )
         .route("/apps/{id}/ssl/custom", post(site_admin::ssl_custom))
         .route("/apps/{id}/ssl/force", put(site_admin::ssl_force))
+        .route("/apps/{id}/security", put(site_admin::security_put))
         // 파일 관리자
         .route("/apps/{id}/files", get(files::list))
         .route(

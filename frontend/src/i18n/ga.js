@@ -1169,4 +1169,13 @@ export default {
   "언어는 rust · python · node · java 중 하나입니다": "Caithfidh an teanga a bheith rust, python, node nó java",
   "Java 버전은 주 버전 숫자입니다 (8 또는 11 이상, 예: 21)": "Is é leagan Java an príomhuimhir (8 nó 11 agus os a chionn, m.sh. 21)",
   "jar 파일 경로는 .jar 로 끝나야 합니다": "Caithfidh conair an chomhaid jar críochnú le .jar",
+  "화면 보안 헤더 (CSP)": "Ceanntásca slándála an leathanaigh (CSP)",
+  "Content-Security-Policy 는 허용한 곳의 스크립트·스타일·이미지만 불러오게 해서 스크립트 삽입(XSS) 피해를 줄입니다. 처음에는 점검만으로 켜고, 브라우저 개발자 도구 콘솔에 막힌 항목이 없는지 확인한 뒤 적용으로 바꾸세요.": "Le Content-Security-Policy ní lódálann an leathanach scripteanna, stíleanna ná íomhánna ach ó na háiteanna a cheadaíonn tú, rud a laghdaíonn an damáiste ó instealladh scripte (XSS). Tosaigh le Seiceáil amháin, féach ar chonsól forbróra an bhrabhsálaí le haghaidh míreanna bactha, agus ansin athraigh go Cuir i bhfeidhm.",
+  "끔": "As",
+  "점검만 (Report-Only)": "Seiceáil amháin (Report-Only)",
+  "적용 (막기)": "Cuir i bhfeidhm (bac)",
+  "CSP 정책": "Polasaí CSP",
+  "기본 정책 넣기": "Cuir isteach an polasaí réamhshocraithe",
+  "보안 헤더를 저장했습니다": "Sábháladh na ceanntásca slándála",
+  "HTTPS 강제가 켜져 있으면 HSTS(1년)도 보냅니다. 브라우저가 1년 동안 이 도메인을 HTTPS 로만 여니, 인증서를 계속 유지할 때만 켜 두세요.": "Nuair atá HTTPS a éileamh ar siúl, seoltar HSTS (1 bhliain) freisin. Osclóidh brabhsálaithe an fearann seo thar HTTPS amháin ar feadh bliana, mar sin ná fág ar siúl é ach má choinníonn tú an teastas.",
 }

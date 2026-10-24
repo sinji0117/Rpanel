@@ -85,9 +85,11 @@
   - Redis 계정: ACL 사용자. 이름·키 패턴을 화이트리스트로 검사하고, 비밀번호는 stdin 으로 받아 SHA-256 해시만 `/etc/redis/rpanel-users.conf`(root:redis 0640, redis.conf 가 include)에 저장. 권한은 `+@all -@admin -@dangerous`(읽기·쓰기) 또는 `+@read`(읽기 전용) + 키·채널 패턴 제한. `default` 등 예약 이름 거부
   - 비밀번호(DB 추가 계정·Redis 계정)는 명령줄이 아닌 stdin 으로 전달하고 `[A-Za-z0-9_.~-]{10,64}` 만 허용 (URL·SQL 에 그대로 넣어도 안전)
   - SSL: 인증서와 개인키 일치 검사, 키는 root 0600
+  - 응답 헤더(`add_header`): 정해진 보안 · 캐시 헤더만. CSP 정책은 백엔드와 같은 문자 규칙(`[A-Za-z0-9 :;/.*'_+=,-]`)으로 다시 검사해, 따옴표 · `$` · 중괄호로 다른 지시어를 끼워 넣을 수 없음
   - 사이트 추가 계정: 레지스트리(`/etc/rpanel/site-accounts`)에 있는 계정만 수정·삭제. 주 그룹은 그 사이트 유저 그룹, `htdocs`·`logs` 에 POSIX ACL(`u:<계정>:rwX` + default ACL) 로 쓰기 권한. SSH 공개키는 키 종류로 시작하는 줄만 허용(옵션·제어문자 거부). 비밀번호는 stdin 으로 전달
 - **사이트 파일은 그 사이트 유저 권한으로만** 다룹니다 (`sudo -u <사이트유저> rpanel-files`). 홈 디렉토리 밖을 가리키는 경로·심볼릭 링크는 거부합니다.
 - 사이트끼리는 리눅스 계정으로 격리됩니다 (홈 0750, 업로드한 Rust 프로그램은 사이트 유저로 실행). Nginx(`www-data`)만 각 사이트 그룹에 들어가 정적 파일을 읽습니다.
+- 사이트 화면 응답에는 `X-Content-Type-Options: nosniff` · `X-Frame-Options: SAMEORIGIN` · `Referrer-Policy` 를 붙이고, 인증서가 있고 HTTPS 강제가 켜져 있으면 HTTPS 응답에 `Strict-Transport-Security: max-age=31536000` 도 붙입니다. Nginx 는 location 안에 `add_header` 가 있으면 server 블록 헤더를 물려받지 않으므로, 캐시 헤더를 쓰는 location(정적 파일 · `index.html`)에도 같은 헤더를 다시 넣습니다. **SSL 탭 → 화면 보안 헤더(CSP)** 에서 사이트마다 Content-Security-Policy 를 끔 · 점검만(Report-Only) · 적용 으로 고를 수 있습니다.
 - 이 계약은 `backend/tests/helper_contract.rs` 가 생성 템플릿 통과 + 위험한 변형(설정 주입, 경로 탈출, 권한 상승 시도 등)으로 검증합니다.
 
 ## 사이트 계정 (SSH · SFTP)
@@ -285,6 +287,7 @@ npx playwright install chromium && npm run e2e # E2E (가짜 API, 백엔드 불�
 | GET/POST/PUT/DELETE | `/api/apps/{id}/accounts`, `/accounts/{aid}`, POST `/accounts/{aid}/password` | 사이트 계정(SSH·SFTP) |
 | GET/POST/PUT/DELETE | `/api/users`, `/api/users/{id}` | 관리자 |
 | GET/POST/PUT/DELETE | `/api/apps/{id}/ssl`, `/ssl/letsencrypt`, `/ssl/custom`, `/ssl/force` | SSL |
+| PUT | `/api/apps/{id}/security` (`csp_mode`: off·report·enforce, `csp_policy`) | 화면 보안 헤더(CSP) |
 | GET/PUT/POST | `/api/apps/{id}/files`, `/files/content`, `/files/upload`, `/files/download`, `/files/op` | 파일 관리자 |
 | GET/POST | `/api/projects`, `/api/projects/{id}` (PUT/DELETE), `/api/projects/{id}/apps` | Git 프로젝트·앱 |
 | GET/PUT/DELETE | `/api/apps/{id}` · GET/PUT `/env` · POST `/deploy` | 앱 |

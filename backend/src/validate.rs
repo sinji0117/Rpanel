@@ -188,6 +188,35 @@ pub fn email(s: &str) -> Result<(), String> {
     }
 }
 
+/// Content-Security-Policy 정책. Nginx `add_header ... "<정책>" always;` 의 큰따옴표 안에 들어가므로
+/// 따옴표·`$`·`\`·중괄호·줄바꿈 등을 막고 CSP 에 쓰는 문자만 받습니다 (rpanel-helper 와 같은 규칙).
+/// 줄바꿈·연속 공백은 공백 하나로 정리한 값을 돌려줍니다.
+pub fn csp(input: &str) -> Result<String, String> {
+    let s = input.split_whitespace().collect::<Vec<_>>().join(" ");
+    if s.is_empty() {
+        return Err("CSP 정책을 입력하세요".into());
+    }
+    if s.len() > 2000 {
+        return Err("CSP 정책은 2000자 이하여야 합니다".into());
+    }
+    if let Some(c) = s
+        .chars()
+        .find(|c| !(c.is_ascii_alphanumeric() || " :;/.*'_+=,-".contains(*c)))
+    {
+        return Err(format!("CSP 정책에 쓸 수 없는 문자가 있습니다: {c}"));
+    }
+    for d in s.split(';').map(str::trim).filter(|d| !d.is_empty()) {
+        let name = d.split(' ').next().unwrap_or("");
+        if name.is_empty()
+            || !name.starts_with(|c: char| c.is_ascii_lowercase())
+            || !name.chars().all(|c| c.is_ascii_lowercase() || c == '-')
+        {
+            return Err(format!("CSP 지시어 이름이 올바르지 않습니다: {name}"));
+        }
+    }
+    Ok(s)
+}
+
 pub fn password(s: &str) -> Result<(), String> {
     if s.chars().count() < 10 {
         Err("비밀번호는 10자 이상이어야 합니다".into())
@@ -201,6 +230,26 @@ pub fn password(s: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn csp_policies() {
+        assert_eq!(
+            csp("default-src 'self';\n  img-src 'self' https: data: blob:; frame-ancestors 'none'")
+                .unwrap(),
+            "default-src 'self'; img-src 'self' https: data: blob:; frame-ancestors 'none'"
+        );
+        assert!(csp("script-src 'self' 'sha256-abc+/=' https://cdn.jsdelivr.net").is_ok());
+        assert!(csp("  ").is_err());
+        assert!(csp(&format!("default-src {}", "a".repeat(2000))).is_err());
+        // Nginx 설정 주입
+        assert!(csp("default-src 'self'\" always; include /etc/passwd; #").is_err());
+        assert!(csp("default-src $host").is_err());
+        assert!(csp("default-src 'self'; } server {").is_err());
+        assert!(csp("default-src \\x").is_err());
+        // 지시어 이름
+        assert!(csp("Default-Src 'self'").is_err());
+        assert!(csp("'self' default-src").is_err());
+    }
 
     #[test]
     fn slugs() {

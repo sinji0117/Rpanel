@@ -1169,4 +1169,13 @@ export default {
   "언어는 rust · python · node · java 중 하나입니다": "De taal moet rust, python, node of java zijn",
   "Java 버전은 주 버전 숫자입니다 (8 또는 11 이상, 예: 21)": "De Java-versie is het hoofdversienummer (8 of 11 en hoger, bijv. 21)",
   "jar 파일 경로는 .jar 로 끝나야 합니다": "Het pad van het jar-bestand moet eindigen op .jar",
+  "화면 보안 헤더 (CSP)": "Beveiligingsheaders van de pagina (CSP)",
+  "Content-Security-Policy 는 허용한 곳의 스크립트·스타일·이미지만 불러오게 해서 스크립트 삽입(XSS) 피해를 줄입니다. 처음에는 점검만으로 켜고, 브라우저 개발자 도구 콘솔에 막힌 항목이 없는지 확인한 뒤 적용으로 바꾸세요.": "Content-Security-Policy laat de pagina scripts, stijlen en afbeeldingen alleen laden van toegestane bronnen en beperkt zo de schade van scriptinjectie (XSS). Begin met Alleen controleren, kijk in de ontwikkelaarsconsole van de browser of er iets wordt geblokkeerd en schakel daarna over naar Afdwingen.",
+  "끔": "Uit",
+  "점검만 (Report-Only)": "Alleen controleren (Report-Only)",
+  "적용 (막기)": "Afdwingen (blokkeren)",
+  "CSP 정책": "CSP-beleid",
+  "기본 정책 넣기": "Standaardbeleid invoegen",
+  "보안 헤더를 저장했습니다": "Beveiligingsheaders opgeslagen",
+  "HTTPS 강제가 켜져 있으면 HSTS(1년)도 보냅니다. 브라우저가 1년 동안 이 도메인을 HTTPS 로만 여니, 인증서를 계속 유지할 때만 켜 두세요.": "Als HTTPS afdwingen aan staat, wordt ook HSTS (1 jaar) verzonden. Browsers openen dit domein dan een jaar lang alleen via HTTPS, dus laat het alleen aan als je het certificaat behoudt.",
 }

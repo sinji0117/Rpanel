@@ -52,6 +52,8 @@ fn app(kind: &str) -> App {
         runtime_version: None,
         frontend_dir: None,
         app_role: None,
+        csp_mode: "off".into(),
+        csp_policy: None,
         created_at: Utc::now(),
         updated_at: Utc::now(),
     }
@@ -128,6 +130,36 @@ fn generated_sites_pass() {
     for kind in ["rust", "python", "static"] {
         let (ok, err) = validate("validate_site", &site(kind), "beripick-api");
         assert!(ok, "{kind} site rejected: {err}\n{}", site(kind));
+    }
+}
+
+/// 보안 헤더(HSTS · CSP)가 들어간 설정도 helper 를 통과
+#[test]
+fn security_header_sites_pass() {
+    for kind in ["rust", "static"] {
+        for mode in ["off", "report", "enforce"] {
+            let mut a = app(kind);
+            a.ssl_mode = "letsencrypt".into();
+            a.force_https = true;
+            a.csp_mode = mode.into();
+            a.csp_policy = Some(
+                "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; \
+                 img-src 'self' https: data: blob:; object-src 'none'; frame-ancestors 'none'"
+                    .into(),
+            );
+            let p = AppPaths::new(Path::new(DATA), &a.slug);
+            let conf = nginx_site(&SiteInput {
+                app: &a,
+                paths: &p,
+                trusted_proxy: "",
+                ipv6: false,
+            })
+            .unwrap();
+            assert!(conf.contains("Strict-Transport-Security"));
+            assert_eq!(conf.contains("Content-Security-Policy"), mode != "off");
+            let (ok, err) = validate("validate_site", &conf, "beripick-api");
+            assert!(ok, "{kind}/{mode} rejected: {err}\n{conf}");
+        }
     }
 }
 
@@ -216,6 +248,27 @@ fn dangerous_sites_rejected() {
             "error_page 404 502 503 504 = /etc/passwd;",
         ),
         base.replace("location = /robots.txt {", "location = /etc {"),
+        // add_header 는 정해진 헤더만, 한 줄에 지시어 하나
+        base.replace(
+            "add_header X-Frame-Options \"SAMEORIGIN\" always;",
+            "add_header X-Frame-Options \"ALLOWALL\" always;",
+        ),
+        base.replace(
+            "add_header Referrer-Policy \"strict-origin-when-cross-origin\" always;",
+            "add_header Referrer-Policy \"x\" always; include /etc/nginx/secret.conf;",
+        ),
+        base.replace(
+            "add_header X-Frame-Options \"SAMEORIGIN\" always;",
+            "add_header Content-Security-Policy \"default-src 'self'\" always; include /etc/passwd;",
+        ),
+        base.replace(
+            "add_header X-Frame-Options \"SAMEORIGIN\" always;",
+            "add_header Content-Security-Policy \"a\" always; } server { listen 81; root /etc; location / { \"x\" always;",
+        ),
+        base.replace(
+            "add_header X-Frame-Options \"SAMEORIGIN\" always;",
+            "add_header Set-Cookie \"admin=1\" always;",
+        ),
     ];
     for (i, c) in cases.iter().enumerate() {
         assert_ne!(c, &base, "case {i} did not change the site");

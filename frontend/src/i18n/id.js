@@ -1169,4 +1169,13 @@ export default {
   "언어는 rust · python · node · java 중 하나입니다": "Bahasa harus rust, python, node, atau java",
   "Java 버전은 주 버전 숫자입니다 (8 또는 11 이상, 예: 21)": "Versi Java adalah nomor utama (8 atau 11 ke atas, mis. 21)",
   "jar 파일 경로는 .jar 로 끝나야 합니다": "Path file jar harus diakhiri .jar",
+  "화면 보안 헤더 (CSP)": "Header keamanan halaman (CSP)",
+  "Content-Security-Policy 는 허용한 곳의 스크립트·스타일·이미지만 불러오게 해서 스크립트 삽입(XSS) 피해를 줄입니다. 처음에는 점검만으로 켜고, 브라우저 개발자 도구 콘솔에 막힌 항목이 없는지 확인한 뒤 적용으로 바꾸세요.": "Content-Security-Policy membuat halaman hanya memuat skrip, gaya, dan gambar dari tempat yang Anda izinkan, sehingga membatasi kerusakan akibat injeksi skrip (XSS). Mulailah dengan Hanya periksa, cek konsol pengembang browser apakah ada yang diblokir, lalu ganti ke Terapkan.",
+  "끔": "Mati",
+  "점검만 (Report-Only)": "Hanya periksa (Report-Only)",
+  "적용 (막기)": "Terapkan (blokir)",
+  "CSP 정책": "Kebijakan CSP",
+  "기본 정책 넣기": "Masukkan kebijakan bawaan",
+  "보안 헤더를 저장했습니다": "Header keamanan disimpan",
+  "HTTPS 강제가 켜져 있으면 HSTS(1년)도 보냅니다. 브라우저가 1년 동안 이 도메인을 HTTPS 로만 여니, 인증서를 계속 유지할 때만 켜 두세요.": "Saat Paksa HTTPS aktif, HSTS (1 tahun) juga dikirim. Browser akan membuka domain ini hanya lewat HTTPS selama setahun, jadi aktifkan hanya jika Anda akan mempertahankan sertifikat.",
 }

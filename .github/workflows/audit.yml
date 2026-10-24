@@ -23,7 +23,18 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-audit
-      - run: cargo audit
+      # 찾은 항목을 실행 화면의 주석(annotation)으로도 남김 (로그를 열지 않아도 보이게)
+      - name: cargo audit
+        shell: bash
+        run: |
+          set +e
+          cargo audit --json > audit.json; code=$?
+          v=$(jq -r '[.vulnerabilities.list[] | "\(.package.name) \(.package.version) — \(.advisory.id) \(.advisory.title) (고치는 버전: \(.versions.patched | join(", ")))"] | join("%0A")' audit.json)
+          w=$(jq -r '[(.warnings // {}) | to_entries[] | .key as $k | .value[] | "\(.package.name) \(.package.version) — \($k) \(.advisory.id // "") \(.advisory.title // "")"] | join("%0A")' audit.json)
+          [ -n "$v" ] && echo "::error title=cargo audit 취약점::$v"
+          [ -n "$w" ] && echo "::warning title=cargo audit 경고::$w"
+          cargo audit
+          exit $code
 
   npm:
     runs-on: ubuntu-24.04
@@ -35,7 +46,17 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: 22
-      # 실제로 배포되는 라이브러리 (빌드 도구 제외)
-      - run: npm audit --omit=dev
-      # 빌드 도구까지 — 참고용 (실패해도 이 작업은 통과)
-      - run: npm audit || true
+      # 실제로 배포되는 라이브러리 (빌드 도구 제외) — 실패 기준
+      # 빌드 도구까지 포함한 결과는 참고용 경고로만
+      - name: npm audit
+        shell: bash
+        run: |
+          set +e
+          summary() { jq -r '[.vulnerabilities // {} | to_entries[] | "\(.key) [\(.value.severity)] \(.value.range) — 고침: \(if (.value.fixAvailable|type) == "object" then "\(.value.fixAvailable.name) \(.value.fixAvailable.version)" else (.value.fixAvailable|tostring) end)"] | join("%0A")'; }
+          npm audit --omit=dev --json > prod.json; code=$?
+          npm audit --json > all.json
+          p=$(summary < prod.json); a=$(summary < all.json)
+          [ -n "$p" ] && echo "::error title=npm audit (배포 라이브러리)::$p"
+          [ -n "$a" ] && echo "::warning title=npm audit (빌드 도구 포함)::$a"
+          npm audit --omit=dev
+          exit $code

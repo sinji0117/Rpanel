@@ -202,6 +202,20 @@ fn dangerous_sites_rejected() {
             "client_max_body_size 64m;",
             "client_max_body_size 64m;\n    load_module /tmp/x.so;",
         ),
+        // SEO 프록시: 변수는 로컬 백엔드 /api/seo/$1 에서만, error_page 는 @seo_static 만
+        base.replace(
+            "proxy_pass http://127.0.0.1:8101/api/seo/$1;",
+            "proxy_pass http://evil.example/api/seo/$1;",
+        ),
+        base.replace(
+            "proxy_pass http://127.0.0.1:8101/api/seo/$1;",
+            "proxy_pass http://127.0.0.1:8101/api/seo/$request_uri;",
+        ),
+        base.replace(
+            "error_page 404 502 503 504 = @seo_static;",
+            "error_page 404 502 503 504 = /etc/passwd;",
+        ),
+        base.replace("location = /robots.txt {", "location = /etc {"),
     ];
     for (i, c) in cases.iter().enumerate() {
         assert_ne!(c, &base, "case {i} did not change the site");

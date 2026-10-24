@@ -160,7 +160,7 @@ validate_site() {
     fi
     d="${line%%[[:space:]]*}"
     case "$d" in
-      try_files|proxy_set_header|location|return) ;;
+      try_files|proxy_set_header|location|return|proxy_pass) ;;
       *) [[ "$line" == *'$'* || "$line" == *'\'* || "$line" == *'`'* ]] && die "site: unexpected characters: $line" ;;
     esac
     [[ "$line" == *'`'* ]] && die "site: unexpected characters: $line"
@@ -194,10 +194,16 @@ validate_site() {
         elif [[ -n "$sroot" && ( "$line" == "root $sroot;" || "$line" =~ ^root\ "$sroot"/[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*\;$ ) && "$line" != *..* ]]; then :
         else die "site: root not allowed: $line"; fi ;;
       proxy_pass)
+        # 변수는 SEO 사이트맵 프록시(로컬 백엔드 /api/seo/$1)만 허용
         re='^proxy_pass https?://[A-Za-z0-9.-]+(:[0-9]{1,5})?(/[A-Za-z0-9._~/-]*)?;$'
-        [[ "$line" =~ $re ]] || die "site: bad proxy_pass" ;;
+        re_seo='^proxy_pass http://127\.0\.0\.1:[0-9]{1,5}/api/seo/\$1;$'
+        [[ "$line" =~ $re || "$line" =~ $re_seo ]] || die "site: bad proxy_pass" ;;
+      proxy_intercept_errors) [[ "$line" == "proxy_intercept_errors on;" ]] || die "site: bad proxy_intercept_errors" ;;
+      error_page) [[ "$line" == "error_page 404 502 503 504 = @seo_static;" ]] || die "site: error_page not allowed: $line" ;;
       location)
         [[ "$line" == "location / {" || "$line" == "location /api/ {" || "$line" == "location = /index.html {" || \
+           "$line" == "location = /robots.txt {" || "$line" == "location @seo_static {" || \
+           "$line" == 'location ~ ^/(sitemap[A-Za-z0-9_-]*\.xml)$ {' || \
            "$line" == "location ^~ /.well-known/acme-challenge/ {" || \
            "$line" == 'location ~ /\.(?!well-known).* {' || \
            "$line" == 'location ~* \.(?:js|css|woff2?|ttf|eot|svg|png|jpe?g|gif|webp|avif|ico)$ {' ]] || die "site: location not allowed: $line" ;;

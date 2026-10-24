@@ -510,7 +510,103 @@ export function SslTab({ app, onChanged }) {
         )}
       </section>
       {error && <ErrorBox error={error} />}
+      <SecurityHeaders app={app} onChanged={onChanged} />
     </div>
+  )
+}
+
+/** 처음 켤 때 넣어 주는 정책 — 같은 사이트의 파일만, 이미지는 https 어디서나 */
+export const DEFAULT_CSP =
+  "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' https: data: blob:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'"
+
+const CSP_MODES = [
+  { id: 'off', label: '끔' },
+  { id: 'report', label: '점검만 (Report-Only)' },
+  { id: 'enforce', label: '적용 (막기)' },
+]
+
+export function SecurityHeaders({ app, onChanged }) {
+  const toast = useToast()
+  const [mode, setMode] = useState(app.csp_mode || 'off')
+  const [policy, setPolicy] = useState(app.csp_policy || '')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState(null)
+
+  useEffect(() => {
+    setMode(app.csp_mode || 'off')
+    setPolicy(app.csp_policy || '')
+  }, [app.csp_mode, app.csp_policy])
+
+  const pick = (m) => {
+    setMode(m)
+    if (m !== 'off' && !policy.trim()) setPolicy(DEFAULT_CSP)
+  }
+
+  const save = async (e) => {
+    e.preventDefault()
+    setBusy(true)
+    setError(null)
+    try {
+      await put(`/apps/${app.id}/security`, { csp_mode: mode, csp_policy: policy })
+      toast.push(t('보안 헤더를 저장했습니다'), 'success')
+      onChanged?.()
+    } catch (err) {
+      setError(err)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const title = t('화면 보안 헤더 (CSP)')
+  return (
+    <section className="card p-5">
+      <CardHeader
+        title={title}
+        help={t(
+          'Content-Security-Policy 는 허용한 곳의 스크립트·스타일·이미지만 불러오게 해서 스크립트 삽입(XSS) 피해를 줄입니다. 처음에는 점검만으로 켜고, 브라우저 개발자 도구 콘솔에 막힌 항목이 없는지 확인한 뒤 적용으로 바꾸세요.',
+        )}
+      />
+      <form className="mt-4 space-y-3" onSubmit={save}>
+        <div role="radiogroup" aria-label={title} className="flex flex-wrap gap-2">
+          {CSP_MODES.map((m) => (
+            <button
+              key={m.id}
+              type="button"
+              role="radio"
+              aria-checked={mode === m.id}
+              onClick={() => pick(m.id)}
+              className={`rounded-lg border px-3 py-1.5 text-sm transition ${mode === m.id ? 'border-signal/60 bg-signal/5' : 'border-ink-700 hover:border-ink-600'}`}
+            >
+              {t(m.label)}
+            </button>
+          ))}
+        </div>
+        <Field label={t('CSP 정책')} htmlFor="csp-policy">
+          <textarea
+            id="csp-policy"
+            className="input h-28 font-mono text-[11px]"
+            maxLength={2000}
+            required={mode !== 'off'}
+            spellCheck={false}
+            placeholder={DEFAULT_CSP}
+            value={policy}
+            onChange={(e) => setPolicy(e.target.value)}
+          />
+        </Field>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <button type="button" className="btn-ghost text-xs" onClick={() => setPolicy(DEFAULT_CSP)}>
+            {t('기본 정책 넣기')}
+          </button>
+          <button className="btn-primary" disabled={busy}>
+            {busy ? t('저장 중…') : t('저장')}
+          </button>
+        </div>
+        <p className="text-xs text-ink-400">
+          {t('HTTPS 강제가 켜져 있으면 HSTS(1년)도 보냅니다. 브라우저가 1년 동안 이 도메인을 HTTPS 로만 여니, 인증서를 계속 유지할 때만 켜 두세요.')}
+        </p>
+      </form>
+      {error && <ErrorBox error={error} />}
+    </section>
   )
 }
 

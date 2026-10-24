@@ -339,14 +339,52 @@ const PROXY_HEADERS: &str = "        proxy_http_version 1.1;
         proxy_buffering       off;
 ";
 
-const STATIC_ASSETS: &str = "
-    location ~* \\.(?:js|css|woff2?|ttf|eot|svg|png|jpe?g|gif|webp|avif|ico)$ {
+/// CSP 헤더 (이름, 정책). 꺼져 있거나 정책이 검증을 통과하지 못하면 None.
+pub fn csp_header(app: &App) -> Option<(&'static str, String)> {
+    let name = match app.csp_mode.as_str() {
+        "report" => "Content-Security-Policy-Report-Only",
+        "enforce" => "Content-Security-Policy",
+        _ => return None,
+    };
+    let policy = crate::validate::csp(app.csp_policy.as_deref()?).ok()?;
+    Some((name, policy))
+}
+
+/// 보안 헤더 줄들 (`indent` 만큼 들여씀).
+///
+/// Nginx 는 location 안에 `add_header` 가 하나라도 있으면 server 블록의 `add_header` 를
+/// **하나도** 물려받지 않습니다. 그래서 server 블록뿐 아니라 `add_header` 를 쓰는
+/// location(정적 파일 캐시 · index.html)에도 이 블록을 다시 넣습니다.
+/// HSTS 는 HTTPS(443) 블록이고 HTTPS 강제가 켜져 있을 때만 붙입니다.
+fn security_headers(app: &App, https: bool, indent: &str) -> String {
+    let mut h = vec![
+        "X-Content-Type-Options \"nosniff\"".to_string(),
+        "X-Frame-Options \"SAMEORIGIN\"".to_string(),
+        "Referrer-Policy \"strict-origin-when-cross-origin\"".to_string(),
+    ];
+    if https && app.force_https {
+        h.push("Strict-Transport-Security \"max-age=31536000\"".to_string());
+    }
+    if let Some((name, policy)) = csp_header(app) {
+        h.push(format!("{name} \"{policy}\""));
+    }
+    h.iter()
+        .map(|x| format!("{indent}add_header {x} always;\n"))
+        .collect()
+}
+
+fn static_assets(sec: &str) -> String {
+    format!(
+        "
+    location ~* \\.(?:js|css|woff2?|ttf|eot|svg|png|jpe?g|gif|webp|avif|ico)$ {{
         expires 1y;
         add_header Cache-Control \"public, immutable\";
-        access_log off;
+{sec}        access_log off;
         try_files $uri =404;
-    }
-";
+    }}
+"
+    )
+}
 
 const DENY_HIDDEN: &str = "
     location ~ /\\.(?!well-known).* {
@@ -379,7 +417,7 @@ fn seo_proxy(api: u32) -> String {
     )
 }
 
-fn site_head(i: &SiteInput) -> String {
+fn site_head(i: &SiteInput, https: bool) -> String {
     let app = i.app;
     let mut s = String::new();
     if !i.trusted_proxy.is_empty() {
@@ -392,12 +430,10 @@ fn site_head(i: &SiteInput) -> String {
             i.trusted_proxy
         ));
     }
+    s.push('\n');
+    s.push_str(&security_headers(app, https, "    "));
     s.push_str(&format!(
         "
-    add_header X-Content-Type-Options \"nosniff\" always;
-    add_header X-Frame-Options \"SAMEORIGIN\" always;
-    add_header Referrer-Policy \"strict-origin-when-cross-origin\" always;
-
     access_log /var/log/nginx/rpanel-{slug}-access.log;
     error_log  /var/log/nginx/rpanel-{slug}-error.log;
 
@@ -409,8 +445,10 @@ fn site_head(i: &SiteInput) -> String {
     s
 }
 
-fn site_body(i: &SiteInput) -> String {
+fn site_body(i: &SiteInput, https: bool) -> String {
     let app = i.app;
+    // add_header 를 쓰는 location 에 다시 넣을 보안 헤더
+    let sec = security_headers(app, https, "        ");
     let mut s = String::new();
     match (app.kind(), app.source()) {
         (AppKind::Rust | AppKind::Python | AppKind::Node | AppKind::Java, _) => {
@@ -459,19 +497,19 @@ fn site_body(i: &SiteInput) -> String {
                     s.push_str(&seo_proxy(api));
                 }
             }
-            s.push_str(STATIC_ASSETS);
-            s.push_str(
+            s.push_str(&static_assets(&sec));
+            s.push_str(&format!(
                 "
-    location / {
+    location / {{
         try_files $uri $uri/ /index.html;
-    }
+    }}
 
-    location = /index.html {
+    location = /index.html {{
         add_header Cache-Control \"no-cache, no-store, must-revalidate\";
-        expires 0;
-    }
-",
-            );
+{sec}        expires 0;
+    }}
+"
+            ));
         }
         (AppKind::Static, _) => {
             s.push_str(&format!(
@@ -481,7 +519,7 @@ fn site_body(i: &SiteInput) -> String {
 ",
                 root = app.document_root().unwrap_or_default()
             ));
-            s.push_str(STATIC_ASSETS);
+            s.push_str(&static_assets(&sec));
             s.push_str(DENY_HIDDEN);
             s.push_str(
                 "
@@ -514,8 +552,8 @@ pub fn nginx_site(i: &SiteInput) -> Option<String> {
         return None;
     }
     let names = domains.join(" ");
-    let head = site_head(i);
-    let body = site_body(i);
+    let head = site_head(i, false);
+    let body = site_body(i, false);
     let ssl = ssl_paths(app);
     let acme = format!(
         "
@@ -553,6 +591,8 @@ server {{
         s.push_str("}\n");
     }
     if let Some((cert, key)) = ssl {
+        let head = site_head(i, true);
+        let body = site_body(i, true);
         s.push_str(&format!(
             "
 server {{
@@ -613,6 +653,8 @@ mod tests {
             runtime_version: None,
             frontend_dir: None,
             app_role: None,
+            csp_mode: "off".into(),
+            csp_policy: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
         }
@@ -722,6 +764,112 @@ mod tests {
         assert!(!s.contains("listen 443"));
         assert!(s.contains("/.well-known/acme-challenge/"));
         assert_eq!(s.matches('{').count(), s.matches('}').count());
+    }
+
+    #[test]
+    fn security_headers_reach_every_location() {
+        // location 안에 add_header 가 있으면 server 블록 헤더를 물려받지 않으므로 그 안에도 있어야 함
+        fn check(s: &str) {
+            let mut n = 0;
+            for (pos, _) in s.match_indices("add_header Cache-Control") {
+                let start = s[..pos].rfind("location ").unwrap();
+                let end = pos + s[pos..].find("\n    }").unwrap();
+                let block = &s[start..end];
+                assert!(
+                    block.contains("add_header X-Content-Type-Options \"nosniff\" always;")
+                        && block.contains("add_header X-Frame-Options \"SAMEORIGIN\" always;")
+                        && block.contains("add_header Referrer-Policy"),
+                    "location without security headers:\n{block}"
+                );
+                n += 1;
+            }
+            assert!(n > 0);
+        }
+        let p = AppPaths::new(Path::new("/var/lib/rpanel"), "beripick-api");
+        let mut git = app("static");
+        git.api_proxy_port = Some(8101);
+        let mut files = files_app("static");
+        files.web_root = "public".into();
+        for a in [&mut git, &mut files] {
+            a.ssl_mode = "letsencrypt".into();
+            a.force_https = false;
+            let s = nginx_site(&SiteInput {
+                app: a,
+                paths: &p,
+                trusted_proxy: "",
+                ipv6: false,
+            })
+            .unwrap();
+            check(&s);
+            // index.html 위치(Git SPA)에도
+            if a.source == "git" {
+                let i = s.find("location = /index.html {").unwrap();
+                assert!(s[i..].split("\n    }").next().unwrap().contains("nosniff"));
+            }
+        }
+    }
+
+    #[test]
+    fn hsts_only_on_https_with_force() {
+        let mut a = app("static");
+        let p = AppPaths::new(Path::new("/var/lib/rpanel"), &a.slug);
+        let gen = |a: &App| {
+            nginx_site(&SiteInput {
+                app: a,
+                paths: &p,
+                trusted_proxy: "",
+                ipv6: false,
+            })
+            .unwrap()
+        };
+        // 인증서 없음
+        assert!(!gen(&a).contains("Strict-Transport-Security"));
+        // 인증서 있음 · 강제 꺼짐 → 붙이지 않음 (HTTP 로도 서비스 중)
+        a.ssl_mode = "letsencrypt".into();
+        assert!(!gen(&a).contains("Strict-Transport-Security"));
+        // 강제 켜짐 → 443 블록에만
+        a.force_https = true;
+        let s = gen(&a);
+        let (http, https) = s.split_once("listen 443 ssl http2;").unwrap();
+        assert!(!http.contains("Strict-Transport-Security"));
+        assert!(https
+            .contains("    add_header Strict-Transport-Security \"max-age=31536000\" always;\n"));
+        // index.html · 정적 파일 location 에도
+        assert!(https.matches("Strict-Transport-Security").count() >= 3);
+    }
+
+    #[test]
+    fn csp_modes() {
+        let mut a = app("static");
+        let p = AppPaths::new(Path::new("/var/lib/rpanel"), &a.slug);
+        let gen = |a: &App| {
+            nginx_site(&SiteInput {
+                app: a,
+                paths: &p,
+                trusted_proxy: "",
+                ipv6: false,
+            })
+            .unwrap()
+        };
+        a.csp_policy = Some("default-src 'self'; frame-ancestors 'none'".into());
+        assert!(!gen(&a).contains("Content-Security-Policy"));
+        a.csp_mode = "report".into();
+        let s = gen(&a);
+        assert!(s.contains(
+            "    add_header Content-Security-Policy-Report-Only \"default-src 'self'; frame-ancestors 'none'\" always;\n"
+        ));
+        assert!(!s.contains("add_header Content-Security-Policy \""));
+        a.csp_mode = "enforce".into();
+        let s = gen(&a);
+        assert!(s.contains(
+            "    add_header Content-Security-Policy \"default-src 'self'; frame-ancestors 'none'\" always;\n"
+        ));
+        assert!(!s.contains("Report-Only"));
+        // DB 값이 잘못돼 있어도 설정에 들어가지 않음
+        a.csp_policy = Some("default-src 'self'\"; include /etc/passwd; #".into());
+        assert!(!gen(&a).contains("Content-Security-Policy"));
+        a.csp_policy = None;
+        assert!(!gen(&a).contains("Content-Security-Policy"));
     }
 
     #[test]

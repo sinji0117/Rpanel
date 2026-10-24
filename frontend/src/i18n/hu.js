@@ -1169,4 +1169,13 @@ export default {
   "언어는 rust · python · node · java 중 하나입니다": "A nyelv rust, python, node vagy java lehet",
   "Java 버전은 주 버전 숫자입니다 (8 또는 11 이상, 예: 21)": "A Java verzió a fő verziószám (8 vagy 11-től felfelé, pl. 21)",
   "jar 파일 경로는 .jar 로 끝나야 합니다": "A jar-fájl útvonalának .jar-ra kell végződnie",
+  "화면 보안 헤더 (CSP)": "Az oldal biztonsági fejlécei (CSP)",
+  "Content-Security-Policy 는 허용한 곳의 스크립트·스타일·이미지만 불러오게 해서 스크립트 삽입(XSS) 피해를 줄입니다. 처음에는 점검만으로 켜고, 브라우저 개발자 도구 콘솔에 막힌 항목이 없는지 확인한 뒤 적용으로 바꾸세요.": "A Content-Security-Policy csak az engedélyezett helyekről enged szkripteket, stílusokat és képeket betölteni, így csökkenti a szkriptbeszúrás (XSS) okozta kárt. Kezdje a Csak ellenőrzés módban, nézze meg a böngésző fejlesztői konzoljában, hogy nincs-e letiltott elem, majd váltson Alkalmazásra.",
+  "끔": "Ki",
+  "점검만 (Report-Only)": "Csak ellenőrzés (Report-Only)",
+  "적용 (막기)": "Alkalmazás (tiltás)",
+  "CSP 정책": "CSP-szabályzat",
+  "기본 정책 넣기": "Alapértelmezett szabályzat beillesztése",
+  "보안 헤더를 저장했습니다": "Biztonsági fejlécek mentve",
+  "HTTPS 강제가 켜져 있으면 HSTS(1년)도 보냅니다. 브라우저가 1년 동안 이 도메인을 HTTPS 로만 여니, 인증서를 계속 유지할 때만 켜 두세요.": "Ha a HTTPS kényszerítése be van kapcsolva, HSTS (1 év) is megy. A böngészők egy évig csak HTTPS-en nyitják meg ezt a domaint, ezért csak akkor kapcsolja be, ha megtartja a tanúsítványt.",
 }

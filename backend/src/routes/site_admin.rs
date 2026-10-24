@@ -629,6 +629,66 @@ pub async fn ssl_force(
     Ok(Json(json!({ "ok": true })))
 }
 
+#[derive(Deserialize)]
+pub struct SecurityBody {
+    /// off | report | enforce
+    pub csp_mode: String,
+    #[serde(default)]
+    pub csp_policy: Option<String>,
+}
+
+async fn set_csp(state: &AppState, id: u64, mode: &str, policy: &Option<String>) -> AppResult<()> {
+    sqlx::query("UPDATE apps SET csp_mode = ?, csp_policy = ? WHERE id = ?")
+        .bind(mode)
+        .bind(policy)
+        .bind(id)
+        .execute(&state.db)
+        .await?;
+    Ok(())
+}
+
+/// PUT /api/apps/{id}/security — 화면 보안 헤더 (Content-Security-Policy)
+///  - off: 보내지 않음 · report: Report-Only(막지 않고 콘솔에 표시) · enforce: 적용
+///  - 정책은 끈 상태에서도 저장해 둠 (다시 켤 때 그대로)
+pub async fn security_put(
+    State(state): State<AppState>,
+    user: AuthUser,
+    ClientIp(ip): ClientIp,
+    Path(id): Path<u64>,
+    Json(b): Json<SecurityBody>,
+) -> AppResult<Json<App>> {
+    user.require_admin()?;
+    let app = apps::fetch(&state, id).await?;
+    if !matches!(b.csp_mode.as_str(), "off" | "report" | "enforce") {
+        return Err(AppError::bad(
+            "CSP 모드는 off · report · enforce 중 하나입니다",
+        ));
+    }
+    let policy = match b.csp_policy.as_deref().map(str::trim) {
+        Some(p) if !p.is_empty() => Some(validate::csp(p).map_err(AppError::BadRequest)?),
+        _ => None,
+    };
+    if b.csp_mode != "off" && policy.is_none() {
+        return Err(AppError::bad("CSP 를 켜려면 정책을 입력하세요"));
+    }
+    let (prev_mode, prev_policy) = (app.csp_mode.clone(), app.csp_policy.clone());
+    set_csp(&state, id, &b.csp_mode, &policy).await?;
+    if let Err(e) = reapply_nginx(&state, id).await {
+        set_csp(&state, id, &prev_mode, &prev_policy).await?;
+        let _ = reapply_nginx(&state, id).await;
+        return Err(e);
+    }
+    audit::log(
+        &state,
+        Some(user.id),
+        "security.csp",
+        &format!("{} {}", app.slug, b.csp_mode),
+        &ip,
+    )
+    .await;
+    Ok(Json(apps::fetch(&state, id).await?))
+}
+
 /// GET /api/system/edge — 설치 모드 안내용
 pub async fn edge(State(state): State<AppState>, _u: AuthUser) -> Json<serde_json::Value> {
     Json(json!({

@@ -181,8 +181,21 @@ validate_site() {
       ssl_session_timeout) [[ "$line" == "ssl_session_timeout 1d;" ]] || die "site: bad ssl_session_timeout" ;;
       return) [[ "$line" == 'return 301 https://$host$request_uri;' ]] || die "site: return not allowed: $line" ;;
       real_ip_header|real_ip_recursive|index|expires|gzip|gzip_vary|gzip_min_length|default_type|\
-      proxy_http_version|proxy_connect_timeout|proxy_read_timeout|proxy_send_timeout|proxy_buffering|add_header|proxy_set_header|try_files)
+      proxy_http_version|proxy_connect_timeout|proxy_read_timeout|proxy_send_timeout|proxy_buffering|proxy_set_header|try_files)
         [[ "$line" == *\; ]] || die "site: missing ';' in $d" ;;
+      add_header)
+        # 정해진 헤더만. CSP 정책은 백엔드 validate::csp 와 같은 문자만 (따옴표·$·\·중괄호 금지)
+        re="^add_header Content-Security-Policy(-Report-Only)? \"[A-Za-z0-9 :;/.*'_+=,-]+\" always;\$"
+        (( ${#line} <= 2100 )) || die "site: add_header too long"
+        case "$line" in
+          'add_header X-Content-Type-Options "nosniff" always;'|\
+          'add_header X-Frame-Options "SAMEORIGIN" always;'|\
+          'add_header Referrer-Policy "strict-origin-when-cross-origin" always;'|\
+          'add_header Strict-Transport-Security "max-age=31536000" always;'|\
+          'add_header Cache-Control "public, immutable";'|\
+          'add_header Cache-Control "no-cache, no-store, must-revalidate";') ;;
+          *) [[ "$line" =~ $re ]] || die "site: add_header not allowed: $line" ;;
+        esac ;;
       client_max_body_size) [[ "$line" =~ ^client_max_body_size\ [0-9]{1,5}m\;$ ]] || die "site: bad client_max_body_size" ;;
       proxy_ssl_server_name) [[ "$line" == "proxy_ssl_server_name on;" ]] || die "site: bad proxy_ssl_server_name" ;;
       deny) [[ "$line" == "deny all;" ]] || die "site: bad deny" ;;

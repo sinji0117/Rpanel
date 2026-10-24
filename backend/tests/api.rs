@@ -2335,6 +2335,59 @@ async fn full_flow() {
         ctx.get(&format!("/api/apps/{html_id}"), &t).await.body["ssl_mode"],
         "letsencrypt"
     );
+    // 화면 보안 헤더 (CSP)
+    let r = ctx.get(&format!("/api/apps/{html_id}"), &t).await;
+    assert_eq!(r.body["csp_mode"], "off", "default off");
+    for bad in [
+        json!({"csp_mode":"report"}),
+        json!({"csp_mode":"maybe","csp_policy":"default-src 'self'"}),
+        json!({"csp_mode":"enforce","csp_policy":"default-src 'self'\"; include /etc/passwd; #"}),
+        json!({"csp_mode":"enforce","csp_policy":"default-src $host"}),
+    ] {
+        let r = ctx
+            .req(
+                Method::PUT,
+                &format!("/api/apps/{html_id}/security"),
+                Some(&t),
+                None,
+                Some(bad.clone()),
+            )
+            .await;
+        assert_eq!(r.status, StatusCode::BAD_REQUEST, "{bad} {:?}", r.body);
+    }
+    let r = ctx
+        .req(
+            Method::PUT,
+            &format!("/api/apps/{html_id}/security"),
+            Some(&t),
+            None,
+            Some(json!({"csp_mode":"report","csp_policy":"default-src 'self';\n  frame-ancestors 'none'"})),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+    assert_eq!(r.body["csp_mode"], "report");
+    assert_eq!(
+        r.body["csp_policy"],
+        "default-src 'self'; frame-ancestors 'none'"
+    );
+    // 끄더라도 정책은 남겨 둠
+    let r = ctx
+        .req(
+            Method::PUT,
+            &format!("/api/apps/{html_id}/security"),
+            Some(&t),
+            None,
+            Some(
+                json!({"csp_mode":"off","csp_policy":"default-src 'self'; frame-ancestors 'none'"}),
+            ),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+    assert_eq!(r.body["csp_mode"], "off");
+    assert_eq!(
+        r.body["csp_policy"],
+        "default-src 'self'; frame-ancestors 'none'"
+    );
     assert_eq!(
         ctx.post(
             &format!("/api/apps/{html_id}/ssl/custom"),

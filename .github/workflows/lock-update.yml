@@ -1,0 +1,39 @@
+# 임시: 취약점 고친 버전으로 잠금 파일 갱신 (끝나면 지움)
+name: Lock update
+on:
+  push:
+    branches: [security-audit]
+    paths: ['.github/workflows/lock-update.yml']
+permissions:
+  contents: write
+jobs:
+  update:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - name: cargo
+        working-directory: backend
+        run: |
+          cargo update -p tokio -p ctutils -p rustls -p rustls-webpki -p webpki-roots@1.0.9 2>&1 | tee /tmp/cargo.txt
+          echo "::notice title=cargo update::$(grep -E 'Updating|Adding|Removing' /tmp/cargo.txt | sed 's/^ *//' | paste -sd'|' | sed 's/|/%0A/g')"
+          cargo audit --json > /tmp/a.json || true
+          echo "::notice title=cargo audit 남은 항목::$(jq -r '[.vulnerabilities.list[]|"\(.package.name) \(.package.version) \(.advisory.id)"] + [(.warnings//{})|to_entries[]|.key as $k|.value[]|"\(.package.name) \(.package.version) \($k)"] | if length==0 then "없음" else join("%0A") end' /tmp/a.json)"
+      - name: npm
+        working-directory: frontend
+        run: |
+          npm audit fix 2>&1 | tail -5
+          npm audit > /tmp/n.txt 2>&1 && echo "::notice title=npm audit::취약점 없음 (빌드 도구 포함)" || echo "::warning title=npm audit::$(tail -8 /tmp/n.txt | paste -sd'|' | sed 's/|/%0A/g')"
+          git diff --stat package.json package-lock.json
+      - name: commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add backend/Cargo.lock frontend/package.json frontend/package-lock.json
+          git commit -m "잠금 파일: tokio · rustls · rustls-webpki · webpki-roots · ctutils 패치 버전, undici" && git push

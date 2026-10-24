@@ -1,0 +1,8 @@
+# cargo audit 설정 — 무시하는 항목은 이유를 꼭 적습니다.
+[advisories]
+ignore = [
+  # rsa — Marvin Attack (타이밍으로 개인키 복호화 결과 추측). 고친 버전 없음.
+  # sqlx-mysql 이 MySQL/MariaDB 접속 때 서버 공개키로 비밀번호를 "암호화"하는 데만 쓰고,
+  # 개인키 복호화는 하지 않으므로 해당되지 않습니다. rsa 가 고쳐지면 이 줄을 지우세요.
+  "RUSTSEC-2023-0071",
+]

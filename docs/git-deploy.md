@@ -81,6 +81,21 @@ fatal: could not read Username for 'https://github.com': terminal prompts disabl
 
 카드 위쪽 표시(사용자 화면 · 관리자 화면 · 백엔드)로 구분됩니다. 도메인마다 https 인증서는 각 앱의 **SSL** 탭에서 받습니다.
 
+### 검색 노출 (SEO): robots.txt · sitemap.xml
+
+사용자 화면에 **/api/ 연결**이 있으면, 검색 로봇이 읽는 파일을 백엔드에서 받아 옵니다. 관리자 화면에서 SEO 설정을 바꾸면 프런트를 다시 빌드하지 않아도 바로 반영됩니다.
+
+| 주소 | 실제로 응답하는 곳 |
+|---|---|
+| `example.com/robots.txt` | 백엔드 `/api/seo/robots.txt` |
+| `example.com/sitemap.xml` (`sitemap-posts.xml` 처럼 `sitemap…xml` 모두) | 백엔드 `/api/seo/sitemap.xml` (같은 파일 이름) |
+
+- 백엔드에 그 경로가 없거나(404) 백엔드가 꺼져 있으면, 빌드 결과(`dist`)에 있는 같은 이름의 파일을 그대로 줍니다. 그 파일도 없으면 404 입니다 (예전처럼 `index.html` 이 나가지 않습니다).
+- 관리자 화면(앱 용도 **관리자**)에는 적용하지 않습니다.
+- 백엔드는 `/api/seo/robots.txt`, `/api/seo/sitemap.xml` 만 만들면 됩니다. 사이트 주소는 요청의 `Host` · `X-Forwarded-Proto` 헤더로 알 수 있습니다.
+- `<title>` · `description` · Open Graph 같은 `<head>` 태그는 프런트 빌드 때 `index.html` 에 들어가므로, 이 값을 바꾼 뒤에는 프런트 앱을 **다시 배포**해야 합니다.
+- 패널을 업데이트한 뒤, 이미 있던 사용자 화면 앱은 한 번 **배포**해야 새 Nginx 설정이 적용됩니다.
+
 > 프로젝트(Git)로 만든 앱은 **사이트 계정(SFTP)이 없습니다.** 코드가 Git 에서 오기 때문입니다. **사이트** 메뉴의 **계정** 칸에 `Git 배포`라고 나오고, 누르면 프로젝트 화면으로 갑니다. 파일을 직접 올려야 하면 **사이트** 메뉴에서 사이트로 만드세요.
 
 ## push 할 때 자동 배포 (웹훅)

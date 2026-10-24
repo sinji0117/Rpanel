@@ -354,6 +354,31 @@ const DENY_HIDDEN: &str = "
     }
 ";
 
+/// SEO 경로 — 프런트(Static) 앱의 `/robots.txt` · `/sitemap*.xml` 을 백엔드 `/api/seo/…` 로.
+/// 관리자 → SEO 설정에서 바꾼 값이 재빌드 없이 바로 나가고, `/sitemap.xml` 이 SPA index.html 로 떨어지지 않음.
+/// 백엔드에 해당 경로가 없거나(404) 꺼져 있으면 빌드 결과의 파일을 그대로 줌 (없으면 404).
+fn seo_proxy(api: u32) -> String {
+    format!(
+        "
+    location = /robots.txt {{
+        proxy_pass http://127.0.0.1:{api}/api/seo/robots.txt;
+{PROXY_HEADERS}        proxy_intercept_errors on;
+        error_page 404 502 503 504 = @seo_static;
+    }}
+
+    location ~ ^/(sitemap[A-Za-z0-9_-]*\\.xml)$ {{
+        proxy_pass http://127.0.0.1:{api}/api/seo/$1;
+{PROXY_HEADERS}        proxy_intercept_errors on;
+        error_page 404 502 503 504 = @seo_static;
+    }}
+
+    location @seo_static {{
+        try_files $uri =404;
+    }}
+"
+    )
+}
+
 fn site_head(i: &SiteInput) -> String {
     let app = i.app;
     let mut s = String::new();
@@ -429,6 +454,10 @@ fn site_body(i: &SiteInput) -> String {
 {PROXY_HEADERS}    }}
 "
                 ));
+                // 사용자 화면이면 검색 로봇용 파일을 백엔드 SEO 설정에서 받음
+                if app.app_role.as_deref() != Some("admin") {
+                    s.push_str(&seo_proxy(api));
+                }
             }
             s.push_str(STATIC_ASSETS);
             s.push_str(
@@ -711,6 +740,29 @@ mod tests {
         assert!(s.contains("location /api/ {\n        proxy_pass http://127.0.0.1:8101;"));
         assert!(s.contains("try_files $uri $uri/ /index.html;"));
         assert_eq!(s.matches('{').count(), s.matches('}').count());
+        // SEO: robots · sitemap 은 백엔드로, 백엔드에 없으면 빌드된 파일
+        assert!(s.contains(
+            "location = /robots.txt {\n        proxy_pass http://127.0.0.1:8101/api/seo/robots.txt;"
+        ));
+        assert!(s.contains("location ~ ^/(sitemap[A-Za-z0-9_-]*\\.xml)$ {"));
+        assert!(s.contains("proxy_pass http://127.0.0.1:8101/api/seo/$1;"));
+        assert!(s.contains("error_page 404 502 503 504 = @seo_static;"));
+        assert!(s.contains("location @seo_static {\n        try_files $uri =404;"));
+        // SEO 경로가 SPA 폴백(location /)보다 앞에
+        assert!(s.find("location = /robots.txt").unwrap() < s.find("location / {").unwrap());
+
+        // 관리자 화면은 검색 노출 대상이 아니므로 SEO 프록시 없음
+        a.app_role = Some("admin".into());
+        let s = nginx_site(&SiteInput {
+            app: &a,
+            paths: &p,
+            trusted_proxy: "10.0.0.10",
+            ipv6: true,
+        })
+        .unwrap();
+        assert!(s.contains("location /api/"));
+        assert!(!s.contains("/api/seo/"));
+        a.app_role = Some("front".into());
 
         a.api_proxy_port = None;
         let s = nginx_site(&SiteInput {
@@ -721,6 +773,7 @@ mod tests {
         })
         .unwrap();
         assert!(!s.contains("location /api/"));
+        assert!(!s.contains("/api/seo/"));
 
         a.domains = "".into();
         assert!(nginx_site(&SiteInput {

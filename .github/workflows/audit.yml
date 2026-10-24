@@ -1,0 +1,41 @@
+# 라이브러리 취약점 점검 — 매달 1일 09:00(KST) · 잠금 파일이 바뀔 때 · Actions 탭에서 직접 실행
+# 실패하면 알려진 취약점이 있는 라이브러리가 있다는 뜻입니다. 로그에서 패키지와 고칠 버전을 확인하세요.
+name: Audit
+
+on:
+  schedule:
+    - cron: '0 0 1 * *'
+  workflow_dispatch:
+  push:
+    paths:
+      - 'backend/Cargo.lock'
+      - 'frontend/package-lock.json'
+      - '.github/workflows/audit.yml'
+
+jobs:
+  cargo:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v5
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit
+      - run: cargo audit
+
+  npm:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      # 실제로 배포되는 라이브러리 (빌드 도구 제외)
+      - run: npm audit --omit=dev
+      # 빌드 도구까지 — 참고용 (실패해도 이 작업은 통과)
+      - run: npm audit || true

@@ -63,7 +63,7 @@
 | Nginx | 기본 서버는 등록되지 않은 도메인·IP 직접 접속을 끊음(444 / TLS 거부), Let's Encrypt 확인 경로, 갱신 시 자동 reload |
 | MariaDB 10.11 | `127.0.0.1` 바인딩, 익명 계정·test DB·원격 root 제거, RAM 기준 튜닝(없을 때만), 패널 DB |
 | Redis 7 | `127.0.0.1` 바인딩, 비밀번호 생성(이미 있으면 유지), `maxmemory 1gb` |
-| MongoDB 8 | repo.mongodb.org, `bindIp 127.0.0.1`, 인증 필수, 관리자 `rpanel_admin` → `MONGODB_URL` (AVX 없으면 건너뜀) |
+| MongoDB 8 | repo.mongodb.org, `bindIp 127.0.0.1`, 인증 필수, 관리자 `rpanel_admin` → `MONGODB_URL` (AVX 없으면 건너뜀). 커널 6.19+ 시작 거부([SERVER-121912](https://jira.mongodb.org/browse/SERVER-121912)) 우회로 `mongod.service.d/rpanel-kernel.conf` 에 `GLIBC_TUNABLES=glibc.pthread.rseq=1` |
 | Node.js 22 / Rust / Python | NodeSource(패널 UI·React 정적 앱 빌드용), rustup (Rust 앱 빌드용), `python3` + `python3-venv`·`pip`·`dev` (Python 앱) |
 | 패널 | `rpanel`·`rpanel-app` 사용자, `rpanel-sites` 그룹, 빌드·설치, helper + sudoers, systemd, HTTPS :8443 |
 | SSH | `rpanel-sites` 그룹만 비밀번호 로그인 허용 (`Match Group`) |

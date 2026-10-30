@@ -1244,6 +1244,10 @@ db_engine_upgrade() {
       apt-get update -q >&2 || die "apt-get update 실패"
       echo "▶ MongoDB $v 설치 (데이터는 그대로)" >&2
       apt_install_quiet mongodb-org >&2 || die "MongoDB $v 설치 실패 — 백업: $DATA/backups/_engines"
+      install -d -m 0755 /etc/systemd/system/mongod.service.d
+      printf '%s\n' '# Rpanel: 커널 6.19+ 에서 MongoDB 8.x 가 시작을 거부하는 문제(SERVER-121912) 우회 — 다른 커널에서는 영향 없음' \
+        '[Service]' 'Environment=GLIBC_TUNABLES=glibc.pthread.rseq=1' > /etc/systemd/system/mongod.service.d/rpanel-kernel.conf
+      systemctl daemon-reload
       systemctl restart mongod
       for _ in $(seq 1 60); do (echo > /dev/tcp/127.0.0.1/27017) 2>/dev/null && break; sleep 1; done
       echo "OK $(mongod --version | awk 'NR==1{print $3}')"

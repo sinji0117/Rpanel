@@ -270,6 +270,11 @@ if (( MONGO )); then
     MCONF=/etc/mongod.conf
     # 바인드는 127.0.0.1 만
     if grep -qE '^\s*bindIp:' "$MCONF"; then sed -i -E 's/^(\s*)bindIp:.*/\1bindIp: 127.0.0.1/' "$MCONF"; fi
+    # 커널 6.19+ 에서 MongoDB 8.x 시작 거부(SERVER-121912) 우회
+    install -d -m 0755 /etc/systemd/system/mongod.service.d
+    printf '%s\n' '# Rpanel: 커널 6.19+ 에서 MongoDB 8.x 가 시작을 거부하는 문제(SERVER-121912) 우회 — 다른 커널에서는 영향 없음' \
+      '[Service]' 'Environment=GLIBC_TUNABLES=glibc.pthread.rseq=1' > /etc/systemd/system/mongod.service.d/rpanel-kernel.conf
+    systemctl daemon-reload
     systemctl enable mongod >/dev/null 2>&1 || true
     mongo_up() { for _ in $(seq 1 40); do mongosh --quiet --eval 'db.adminCommand({ping:1}).ok' "$@" 2>/dev/null | grep -q 1 && return 0; sleep 0.5; done; return 1; }
     MONGO_PW=""

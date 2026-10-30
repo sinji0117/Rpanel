@@ -148,3 +148,9 @@ Rpanel이 도움이 되셨다면 커피 한 잔으로 응원해 주세요. 후�
 
 - 후원이 어렵다면 GitHub에서 ⭐ **Star**를 눌러 주는 것도 큰 응원이 됩니다.
 - 버그나 아이디어는 [이슈](https://github.com/sinji0117/Rpanel/issues)로 남겨 주세요.
+
+---
+
+## 문의
+
+설치·사용 문의, 협업 제안은 [beripick.com](https://beripick.com)으로 연락해 주세요.

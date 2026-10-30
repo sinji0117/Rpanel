@@ -596,6 +596,15 @@ test('Node.js · Java 사이트와 Git 앱 만들기, Java 런타임 설치', as
   await jv.getByRole('button', { name: '설치만' }).click()
   const jvRows = page.getByRole('table', { name: 'Java 설치된 버전' })
   await expect(jvRows.getByRole('row', { name: /21\.0/ }).getByText('사용 가능')).toBeVisible({ timeout: 10000 })
+
+  // 빌드 도구: 서버에 없는 Maven → 3 설치하고 기본으로
+  const mvRows = page.getByRole('table', { name: 'Maven 설치된 버전' })
+  await expect(mvRows.getByText('서버에 없음')).toBeVisible()
+  const mv = page.getByRole('group', { name: 'Maven 버전 고르기' })
+  await mv.getByLabel('Maven 버전').selectOption('3')
+  await mv.getByRole('button', { name: '설치하고 기본으로 변경' }).click()
+  await expect(mvRows.getByRole('row', { name: /^3/ }).getByText('사용 가능')).toBeVisible({ timeout: 10000 })
+  await expect(mvRows.getByRole('row', { name: /^3/ }).getByText('기본', { exact: true })).toBeVisible()
 })
 
 test('버전 표시 (지금 · GitHub) 와 런타임 버전 설치·기본 변경·앱별 선택', async ({ page }) => {

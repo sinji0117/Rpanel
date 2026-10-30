@@ -1459,6 +1459,8 @@ nginx_log() {
 #   python: uv 의 standalone 빌드 → bin/python3.X 링크
 #   node:   nodejs.org 공식 tarball (SHA-256 확인) → node/<major>
 #   java:   Eclipse Temurin JDK (api.adoptium.net, SHA-256 확인) → java/<major>
+#   maven:  repo.maven.apache.org 공식 배포 (SHA-512 확인) → maven/<버전>
+#   gradle: services.gradle.org 공식 배포 (SHA-256 확인) → gradle/<버전>
 
 RT="${RPANEL_TEST_RUNTIMES:-/opt/rpanel/runtimes}"   # 테스트용 덮어쓰기
 
@@ -1468,7 +1470,9 @@ valid_runtime() {
     python) [[ "$v" =~ ^3\.([0-9]{1,2})$ ]] && (( BASH_REMATCH[1] >= 8 && BASH_REMATCH[1] <= 20 )) || die "invalid python version: '$v'" ;;
     node)   [[ "$v" =~ ^[1-9][0-9]$ ]] && (( v >= 18 && v <= 40 )) || die "invalid node version: '$v'" ;;
     java)   [[ "$v" =~ ^(8|[1-9][0-9])$ ]] && (( v == 8 || (v >= 11 && v <= 40) )) || die "invalid java version: '$v'" ;;
-    *) die "invalid runtime: '$lang' (python|node|java)" ;;
+    maven)  [[ "$v" =~ ^([1-9][0-9]?)(\.[0-9]{1,2})?$ ]] && (( BASH_REMATCH[1] >= 3 && BASH_REMATCH[1] <= 9 )) || die "invalid maven version: '$v'" ;;
+    gradle) [[ "$v" =~ ^([1-9][0-9]?)(\.[0-9]{1,2})?$ ]] && (( BASH_REMATCH[1] >= 7 && BASH_REMATCH[1] <= 30 )) || die "invalid gradle version: '$v'" ;;
+    *) die "invalid runtime: '$lang' (python|node|java|maven|gradle)" ;;
   esac
 }
 
@@ -1478,6 +1482,40 @@ rt_arch() {
     aarch64|arm64) echo "$1" | cut -d, -f2 ;;
     *) die "unsupported cpu: $(uname -m)" ;;
   esac
+}
+
+# 버전 목록(한 줄에 하나)에서 "<v>" 또는 "<v>.*" 인 정식 버전 중 가장 높은 것
+rt_pick_version() {
+  python3 -c 'import re,sys
+want = sys.argv[1]
+best = None
+for line in sys.stdin:
+    v = line.strip()
+    if not re.fullmatch(r"[0-9]+\.[0-9]+(\.[0-9]+)?", v):
+        continue
+    if v != want and not v.startswith(want + "."):
+        continue
+    k = tuple(int(x) for x in v.split("."))
+    if best is None or k > best[0]:
+        best = (k, v)
+if not best:
+    sys.exit(1)
+print(best[1])' "$1"
+}
+
+# 압축을 임시 폴더에 풀고, 맨 위 폴더 하나를 RT/<lang>/<v> 로 옮김 (버전 파일 남김)
+rt_place() {
+  local lang="$1" v="$2" src="$3" ver="$4" bin="$5"
+  install -d -m 0755 "$RT/$lang"
+  rm -rf "$RT/$lang/.$v.new"
+  mv "$src" "$RT/$lang/.$v.new"
+  [[ -f "$RT/$lang/.$v.new/bin/$bin" ]] || { rm -rf "$RT/$lang/.$v.new"; die "bin/$bin 이 없는 압축 파일입니다"; }
+  chmod 0755 "$RT/$lang/.$v.new/bin/$bin"
+  printf '%s\n' "$ver" > "$RT/$lang/.$v.new/.rpanel-version"
+  chmod -R a+rX "$RT/$lang/.$v.new"
+  rm -rf "$RT/$lang/$v"
+  mv "$RT/$lang/.$v.new" "$RT/$lang/$v"
+  echo "OK $lang $ver"
 }
 
 # 받은 파일을 SHA-256 으로 확인
@@ -1578,6 +1616,52 @@ print(p["link"]); print(p["checksum"]); print(r["release_name"])') \
       mv "$RT/java/.$v.new" "$RT/java/$v"
       echo "OK $("$RT/java/$v/bin/java" -version 2>&1 | grep -m1 ' version ')"
       ;;
+    maven)
+      local base="https://repo.maven.apache.org/maven2/org/apache/maven/apache-maven" meta ver sum tmp
+      meta=$(curl -fsSL --proto '=https' --max-time 60 "$base/maven-metadata.xml") \
+        || die "repo.maven.apache.org 에 접속하지 못했습니다 — 서버 인터넷 연결을 확인하세요"
+      ver=$(printf '%s' "$meta" | grep -oE '<version>[^<]+</version>' | sed -E 's#</?version>##g' | rt_pick_version "$v") \
+        || die "maven $v: 출시된 버전을 찾지 못했습니다"
+      tmp=$(mktemp -d)
+      echo "Maven $ver 내려받는 중" >&2
+      rt_fetch "$base/$ver/apache-maven-$ver-bin.tar.gz" "$tmp/maven.tar.gz"
+      rt_fetch "$base/$ver/apache-maven-$ver-bin.tar.gz.sha512" "$tmp/maven.sha512"
+      sum=$(awk '{print $1; exit}' "$tmp/maven.sha512")
+      [[ "$sum" =~ ^[0-9a-f]{128}$ ]] || { rm -rf "$tmp"; die "bad maven checksum file"; }
+      echo "$sum  $tmp/maven.tar.gz" | sha512sum -c --quiet - || { rm -rf "$tmp"; die "maven checksum mismatch"; }
+      mkdir "$tmp/x"
+      tar -xzf "$tmp/maven.tar.gz" -C "$tmp/x" --strip-components=1 --no-same-owner
+      rt_place maven "$v" "$tmp/x" "$ver" mvn
+      rm -rf "$tmp"
+      ;;
+    gradle)
+      local list ver sum tmp
+      list=$(curl -fsSL --proto '=https' --max-time 60 https://services.gradle.org/versions/all) \
+        || die "services.gradle.org 에 접속하지 못했습니다 — 서버 인터넷 연결을 확인하세요"
+      ver=$(printf '%s' "$list" | python3 -c 'import json,sys
+for r in json.load(sys.stdin):
+    if not r.get("broken") and not r.get("snapshot") and not r.get("nightly") and not r.get("rcFor") and not r.get("milestoneFor"):
+        print(r["version"])' | rt_pick_version "$v") || die "gradle $v: 출시된 버전을 찾지 못했습니다"
+      tmp=$(mktemp -d)
+      echo "Gradle $ver 내려받는 중" >&2
+      rt_fetch "https://services.gradle.org/distributions/gradle-$ver-bin.zip" "$tmp/gradle.zip"
+      rt_fetch "https://services.gradle.org/distributions/gradle-$ver-bin.zip.sha256" "$tmp/gradle.sha256"
+      sum=$(awk '{print $1; exit}' "$tmp/gradle.sha256")
+      [[ "$sum" =~ ^[0-9a-f]{64}$ ]] || { rm -rf "$tmp"; die "bad gradle checksum file"; }
+      echo "$sum  $tmp/gradle.zip" | sha256sum -c --quiet - || { rm -rf "$tmp"; die "gradle checksum mismatch"; }
+      # unzip 이 없을 수 있어 python 으로 풂 (경로가 gradle-<버전>/ 밖으로 나가는 항목은 거부)
+      python3 - "$tmp/gradle.zip" "$tmp" "gradle-$ver/" <<'PY' || { rm -rf "$tmp"; die "gradle 압축 풀기 실패"; }
+import os, sys, zipfile
+src, dst, top = sys.argv[1], sys.argv[2], sys.argv[3]
+with zipfile.ZipFile(src) as z:
+    for n in z.namelist():
+        if not n.startswith(top) or ".." in n.split("/") or n.startswith("/"):
+            sys.exit("bad entry: " + n)
+    z.extractall(dst)
+PY
+      rt_place gradle "$v" "$tmp/gradle-$ver" "$ver" gradle
+      rm -rf "$tmp"
+      ;;
   esac
 }
 
@@ -1591,6 +1675,7 @@ runtime_remove() {
       ;;
     node) rm -rf --one-file-system "$RT/node/$v" ;;
     java) rm -rf --one-file-system "$RT/java/$v" ;;
+    maven|gradle) rm -rf --one-file-system "${RT:?}/$lang/$v" ;;
   esac
   echo "removed $lang $v"
 }
@@ -1888,7 +1973,7 @@ case "$cmd" in
     echo "purged $1"
     ;;
   *)
-    die "usage: rpanel-helper {prepare-app|install-unit|remove-unit|install-site|remove-site|purge-app} <slug> | svc {start|stop|restart} <slug> | status|journal <slug> | {install,remove,run}-cron|cron-status|cron-log <slug> <id> | db-{create,drop,password} <db> <user> | db-user-create <db> <user> <all|read> (pw stdin) | db-user-drop <db> <user> | db-user-password <db> <user> (pw stdin) | redis-user-set <user> <pattern> <rw|ro> (pw stdin) | redis-user-drop <user> | backup-db <slug> <db> <stamp> | backup-data <slug> <stamp> | restore-db <slug> <db> <file> | restore-data <slug> <file> | nginx-log <slug> access|error <lines> | site-create <slug> <user> <domain> <static|rust|python|node|java> | site-password <slug> (stdin) | site-account-create <slug> <user> <ssh|sftp> (pw stdin) | site-account-update <slug> <user> <ssh|sftp> <on|off> | site-account-password <slug> <user> (stdin) | site-account-keys <slug> <user> (stdin) | site-account-delete <slug> <user> | ssl-issue <slug> <email> <domain>... | ssl-custom|ssl-info|ssl-remove <slug> | backup-files <slug> <stamp> | restore-files <slug> <file> | backup-mongo <slug> <db> <stamp> | restore-mongo <slug> <db> <file> | runtime-install|runtime-remove <python|node|java> <version> | system-log <panel|nginx|ssh|mariadb|redis> <lines> | system-events <count> | panel-domain-set <domain> <email> | panel-domain-remove | db-engine-upgrade|db-engine-downgrade <mariadb|mongodb|redis> <version> | panel-access <any|CIDR,...> | storage-set <backups|projects> <path|default>"
+    die "usage: rpanel-helper {prepare-app|install-unit|remove-unit|install-site|remove-site|purge-app} <slug> | svc {start|stop|restart} <slug> | status|journal <slug> | {install,remove,run}-cron|cron-status|cron-log <slug> <id> | db-{create,drop,password} <db> <user> | db-user-create <db> <user> <all|read> (pw stdin) | db-user-drop <db> <user> | db-user-password <db> <user> (pw stdin) | redis-user-set <user> <pattern> <rw|ro> (pw stdin) | redis-user-drop <user> | backup-db <slug> <db> <stamp> | backup-data <slug> <stamp> | restore-db <slug> <db> <file> | restore-data <slug> <file> | nginx-log <slug> access|error <lines> | site-create <slug> <user> <domain> <static|rust|python|node|java> | site-password <slug> (stdin) | site-account-create <slug> <user> <ssh|sftp> (pw stdin) | site-account-update <slug> <user> <ssh|sftp> <on|off> | site-account-password <slug> <user> (stdin) | site-account-keys <slug> <user> (stdin) | site-account-delete <slug> <user> | ssl-issue <slug> <email> <domain>... | ssl-custom|ssl-info|ssl-remove <slug> | backup-files <slug> <stamp> | restore-files <slug> <file> | backup-mongo <slug> <db> <stamp> | restore-mongo <slug> <db> <file> | runtime-install|runtime-remove <python|node|java|maven|gradle> <version> | system-log <panel|nginx|ssh|mariadb|redis> <lines> | system-events <count> | panel-domain-set <domain> <email> | panel-domain-remove | db-engine-upgrade|db-engine-downgrade <mariadb|mongodb|redis> <version> | panel-access <any|CIDR,...> | storage-set <backups|projects> <path|default>"
     ;;
 esac
 }

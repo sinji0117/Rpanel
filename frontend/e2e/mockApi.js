@@ -101,6 +101,8 @@ export function createMockBackend({ needsSetup = false } = {}) {
       { id: 902, lang: 'python', version: 'system', status: 'ready', is_default: true, is_system: true, detail: '3.12.3', log: null, updated_at: now() },
       { id: 903, lang: 'node', version: 'system', status: 'ready', is_default: true, is_system: true, detail: '22.11.0', log: null, updated_at: now() },
       { id: 904, lang: 'java', version: 'system', status: 'ready', is_default: true, is_system: true, detail: '21.0.4', log: null, updated_at: now() },
+      { id: 905, lang: 'maven', version: 'system', status: 'failed', is_default: true, is_system: true, detail: '', log: null, updated_at: now() },
+      { id: 906, lang: 'gradle', version: 'system', status: 'failed', is_default: true, is_system: true, detail: '', log: null, updated_at: now() },
     ],
     seq: 1,
   }
@@ -280,7 +282,7 @@ export function createMockBackend({ needsSetup = false } = {}) {
       }
       return json(route, 200, {
         runtimes: db.runtimes,
-        candidates: { rust: ['stable', 'beta', 'nightly', '1.90', '1.89'], python: ['system', '3.14', '3.13', '3.12', '3.11'], node: ['system', '24', '22', '20'], java: ['system', '25', '21', '17', '11'] },
+        candidates: { rust: ['stable', 'beta', 'nightly', '1.90', '1.89'], python: ['system', '3.14', '3.13', '3.12', '3.11'], node: ['system', '24', '22', '20'], java: ['system', '25', '21', '17', '11'], maven: ['system', '3'], gradle: ['system', '9', '8'] },
         usage,
       })
     }

@@ -1178,4 +1178,10 @@ export default {
   "기본 정책 넣기": "Cuir isteach an polasaí réamhshocraithe",
   "보안 헤더를 저장했습니다": "Sábháladh na ceanntásca slándála",
   "HTTPS 강제가 켜져 있으면 HSTS(1년)도 보냅니다. 브라우저가 1년 동안 이 도메인을 HTTPS 로만 여니, 인증서를 계속 유지할 때만 켜 두세요.": "Nuair atá HTTPS a éileamh ar siúl, seoltar HSTS (1 bhliain) freisin. Osclóidh brabhsálaithe an fearann seo thar HTTPS amháin ar feadh bliana, mar sin ná fág ar siúl é ach má choinníonn tú an teastas.",
+  "복원했습니다. 적용(패키지 다시 설치·재시작)을 시작했습니다": "Athchóirithe. Tá an cur i bhfeidhm tosaithe (pacáistí a athshuiteáil · atosú)",
+  "Java 빌드 도구. 저장소에 mvnw 가 없는 Maven(pom.xml) 프로젝트를 빌드할 때 기본 버전을 씁니다.": "Uirlis tógála Java. Tógann an leagan réamhshocraithe tionscadail Maven (pom.xml) nach bhfuil mvnw ina stór.",
+  "Java 빌드 도구. 저장소에 gradlew 가 없는 Gradle(build.gradle) 프로젝트를 빌드할 때 기본 버전을 씁니다.": "Uirlis tógála Java. Tógann an leagan réamhshocraithe tionscadail Gradle (build.gradle) nach bhfuil gradlew ina stór.",
+  "서버에 없음": "Níl sé ar an bhfreastalaí",
+  "Maven 버전은 3 · 3.9 형식입니다 (주 버전만 쓰면 그 안의 최신)": "Is é leagan Maven 3 nó 3.9 (príomhuimhir amháin = an ceann is déanaí inti)",
+  "Gradle 버전은 9 · 8.14 형식입니다 (주 버전만 쓰면 그 안의 최신)": "Is é leagan Gradle 9 nó 8.14 (príomhuimhir amháin = an ceann is déanaí inti)",
 }

@@ -1178,4 +1178,10 @@ export default {
   "기본 정책 넣기": "Alapértelmezett szabályzat beillesztése",
   "보안 헤더를 저장했습니다": "Biztonsági fejlécek mentve",
   "HTTPS 강제가 켜져 있으면 HSTS(1년)도 보냅니다. 브라우저가 1년 동안 이 도메인을 HTTPS 로만 여니, 인증서를 계속 유지할 때만 켜 두세요.": "Ha a HTTPS kényszerítése be van kapcsolva, HSTS (1 év) is megy. A böngészők egy évig csak HTTPS-en nyitják meg ezt a domaint, ezért csak akkor kapcsolja be, ha megtartja a tanúsítványt.",
+  "복원했습니다. 적용(패키지 다시 설치·재시작)을 시작했습니다": "Visszaállítva. Elindult az alkalmazás (csomagok újratelepítése · újraindítás)",
+  "Java 빌드 도구. 저장소에 mvnw 가 없는 Maven(pom.xml) 프로젝트를 빌드할 때 기본 버전을 씁니다.": "Java build-eszköz. Az alapértelmezett verzió fordítja azokat a Maven (pom.xml) projekteket, amelyek tárolójában nincs mvnw.",
+  "Java 빌드 도구. 저장소에 gradlew 가 없는 Gradle(build.gradle) 프로젝트를 빌드할 때 기본 버전을 씁니다.": "Java build-eszköz. Az alapértelmezett verzió fordítja azokat a Gradle (build.gradle) projekteket, amelyek tárolójában nincs gradlew.",
+  "서버에 없음": "Nincs a szerveren",
+  "Maven 버전은 3 · 3.9 형식입니다 (주 버전만 쓰면 그 안의 최신)": "A Maven verzió 3 vagy 3.9 (csak fő verzió = a sorozat legújabbja)",
+  "Gradle 버전은 9 · 8.14 형식입니다 (주 버전만 쓰면 그 안의 최신)": "A Gradle verzió 9 vagy 8.14 (csak fő verzió = a sorozat legújabbja)",
 }

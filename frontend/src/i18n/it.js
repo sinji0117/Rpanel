@@ -1178,4 +1178,10 @@ export default {
   "기본 정책 넣기": "Inserisci criterio predefinito",
   "보안 헤더를 저장했습니다": "Intestazioni di sicurezza salvate",
   "HTTPS 강제가 켜져 있으면 HSTS(1년)도 보냅니다. 브라우저가 1년 동안 이 도메인을 HTTPS 로만 여니, 인증서를 계속 유지할 때만 켜 두세요.": "Con Forza HTTPS attivo viene inviato anche HSTS (1 anno). I browser apriranno questo dominio solo in HTTPS per un anno, quindi tienilo attivo solo se manterrai il certificato.",
+  "복원했습니다. 적용(패키지 다시 설치·재시작)을 시작했습니다": "Ripristinato. L’applicazione è stata avviata (reinstallazione pacchetti · riavvio)",
+  "Java 빌드 도구. 저장소에 mvnw 가 없는 Maven(pom.xml) 프로젝트를 빌드할 때 기본 버전을 씁니다.": "Strumento di build Java. La versione predefinita compila i progetti Maven (pom.xml) il cui repository non ha mvnw.",
+  "Java 빌드 도구. 저장소에 gradlew 가 없는 Gradle(build.gradle) 프로젝트를 빌드할 때 기본 버전을 씁니다.": "Strumento di build Java. La versione predefinita compila i progetti Gradle (build.gradle) il cui repository non ha gradlew.",
+  "서버에 없음": "Non presente sul server",
+  "Maven 버전은 3 · 3.9 형식입니다 (주 버전만 쓰면 그 안의 최신)": "La versione di Maven è 3 o 3.9 (solo il numero principale = la più recente di quella serie)",
+  "Gradle 버전은 9 · 8.14 형식입니다 (주 버전만 쓰면 그 안의 최신)": "La versione di Gradle è 9 o 8.14 (solo il numero principale = la più recente di quella serie)",
 }

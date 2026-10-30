@@ -427,8 +427,8 @@ export function BackupTable({ rows, loading, onChanged, showApp = false }) {
                               : t('data 디렉토리를 이 백업으로 교체합니다 (서비스 잠시 중지)')
                         if (!(await confirmDialog(t('{what}. 계속할까요?', { what })))) return
                         try {
-                          await post(`/backups/${b.id}/restore`)
-                          toast.push(t('복원했습니다'), 'success')
+                          const r = await post(`/backups/${b.id}/restore`)
+                          toast.push(r?.deployment_id ? t('복원했습니다. 적용(패키지 다시 설치·재시작)을 시작했습니다') : t('복원했습니다'), 'success')
                         } catch (e) {
                           toast.push(e.message, 'error')
                         }

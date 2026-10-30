@@ -1434,7 +1434,7 @@ async fn full_flow() {
     let r = ctx.get("/api/runtimes", &t).await;
     assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
     let rows = r.body["runtimes"].as_array().unwrap().clone();
-    assert_eq!(rows.len(), 4);
+    assert_eq!(rows.len(), 6);
     let default_of = |rows: &[Value], lang: &str| -> String {
         rows.iter()
             .find(|x| x["lang"] == lang && x["is_default"] == true)
@@ -1445,6 +1445,8 @@ async fn full_flow() {
     assert_eq!(default_of(&rows, "python"), "system");
     assert_eq!(default_of(&rows, "node"), "system");
     assert_eq!(default_of(&rows, "java"), "system");
+    assert_eq!(default_of(&rows, "maven"), "system");
+    assert_eq!(default_of(&rows, "gradle"), "system");
     assert!(r.body["candidates"]["java"]
         .as_array()
         .unwrap()
@@ -1469,6 +1471,8 @@ async fn full_flow() {
         json!({"lang":"node","version":"16"}),
         json!({"lang":"java","version":"9"}),
         json!({"lang":"java","version":"21.0"}),
+        json!({"lang":"maven","version":"3.9.11"}),
+        json!({"lang":"gradle","version":"6"}),
     ] {
         assert_eq!(
             ctx.post("/api/runtimes", &t, body.clone()).await.status,
@@ -1662,13 +1666,13 @@ async fn full_flow() {
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
     assert_eq!(del_rt(rust185).await, StatusCode::NO_CONTENT);
-    // 서버 기본 4개 + Java 사이트가 쓰는 Java 21
+    // 서버 기본 6개 + Java 사이트가 쓰는 Java 21
     assert_eq!(
         ctx.get("/api/runtimes", &t).await.body["runtimes"]
             .as_array()
             .unwrap()
             .len(),
-        5
+        7
     );
 
     // 지표 기록 (그래프)

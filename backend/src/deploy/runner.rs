@@ -621,15 +621,31 @@ async fn run(
                 .map_err(|e| {
                     anyhow!("Java 를 찾지 못했습니다 — 런타임 메뉴에서 Java 를 설치하세요 ({e})")
                 })?;
+            // 런타임 메뉴에서 설치한 Maven · Gradle(기본 버전)의 bin 을 PATH 앞에
+            let mut tool_path = rt_env
+                .iter()
+                .find(|(k, _)| k == "PATH")
+                .map(|(_, v)| v.clone())
+                .unwrap_or_else(|| state.cfg.build_path.clone());
+            for tool in [crate::runtimes::Lang::Gradle, crate::runtimes::Lang::Maven] {
+                if let Ok(r) = crate::runtimes::resolve_lang(state, tool, None).await {
+                    if r.bin_dir().is_some() {
+                        log.line(format!("빌드 도구: {}", r.describe())).await;
+                    }
+                    tool_path = r.path_with(&tool_path);
+                }
+            }
             run_ok(
                 exec,
                 bash(&cmd)
+                    .env("PATH", tool_path)
                     .env("MAVEN_OPTS", format!("-Dmaven.repo.local={}", m2.display()))
                     .env("GRADLE_USER_HOME", gradle.display().to_string())
                     .timeout(3600),
                 log,
             )
-            .await?;
+            .await
+            .map_err(|e| anyhow!("{e} — {JAVA_TOOL_HINT}"))?;
             let jar = if exec.is_dry_run() {
                 work.join("target").join("app.jar")
             } else {
@@ -1173,6 +1189,9 @@ elif [ -f pom.xml ]; then mvn -B -q -DskipTests package; \
 elif [ -f gradlew ]; then sh ./gradlew --no-daemon -q build -x test; \
 elif [ -f build.gradle ] || [ -f build.gradle.kts ]; then gradle --no-daemon -q build -x test; \
 else echo 'pom.xml 또는 build.gradle 이 없습니다 — 빌드 명령을 직접 입력하세요' >&2; exit 1; fi";
+
+/// mvn · gradle 이 없을 때 안내 (빌드 명령이 127 로 끝남)
+pub const JAVA_TOOL_HINT: &str = "Maven·Gradle 을 찾지 못했다면 저장소에 래퍼(mvnw·gradlew)를 넣거나 런타임 메뉴에서 Maven·Gradle 을 설치하세요";
 
 /// 빌드한 jar 찾기 — 지정한 경로, 없으면 target/ · build/libs/ 에서 가장 큰 실행용 jar
 pub fn find_jar(work: &std::path::Path, chosen: Option<&str>) -> anyhow::Result<PathBuf> {

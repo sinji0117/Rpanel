@@ -6,6 +6,8 @@
 //!   - Python: uv 로 standalone 빌드 설치 → `/opt/rpanel/runtimes/bin/python3.X`
 //!   - Node.js: nodejs.org 공식 tarball(SHA-256 확인) → `/opt/rpanel/runtimes/node/<major>/bin`
 //!   - Java: Eclipse Temurin JDK(Adoptium, SHA-256 확인) → `/opt/rpanel/runtimes/java/<major>/bin`
+//!   - Maven · Gradle(Java 빌드 도구): 공식 배포 파일(SHA-512 · SHA-256 확인) → `/opt/rpanel/runtimes/{maven,gradle}/<버전>/bin`
+//!     Java 앱을 빌드할 때 기본 버전의 bin 을 PATH 앞에 붙입니다 (앱별로 고르지는 않음)
 //! - `system` 은 서버에 원래 있던 python3 / node / java 입니다.
 //!
 //! 언어마다 기본 버전이 하나 있고, 앱은 따로 고르지 않으면 기본 버전을 씁니다.
@@ -35,10 +37,19 @@ pub enum Lang {
     Python,
     Node,
     Java,
+    Maven,
+    Gradle,
 }
 
 impl Lang {
-    pub const ALL: [Lang; 4] = [Lang::Rust, Lang::Python, Lang::Node, Lang::Java];
+    pub const ALL: [Lang; 6] = [
+        Lang::Rust,
+        Lang::Python,
+        Lang::Node,
+        Lang::Java,
+        Lang::Maven,
+        Lang::Gradle,
+    ];
 
     pub fn as_str(self) -> &'static str {
         match self {
@@ -46,6 +57,8 @@ impl Lang {
             Lang::Python => "python",
             Lang::Node => "node",
             Lang::Java => "java",
+            Lang::Maven => "maven",
+            Lang::Gradle => "gradle",
         }
     }
 
@@ -55,6 +68,8 @@ impl Lang {
             "python" => Some(Lang::Python),
             "node" => Some(Lang::Node),
             "java" => Some(Lang::Java),
+            "maven" => Some(Lang::Maven),
+            "gradle" => Some(Lang::Gradle),
             _ => None,
         }
     }
@@ -65,6 +80,8 @@ impl Lang {
             Lang::Python => "Python",
             Lang::Node => "Node.js",
             Lang::Java => "Java",
+            Lang::Maven => "Maven",
+            Lang::Gradle => "Gradle",
         }
     }
 
@@ -72,7 +89,7 @@ impl Lang {
     fn builtin(self) -> &'static str {
         match self {
             Lang::Rust => "stable",
-            Lang::Python | Lang::Node | Lang::Java => "system",
+            Lang::Python | Lang::Node | Lang::Java | Lang::Maven | Lang::Gradle => "system",
         }
     }
 }
@@ -82,6 +99,9 @@ static RUST_RE: Lazy<Regex> =
 static PY_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"^(system|3\.[0-9]{1,2})$").unwrap());
 static NODE_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"^(system|[1-9][0-9])$").unwrap());
 static JAVA_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"^(system|8|[1-9][0-9])$").unwrap());
+/// Maven · Gradle: 주 버전(그 안의 최신) 또는 주.부 버전
+static TOOL_RE: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"^(system|[1-9][0-9]?(\.[0-9]{1,2})?)$").unwrap());
 
 /// 버전 문자열 검사 (helper 도 같은 규칙으로 다시 검사)
 pub fn validate(lang: Lang, version: &str) -> Result<(), String> {
@@ -103,6 +123,12 @@ pub fn validate(lang: Lang, version: &str) -> Result<(), String> {
                         .parse::<u32>()
                         .is_ok_and(|m| m == 8 || (11..=40).contains(&m)))
         }
+        Lang::Maven => {
+            TOOL_RE.is_match(version) && (version == "system" || major_in(version, 3..=9))
+        }
+        Lang::Gradle => {
+            TOOL_RE.is_match(version) && (version == "system" || major_in(version, 7..=30))
+        }
     };
     if ok {
         Ok(())
@@ -114,8 +140,19 @@ pub fn validate(lang: Lang, version: &str) -> Result<(), String> {
             Lang::Python => "Python 버전은 3.8 ~ 3.20 형식입니다 (예: 3.12)".into(),
             Lang::Node => "Node.js 버전은 주 버전 숫자입니다 (예: 22)".into(),
             Lang::Java => "Java 버전은 주 버전 숫자입니다 (8 또는 11 이상, 예: 21)".into(),
+            Lang::Maven => "Maven 버전은 3 · 3.9 형식입니다 (주 버전만 쓰면 그 안의 최신)".into(),
+            Lang::Gradle => {
+                "Gradle 버전은 9 · 8.14 형식입니다 (주 버전만 쓰면 그 안의 최신)".into()
+            }
         })
     }
+}
+
+fn major_in(v: &str, r: std::ops::RangeInclusive<u32>) -> bool {
+    v.split('.')
+        .next()
+        .and_then(|m| m.parse::<u32>().ok())
+        .is_some_and(|m| r.contains(&m))
 }
 
 fn minor(v: &str) -> Option<u32> {
@@ -138,6 +175,8 @@ pub fn candidates(lang: Lang) -> Vec<String> {
         Lang::Java => ["system", "25", "21", "17", "11"]
             .map(String::from)
             .to_vec(),
+        Lang::Maven => ["system", "3"].map(String::from).to_vec(),
+        Lang::Gradle => ["system", "9", "8"].map(String::from).to_vec(),
     }
 }
 
@@ -170,6 +209,8 @@ pub fn kinds_for(lang: Lang) -> &'static [&'static str] {
         Lang::Python => &["python"],
         Lang::Node => &["node", "static"],
         Lang::Java => &["java"],
+        // 빌드 도구는 앱별로 고르지 않음
+        Lang::Maven | Lang::Gradle => &[],
     }
 }
 
@@ -256,7 +297,7 @@ impl Resolved {
 
 fn bin_dir(lang: Lang, version: &str) -> Option<String> {
     match lang {
-        Lang::Node | Lang::Java if version != "system" => {
+        Lang::Node | Lang::Java | Lang::Maven | Lang::Gradle if version != "system" => {
             Some(format!("{RUNTIMES_DIR}/{}/{version}/bin", lang.as_str()))
         }
         _ => None,
@@ -323,6 +364,16 @@ async fn detect(state: &AppState, lang: Lang, version: &str) -> Option<String> {
             format!("{RUNTIMES_DIR}/java/{version}/bin/java"),
             &["-version"],
         ),
+        Lang::Maven if version == "system" => CmdSpec::new("mvn", &["-v"]),
+        Lang::Gradle if version == "system" => CmdSpec::new("gradle", &["--version", "--quiet"]),
+        // 설치한 빌드 도구: helper 가 남긴 버전 파일 (실행에는 Java 가 필요해 직접 실행하지 않음)
+        Lang::Maven | Lang::Gradle => CmdSpec::new(
+            "cat",
+            &[&format!(
+                "{RUNTIMES_DIR}/{}/{version}/.rpanel-version",
+                lang.as_str()
+            )],
+        ),
     };
     let out = state
         .exec
@@ -333,10 +384,22 @@ async fn detect(state: &AppState, lang: Lang, version: &str) -> Option<String> {
         return None;
     }
     let text = format!("{}{}", out.stdout, out.stderr);
-    if lang == Lang::Java {
-        return parse_java_version(&text);
+    match lang {
+        Lang::Java => parse_java_version(&text),
+        Lang::Maven if version == "system" => parse_tool_version("Apache Maven", &text),
+        Lang::Gradle if version == "system" => parse_tool_version("Gradle", &text),
+        _ => parse_version(&text),
     }
-    parse_version(&text)
+}
+
+/// `Apache Maven 3.9.11 (…)` · `Gradle 8.14.3` → 버전 (Java 안내 줄 등은 건너뜀)
+pub fn parse_tool_version(name: &str, s: &str) -> Option<String> {
+    let re = Regex::new(&format!(
+        r"(?m)^{} ([0-9]+\.[0-9]+(\.[0-9]+)?)",
+        regex::escape(name)
+    ))
+    .ok()?;
+    re.captures(s).map(|c| c[1].to_string())
 }
 
 /// `openjdk version "21.0.4" 2024-07-16` · `java version "1.8.0_412"` → "21.0.4" · "1.8.0_412"
@@ -512,7 +575,7 @@ async fn do_install(
             )
             .await?;
         }
-        Lang::Python | Lang::Node | Lang::Java => {
+        Lang::Python | Lang::Node | Lang::Java | Lang::Maven | Lang::Gradle => {
             if version == "system" {
                 bail!("서버 기본 버전은 설치할 수 없습니다");
             }
@@ -566,7 +629,7 @@ pub async fn uninstall(state: &AppState, lang: Lang, version: &str) -> anyhow::R
             )
             .await?;
         }
-        Lang::Python | Lang::Node | Lang::Java => {
+        Lang::Python | Lang::Node | Lang::Java | Lang::Maven | Lang::Gradle => {
             helper::call(state, &["runtime-remove", lang.as_str(), version], &log).await?;
         }
     }
@@ -603,6 +666,18 @@ mod tests {
         for bad in ["9", "10", "1.8", "21.0", "jdk21", "7", "41", ""] {
             assert!(validate(Lang::Java, bad).is_err(), "{bad}");
         }
+        for ok in ["system", "3", "3.9"] {
+            assert!(validate(Lang::Maven, ok).is_ok(), "{ok}");
+        }
+        for bad in ["2", "3.9.11", "latest", "3.x", "3;id", ""] {
+            assert!(validate(Lang::Maven, bad).is_err(), "{bad}");
+        }
+        for ok in ["system", "8", "9", "8.14"] {
+            assert!(validate(Lang::Gradle, ok).is_ok(), "{ok}");
+        }
+        for bad in ["6", "8.14.3", "9.x", "../9", ""] {
+            assert!(validate(Lang::Gradle, bad).is_err(), "{bad}");
+        }
     }
 
     #[test]
@@ -634,6 +709,14 @@ mod tests {
             Some("1.8.0_412")
         );
         assert_eq!(parse_java_version("bash: java: not found"), None);
+        let mvn = "Apache Maven 3.9.11 (3e54c93a704957b63ee3494413a2b544fd3d825b)\nMaven home: /usr/share/maven\nJava version: 21.0.4";
+        assert_eq!(
+            parse_tool_version("Apache Maven", mvn).as_deref(),
+            Some("3.9.11")
+        );
+        let gr = "Picked up JAVA_TOOL_OPTIONS: -Dx=127.0.0.1\n\n------\nGradle 8.14.3\n------\nKotlin: 2.0.21";
+        assert_eq!(parse_tool_version("Gradle", gr).as_deref(), Some("8.14.3"));
+        assert_eq!(parse_tool_version("Gradle", "command not found"), None);
     }
 
     #[test]

@@ -48,7 +48,7 @@ server.port=${PORT}
 [Git으로 자동 배포하기](git-deploy.md)에서 백엔드 → **Node.js** 또는 **Java** 를 고르면 서버가 빌드합니다.
 
 - **Node.js**: `npm ci` → `npm run build --if-present` → 시작 명령(기본 `npm start`).
-- **Java**: 저장소의 `mvnw` · `pom.xml` · `gradlew` · `build.gradle` 을 보고 Maven 또는 Gradle 로 jar 를 만듭니다 (테스트는 건너뜀). 서버에 `mvn`·`gradle` 이 없어도 저장소에 래퍼(`mvnw`·`gradlew`)가 있으면 됩니다. 만든 jar 를 `app.jar` 로 복사해 `java $JAVA_OPTS -jar app.jar` 로 실행합니다. jar 가 여러 개 생기면 **jar 파일**에 경로(예: `build/libs/api.jar`)를 넣으세요.
+- **Java**: 저장소의 `mvnw` · `pom.xml` · `gradlew` · `build.gradle` 을 보고 Maven 또는 Gradle 로 jar 를 만듭니다 (테스트는 건너뜀). 서버에 `mvn`·`gradle` 이 없어도 저장소에 래퍼(`mvnw`·`gradlew`)가 있으면 됩니다. 래퍼가 없으면 **런타임** 메뉴에서 **Maven** 또는 **Gradle** 을 설치하세요. 만든 jar 를 `app.jar` 로 복사해 `java $JAVA_OPTS -jar app.jar` 로 실행합니다. jar 가 여러 개 생기면 **jar 파일**에 경로(예: `build/libs/api.jar`)를 넣으세요.
 
 ---
 

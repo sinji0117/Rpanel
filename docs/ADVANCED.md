@@ -115,7 +115,8 @@
 - **Node.js**: helper 가 nodejs.org 의 `node-vX.Y.Z-linux-<arch>.tar.xz` 를 `SHASUMS256.txt` 로 확인한 뒤 `/opt/rpanel/runtimes/node/<major>` 에 풉니다. 빌드 PATH 맨 앞에 `…/node/<major>/bin`.
 - **Java**: helper 가 `api.adoptium.net/v3/assets/latest/<major>/hotspot` 에서 Eclipse Temurin JDK 주소·SHA-256 을 받아 내려받고 확인한 뒤 `/opt/rpanel/runtimes/java/<major>` 에 풉니다 (주소는 `github.com/adoptium/…` 만 허용). 빌드에는 `PATH` 앞에 `…/java/<major>/bin`, `JAVA_HOME` 을 넣습니다.
 - Node.js · Java 앱(사이트)의 서비스·크론 유닛 `Environment=PATH=` 와 파일 사이트의 빌드 명령 앞에 고른 버전의 `bin` 을 붙입니다 (서버 기본이면 그대로).
-- `/opt/rpanel/runtimes` 는 root 소유 0755 (사이트 유저도 실행 가능). helper 는 버전 문자열을 `python 3.8~3.20`, `node 18~40`, `java 8 · 11~40` 로만 받습니다.
+- **Maven · Gradle**(Java 빌드 도구): helper 가 `repo.maven.apache.org` 의 `maven-metadata.xml` · `services.gradle.org/versions/all` 에서 고른 주(·부) 버전 안의 최신 정식 버전을 찾아 `.sha512` · `.sha256` 으로 확인한 뒤 `/opt/rpanel/runtimes/{maven,gradle}/<버전>` 에 풉니다 (`.rpanel-version` 에 실제 버전). Git Java 앱 빌드 PATH 맨 앞에 기본 버전의 `bin` 을 붙입니다. 앱별 선택은 없습니다.
+- `/opt/rpanel/runtimes` 는 root 소유 0755 (사이트 유저도 실행 가능). helper 는 버전 문자열을 `python 3.8~3.20`, `node 18~40`, `java 8 · 11~40`, `maven 3~9(.x)`, `gradle 7~30(.x)` 로만 받습니다.
 - 설치는 백그라운드 작업이고 출력은 `runtimes.log` 에 남습니다. 서버 기본·현재 기본·앱이 쓰는 버전은 지울 수 없습니다.
 
 ## 버전 확인 (GitHub)

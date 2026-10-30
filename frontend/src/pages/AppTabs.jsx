@@ -543,7 +543,7 @@ function CronForm({ initial, onSubmit, onCancel }) {
           required
           value={v.command}
           onChange={(e) => setV({ ...v, command: e.target.value })}
-          placeholder="./beripick-api --task cleanup"
+          placeholder="./example-api --task cleanup"
         />
       </Field>
       <label className="flex items-center gap-2 text-sm text-ink-300">

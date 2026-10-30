@@ -814,17 +814,17 @@ mod tests {
 
     fn input() -> AppInput {
         AppInput {
-            name: "Beripick API".into(),
+            name: "Example API".into(),
             slug: None,
             kind: Some("rust".into()),
-            git_url: Some("ssh://git@100.100.199.123:2222/beri/backend.git".into()),
+            git_url: Some("ssh://git@192.0.2.10:2222/team/backend.git".into()),
             git_branch: None,
             root_dir: Some("/backend/".into()),
             build_cmd: Some("  ".into()),
             start_cmd: Some("ignored".into()),
             binary_name: Some("hello-api".into()),
             output_dir: None,
-            domains: Some("API.beripick.com, api.beripick.com".into()),
+            domains: Some("API.example.com, api.example.com".into()),
             api_proxy_port: Some(8080),
             health_path: Some("/api/health".into()),
             web_root: None,
@@ -861,7 +861,7 @@ mod tests {
         assert_eq!(c.build_cmd, None);
         assert_eq!(c.start_cmd, None, "start_cmd only kept for node");
         assert_eq!(c.binary_name.as_deref(), Some("hello-api"));
-        assert_eq!(c.domains, "api.beripick.com");
+        assert_eq!(c.domains, "api.example.com");
         assert_eq!(c.api_proxy_port, None, "api proxy only for static");
         assert_eq!(c.output_dir, "dist");
     }

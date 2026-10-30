@@ -244,8 +244,8 @@ mod git_hint_tests {
     #[test]
     fn ssh_urls() {
         assert_eq!(
-            ssh_url("https://github.com/sinji0117/bandiuri").as_deref(),
-            Some("git@github.com:sinji0117/bandiuri.git")
+            ssh_url("https://github.com/me/myapp").as_deref(),
+            Some("git@github.com:me/myapp.git")
         );
         assert_eq!(
             ssh_url("https://github.com/a/b.git").as_deref(),
@@ -267,11 +267,8 @@ mod git_hint_tests {
     #[test]
     fn hints() {
         let e = anyhow::anyhow!("명령 실패 (exit 128): git clone … — fatal: could not read Username for 'https://github.com': terminal prompts disabled");
-        let m = format!(
-            "{:#}",
-            git_hint(e, "https://github.com/sinji0117/bandiuri", "main")
-        );
-        assert!(m.contains("git@github.com:sinji0117/bandiuri.git"), "{m}");
+        let m = format!("{:#}", git_hint(e, "https://github.com/me/myapp", "main"));
+        assert!(m.contains("git@github.com:me/myapp.git"), "{m}");
         assert!(m.contains("Deploy keys"));
         assert!(m.contains("원래 오류"));
         let e = anyhow::anyhow!("git@github.com: Permission denied (publickey).");

@@ -581,7 +581,7 @@ mod tests {
 
     #[test]
     fn file_names() {
-        assert!(valid_file_name("20261013-030000-db-beripick_api.sql.gz"));
+        assert!(valid_file_name("20261013-030000-db-example_api.sql.gz"));
         assert!(valid_file_name("20261013-030000-data.tar.gz"));
         assert!(valid_file_name("20261013-030000-files.tar.gz"));
         assert!(!valid_file_name("../etc/passwd"));

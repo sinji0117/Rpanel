@@ -163,7 +163,7 @@ pub fn check_db_ident(s: &str, max: usize, what: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// slug → 기본 DB 이름 (beripick-api → beripick_api)
+/// slug → 기본 DB 이름 (example-api → example_api)
 pub fn default_db_name(slug: &str) -> String {
     let mut s: String = slug.replace('-', "_");
     if !s.starts_with(|c: char| c.is_ascii_lowercase()) {
@@ -1159,15 +1159,15 @@ mod tests {
 
     #[test]
     fn idents() {
-        assert!(check_db_ident("beripick_api", 64, "DB").is_ok());
-        assert!(check_db_ident("Beri", 64, "DB").is_err());
+        assert!(check_db_ident("example_api", 64, "DB").is_ok());
+        assert!(check_db_ident("Demo", 64, "DB").is_err());
         assert!(check_db_ident("1db", 64, "DB").is_err());
         assert!(check_db_ident("a`b", 64, "DB").is_err());
         assert!(check_db_ident("a'; DROP", 64, "DB").is_err());
         assert!(check_db_ident("mysql", 64, "DB").is_err());
         assert!(check_db_ident("rpanel", 64, "DB").is_err());
         assert!(check_db_ident(&"a".repeat(33), 32, "user").is_err());
-        assert_eq!(default_db_name("beripick-api"), "beripick_api");
+        assert_eq!(default_db_name("example-api"), "example_api");
         assert_eq!(default_db_name("9shop"), "app_9shop");
         assert_eq!(
             panel_db_name("mysql://u:p@127.0.0.1:3306/rpanel_main?ssl=0"),

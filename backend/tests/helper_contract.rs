@@ -19,10 +19,10 @@ fn app(kind: &str) -> App {
     App {
         id: 1,
         project_id: Some(1),
-        name: "Beripick API".into(),
-        slug: "beripick-api".into(),
+        name: "Example API".into(),
+        slug: "example-api".into(),
         kind: kind.into(),
-        git_url: Some("ssh://git@100.100.199.123:2222/beri/backend.git".into()),
+        git_url: Some("ssh://git@192.0.2.10:2222/team/backend.git".into()),
         git_branch: "main".into(),
         root_dir: "".into(),
         build_cmd: None,
@@ -31,7 +31,7 @@ fn app(kind: &str) -> App {
         output_dir: "dist".into(),
         port: Some(8101),
         api_proxy_port: Some(8101),
-        domains: "beripick.com www.beripick.com".into(),
+        domains: "example.com www.example.com".into(),
         health_path: "/".into(),
         status: "idle".into(),
         current_commit: None,
@@ -120,7 +120,7 @@ fn site(kind: &str) -> String {
 #[test]
 fn generated_units_pass() {
     for kind in ["rust", "python"] {
-        let (ok, err) = validate("validate_unit", &unit(kind), "beripick-api");
+        let (ok, err) = validate("validate_unit", &unit(kind), "example-api");
         assert!(ok, "{kind} unit rejected: {err}\n{}", unit(kind));
     }
 }
@@ -128,7 +128,7 @@ fn generated_units_pass() {
 #[test]
 fn generated_sites_pass() {
     for kind in ["rust", "python", "static"] {
-        let (ok, err) = validate("validate_site", &site(kind), "beripick-api");
+        let (ok, err) = validate("validate_site", &site(kind), "example-api");
         assert!(ok, "{kind} site rejected: {err}\n{}", site(kind));
     }
 }
@@ -157,7 +157,7 @@ fn security_header_sites_pass() {
             .unwrap();
             assert!(conf.contains("Strict-Transport-Security"));
             assert_eq!(conf.contains("Content-Security-Policy"), mode != "off");
-            let (ok, err) = validate("validate_site", &conf, "beripick-api");
+            let (ok, err) = validate("validate_site", &conf, "example-api");
             assert!(ok, "{kind}/{mode} rejected: {err}\n{conf}");
         }
     }
@@ -171,19 +171,19 @@ fn dangerous_units_rejected() {
         base.replace("NoNewPrivileges=true", "NoNewPrivileges=false"),
         base.replace("[Service]\n", "[Service]\nExecStartPre=+/bin/sh -c id\n"),
         base.replace(
-            "ExecStart=/var/lib/rpanel/apps/beripick-api/current/hello-api",
+            "ExecStart=/var/lib/rpanel/apps/example-api/current/hello-api",
             "ExecStart=/bin/sh -c id",
         ),
         base.replace(
-            "ExecStart=/var/lib/rpanel/apps/beripick-api/current/hello-api",
+            "ExecStart=/var/lib/rpanel/apps/example-api/current/hello-api",
             "ExecStart=/var/lib/rpanel/apps/other/current/x",
         ),
         base.replace(
-            "ReadWritePaths=/var/lib/rpanel/apps/beripick-api/data",
+            "ReadWritePaths=/var/lib/rpanel/apps/example-api/data",
             "ReadWritePaths=/etc",
         ),
         base.replace(
-            "EnvironmentFile=/var/lib/rpanel/apps/beripick-api/app.env",
+            "EnvironmentFile=/var/lib/rpanel/apps/example-api/app.env",
             "EnvironmentFile=/etc/shadow",
         ),
         base.replace(
@@ -194,7 +194,7 @@ fn dangerous_units_rejected() {
     ];
     for (i, c) in cases.iter().enumerate() {
         assert_ne!(c, &base, "case {i} did not change the unit");
-        let (ok, _) = validate("validate_unit", c, "beripick-api");
+        let (ok, _) = validate("validate_unit", c, "example-api");
         assert!(!ok, "dangerous unit case {i} was accepted:\n{c}");
     }
     // 다른 slug 경로로 검증하면 거부
@@ -207,7 +207,7 @@ fn dangerous_sites_rejected() {
     let cases = [
         base.replace("listen 80;", "listen 80 default_server;"),
         base.replace(
-            "root /var/lib/rpanel/www/beripick-api/current;",
+            "root /var/lib/rpanel/www/example-api/current;",
             "root /etc;",
         ),
         base.replace(
@@ -223,12 +223,12 @@ fn dangerous_sites_rejected() {
             "proxy_pass http://unix:/var/run/docker.sock:/;",
         ),
         base.replace(
-            "access_log /var/log/nginx/rpanel-beripick-api-access.log;",
+            "access_log /var/log/nginx/rpanel-example-api-access.log;",
             "access_log /var/www/html/leak.log;",
         ),
         base.replace(
-            "server_name beripick.com www.beripick.com;",
-            "server_name beripick.com; return 301 http://evil;",
+            "server_name example.com www.example.com;",
+            "server_name example.com; return 301 http://evil;",
         ),
         base.replace(
             "client_max_body_size 64m;",
@@ -272,7 +272,7 @@ fn dangerous_sites_rejected() {
     ];
     for (i, c) in cases.iter().enumerate() {
         assert_ne!(c, &base, "case {i} did not change the site");
-        let (ok, _) = validate("validate_site", c, "beripick-api");
+        let (ok, _) = validate("validate_site", c, "example-api");
         assert!(!ok, "dangerous site case {i} was accepted:\n{c}");
     }
 }
@@ -358,26 +358,26 @@ fn cron_units_pass_and_dangerous_rejected() {
         "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
     );
     let tmr = cron_timer(&a, &cron_job());
-    let (ok, err) = validate_args("validate_unit", &svc, "beripick-api cron");
+    let (ok, err) = validate_args("validate_unit", &svc, "example-api cron");
     assert!(ok, "cron service rejected: {err}\n{svc}");
-    let (ok, err) = validate_args("validate_timer", &tmr, "beripick-api 42");
+    let (ok, err) = validate_args("validate_timer", &tmr, "example-api 42");
     assert!(ok, "timer rejected: {err}\n{tmr}");
 
     // 서비스 유닛 검증 모드로 cron 유닛을 넣으면 거부 (Type=oneshot)
-    assert!(!validate_args("validate_unit", &svc, "beripick-api service").0);
+    assert!(!validate_args("validate_unit", &svc, "example-api service").0);
     for bad in [
         svc.replace("User=rpanel-app", "User=root"),
         svc.replace("Type=oneshot", "Type=simple"),
         format!("{svc}Restart=always\n"),
     ] {
         assert!(
-            !validate_args("validate_unit", &bad, "beripick-api cron").0,
+            !validate_args("validate_unit", &bad, "example-api cron").0,
             "accepted:\n{bad}"
         );
     }
     for bad in [
         tmr.replace(
-            "Unit=rpanel-cron-beripick-api-42.service",
+            "Unit=rpanel-cron-example-api-42.service",
             "Unit=ssh.service",
         ),
         tmr.replace("OnCalendar=*-*-* 03:00:00", "OnCalendar=$(id)"),
@@ -385,12 +385,12 @@ fn cron_units_pass_and_dangerous_rejected() {
         tmr.replace("Persistent=true", "Persistent=true\nOnBootSec=1"),
     ] {
         assert!(
-            !validate_args("validate_timer", &bad, "beripick-api 42").0,
+            !validate_args("validate_timer", &bad, "example-api 42").0,
             "accepted:\n{bad}"
         );
     }
     // 다른 id 로 검증하면 Unit= 불일치로 거부
-    assert!(!validate_args("validate_timer", &tmr, "beripick-api 43").0);
+    assert!(!validate_args("validate_timer", &tmr, "example-api 43").0);
 }
 
 #[test]
@@ -437,8 +437,8 @@ fn files_app(kind: &str) -> App {
     let mut a = app(kind);
     a.source = "files".into();
     a.git_url = None;
-    a.site_user = Some("beripick".into());
-    a.site_root = Some("/home/beripick/htdocs/beripick.com".into());
+    a.site_user = Some("example".into());
+    a.site_root = Some("/home/example/htdocs/example.com".into());
     a
 }
 
@@ -455,7 +455,7 @@ fn validate_site_reg(func: &str, content: &str, args: &str) -> (bool, String) {
     std::fs::write(&f, content).unwrap();
     std::fs::write(
         &reg,
-        "beripick-api beripick /home/beripick/htdocs/beripick.com\n",
+        "example-api example /home/example/htdocs/example.com\n",
     )
     .unwrap();
     let script = format!(
@@ -500,14 +500,14 @@ fn file_sites_pass() {
                 "".into()
             };
             let conf = site_of(&a);
-            let (ok, err) = validate_site_reg("validate_site", &conf, "beripick-api");
+            let (ok, err) = validate_site_reg("validate_site", &conf, "example-api");
             assert!(ok, "{kind}/{ssl} rejected: {err}\n{conf}");
         }
     }
     let mut p = app("proxy");
     p.source = "none".into();
     p.proxy_target = Some("https://10.0.0.11:8443/app".into());
-    let (ok, err) = validate_site_reg("validate_site", &site_of(&p), "beripick-api");
+    let (ok, err) = validate_site_reg("validate_site", &site_of(&p), "example-api");
     assert!(ok, "proxy rejected: {err}");
 }
 
@@ -518,13 +518,13 @@ fn dangerous_file_sites_rejected() {
     let base = site_of(&a);
     let cases = [
         base.replace(
-            "root /home/beripick/htdocs/beripick.com;",
+            "root /home/example/htdocs/example.com;",
             "root /home/otheruser/htdocs/x;",
         ),
-        base.replace("root /home/beripick/htdocs/beripick.com;", "root /etc;"),
+        base.replace("root /home/example/htdocs/example.com;", "root /etc;"),
         base.replace(
-            "root /home/beripick/htdocs/beripick.com;",
-            "root /home/beripick/htdocs/beripick.com/../../..;",
+            "root /home/example/htdocs/example.com;",
+            "root /home/example/htdocs/example.com/../../..;",
         ),
         base.replace(
             "try_files $uri $uri/ =404;",
@@ -535,7 +535,7 @@ fn dangerous_file_sites_rejected() {
             "try_files $uri $uri/ =404;\n        fastcgi_pass 127.0.0.1:9000;",
         ),
         base.replace(
-            "ssl_certificate /etc/letsencrypt/live/rpanel-beripick-api/fullchain.pem;",
+            "ssl_certificate /etc/letsencrypt/live/rpanel-example-api/fullchain.pem;",
             "ssl_certificate /etc/letsencrypt/live/rpanel-other/fullchain.pem;",
         ),
         base.replace(
@@ -547,7 +547,7 @@ fn dangerous_file_sites_rejected() {
     ];
     for (i, c) in cases.iter().enumerate() {
         assert_ne!(c, &base, "case {i} did not change");
-        let (ok, _) = validate_site_reg("validate_site", c, "beripick-api");
+        let (ok, _) = validate_site_reg("validate_site", c, "example-api");
         assert!(!ok, "dangerous file-site case {i} accepted:\n{c}");
     }
     // 레지스트리에 없는 slug 의 사이트 루트는 거부
@@ -567,18 +567,18 @@ fn site_units_contract() {
             path_env: "/usr/bin:/bin",
         })
         .unwrap();
-        let (ok, err) = validate_site_reg("validate_unit", &u, "beripick-api");
+        let (ok, err) = validate_site_reg("validate_unit", &u, "example-api");
         assert!(ok, "site unit rejected: {err}\n{u}");
         for bad in [
-            u.replace("User=beripick", "User=root"),
-            u.replace("User=beripick", "User=rpanel-app"),
-            u.replace("ReadWritePaths=/home/beripick", "ReadWritePaths=/"),
+            u.replace("User=example", "User=root"),
+            u.replace("User=example", "User=rpanel-app"),
+            u.replace("ReadWritePaths=/home/example", "ReadWritePaths=/"),
             u.replace(
-                "WorkingDirectory=/home/beripick/htdocs/beripick.com",
+                "WorkingDirectory=/home/example/htdocs/example.com",
                 "WorkingDirectory=/root",
             ),
         ] {
-            let (ok, _) = validate_site_reg("validate_unit", &bad, "beripick-api");
+            let (ok, _) = validate_site_reg("validate_unit", &bad, "example-api");
             assert!(!ok, "dangerous site unit accepted:\n{bad}");
         }
     }
@@ -674,7 +674,7 @@ fn account_and_backup_args() {
     }
     // 백업 폴더: 앱 slug 또는 _databases 만
     assert!(helper_fn("valid_backup_scope _databases"));
-    assert!(helper_fn("valid_backup_scope beripick-api"));
+    assert!(helper_fn("valid_backup_scope example-api"));
     for bad in ["../etc", "_other", "''"] {
         assert!(!helper_fn(&format!("valid_backup_scope {bad}")), "{bad}");
     }

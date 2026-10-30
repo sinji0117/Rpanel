@@ -29,7 +29,7 @@ export function ProjectFormModal({ open, onClose, onSaved, initial }) {
         }}
       >
         <Field label={t('이름')} htmlFor="p-name">
-          <input id="p-name" className="input" required value={name} onChange={(e) => setName(e.target.value)} placeholder="Beripick" />
+          <input id="p-name" className="input" required value={name} onChange={(e) => setName(e.target.value)} placeholder="Example" />
         </Field>
         <Field label={t('설명')} htmlFor="p-desc">
           <textarea id="p-desc" className="input min-h-20" value={description} onChange={(e) => setDescription(e.target.value)} />
@@ -65,7 +65,7 @@ export default function Projects() {
           <>
             {t('서비스 단위로 앱(백엔드·프런트)을 묶어 관리합니다')}
             <br />
-            {tx('예: {name} 프로젝트 안에 Rust·Python API 앱과 React 프런트 앱을 둡니다.', { name: <span className="kbd">beripick</span> })}
+            {tx('예: {name} 프로젝트 안에 Rust·Python·Node.js·Java API 앱과 React 프런트 앱을 둡니다.', { name: <span className="kbd">example</span> })}
           </>
         }
         actions={

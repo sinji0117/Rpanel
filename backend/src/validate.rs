@@ -253,14 +253,14 @@ mod tests {
 
     #[test]
     fn slugs() {
-        assert!(slug("beripick-api").is_ok());
+        assert!(slug("example-api").is_ok());
         assert!(slug("a").is_ok());
         assert!(slug("-bad").is_err());
         assert!(slug("Bad").is_err());
         assert!(slug("has space").is_err());
         assert!(slug("../etc").is_err());
         assert!(slug(&"a".repeat(41)).is_err());
-        assert_eq!(slugify("Beripick API v2!"), "beripick-api-v2");
+        assert_eq!(slugify("Example API v2!"), "example-api-v2");
         assert_eq!(slugify("  --hello--  "), "hello");
         assert_eq!(slugify("한글만"), "");
     }
@@ -268,8 +268,8 @@ mod tests {
     #[test]
     fn domain_lists() {
         assert_eq!(
-            domains("Beripick.com, www.beripick.com").unwrap(),
-            "beripick.com www.beripick.com"
+            domains("Example.com, www.example.com").unwrap(),
+            "example.com www.example.com"
         );
         assert_eq!(domains("a.com a.com").unwrap(), "a.com");
         assert_eq!(domains("").unwrap(), "");
@@ -282,9 +282,9 @@ mod tests {
     #[test]
     fn git_urls() {
         assert!(git_url("https://github.com/sinji0117/rpanel.git").is_ok());
-        assert!(git_url("ssh://git@100.100.199.123:2222/group/repo.git").is_ok());
+        assert!(git_url("ssh://git@192.0.2.10:2222/group/repo.git").is_ok());
         assert!(git_url("git@gitlab-internal:group/repo.git").is_ok());
-        assert!(git_url("http://100.100.199.123/group/repo.git").is_ok());
+        assert!(git_url("http://192.0.2.10/group/repo.git").is_ok());
         assert!(git_url("file:///etc/passwd").is_err());
         assert!(git_url("--upload-pack=touch /tmp/x").is_err());
         assert!(git_url("https://host/a b").is_err());

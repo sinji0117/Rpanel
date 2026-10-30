@@ -4,8 +4,8 @@ import { genPassword, userFromDomain } from './CreateSiteModal'
 
 describe('site helpers', () => {
   it('userFromDomain matches server rules', () => {
-    expect(userFromDomain('beripick.com')).toBe('beripick')
-    expect(userFromDomain('www.bandiuri.co.kr www.x.com')).toBe('bandiuri')
+    expect(userFromDomain('example.com')).toBe('example')
+    expect(userFromDomain('www.myshop.co.kr www.x.com')).toBe('myshop')
     expect(userFromDomain('9shop.com')).toBe('site-9shop')
     expect(userFromDomain('ab.io')).toBe('ab-site')
     expect(userFromDomain('My_Shop.com')).toBe('my-shop')

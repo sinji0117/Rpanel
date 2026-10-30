@@ -67,7 +67,7 @@ pub fn valid_site_user(u: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// 도메인 → 사이트 유저 후보 (www.beripick.co.kr → beripick)
+/// 도메인 → 사이트 유저 후보 (www.example.co.kr → example)
 pub fn user_from_domain(domain: &str) -> String {
     let d = domain.strip_prefix("www.").unwrap_or(domain);
     let first = d.split('.').next().unwrap_or("site");
@@ -704,11 +704,11 @@ mod tests {
 
     #[test]
     fn site_users() {
-        assert_eq!(user_from_domain("beripick.com"), "beripick");
-        assert_eq!(user_from_domain("www.bandiuri.co.kr"), "bandiuri");
+        assert_eq!(user_from_domain("example.com"), "example");
+        assert_eq!(user_from_domain("www.myshop.co.kr"), "myshop");
         assert_eq!(user_from_domain("9shop.com"), "site-9shop");
         assert_eq!(user_from_domain("ab.io"), "ab-site");
-        assert!(valid_site_user("beripick").is_ok());
+        assert!(valid_site_user("example").is_ok());
         assert!(valid_site_user("root").is_err());
         assert!(valid_site_user("www-data").is_err());
         assert!(valid_site_user("Bad").is_err());

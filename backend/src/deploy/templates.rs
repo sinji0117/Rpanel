@@ -620,10 +620,10 @@ mod tests {
         App {
             id: 1,
             project_id: Some(1),
-            name: "Beripick API".into(),
-            slug: "beripick-api".into(),
+            name: "Example API".into(),
+            slug: "example-api".into(),
             kind: kind.into(),
-            git_url: Some("ssh://git@100.100.199.123:2222/beri/backend.git".into()),
+            git_url: Some("ssh://git@192.0.2.10:2222/team/backend.git".into()),
             git_branch: "main".into(),
             root_dir: "".into(),
             build_cmd: None,
@@ -632,7 +632,7 @@ mod tests {
             output_dir: "dist".into(),
             port: Some(8101),
             api_proxy_port: None,
-            domains: "beripick.com www.beripick.com".into(),
+            domains: "example.com www.example.com".into(),
             health_path: "/api/health".into(),
             status: "idle".into(),
             current_commit: None,
@@ -662,19 +662,19 @@ mod tests {
 
     #[test]
     fn paths_layout() {
-        let p = AppPaths::new(Path::new("/var/lib/rpanel"), "beri");
-        assert_eq!(p.repo_dir, Path::new("/var/lib/rpanel/builds/beri/repo"));
-        assert_eq!(p.current, Path::new("/var/lib/rpanel/apps/beri/current"));
-        assert_eq!(p.www_current, Path::new("/var/lib/rpanel/www/beri/current"));
+        let p = AppPaths::new(Path::new("/var/lib/rpanel"), "demo");
+        assert_eq!(p.repo_dir, Path::new("/var/lib/rpanel/builds/demo/repo"));
+        assert_eq!(p.current, Path::new("/var/lib/rpanel/apps/demo/current"));
+        assert_eq!(p.www_current, Path::new("/var/lib/rpanel/www/demo/current"));
         assert_eq!(
             p.staging_unit,
-            Path::new("/var/lib/rpanel/staging/beri.service")
+            Path::new("/var/lib/rpanel/staging/demo.service")
         );
         assert_eq!(
             p.work_dir("frontend"),
-            Path::new("/var/lib/rpanel/builds/beri/repo/frontend")
+            Path::new("/var/lib/rpanel/builds/demo/repo/frontend")
         );
-        assert_eq!(unit_name("beri"), "rpanel-app-beri.service");
+        assert_eq!(unit_name("demo"), "rpanel-app-demo.service");
     }
 
     #[test]
@@ -689,11 +689,11 @@ mod tests {
         })
         .unwrap();
         assert!(u.starts_with(MANAGED_MARKER));
-        assert!(u.contains("ExecStart=/var/lib/rpanel/apps/beripick-api/current/hello-api\n"));
+        assert!(u.contains("ExecStart=/var/lib/rpanel/apps/example-api/current/hello-api\n"));
         assert!(u.contains("User=rpanel-app"));
-        assert!(u.contains("EnvironmentFile=/var/lib/rpanel/apps/beripick-api/app.env"));
+        assert!(u.contains("EnvironmentFile=/var/lib/rpanel/apps/example-api/app.env"));
         assert!(u.contains("MemoryDenyWriteExecute=true"));
-        assert!(u.contains("ReadWritePaths=/var/lib/rpanel/apps/beripick-api/data"));
+        assert!(u.contains("ReadWritePaths=/var/lib/rpanel/apps/example-api/data"));
     }
 
     #[test]
@@ -756,7 +756,7 @@ mod tests {
             ipv6: true,
         })
         .unwrap();
-        assert!(s.contains("server_name beripick.com www.beripick.com;"));
+        assert!(s.contains("server_name example.com www.example.com;"));
         assert!(s.contains("proxy_pass http://127.0.0.1:8101;"));
         assert!(s.contains("set_real_ip_from 10.0.0.10;"));
         assert!(s.contains("listen 80;"));
@@ -785,7 +785,7 @@ mod tests {
             }
             assert!(n > 0);
         }
-        let p = AppPaths::new(Path::new("/var/lib/rpanel"), "beripick-api");
+        let p = AppPaths::new(Path::new("/var/lib/rpanel"), "example-api");
         let mut git = app("static");
         git.api_proxy_port = Some(8101);
         let mut files = files_app("static");
@@ -884,7 +884,7 @@ mod tests {
             ipv6: true,
         })
         .unwrap();
-        assert!(s.contains("root /var/lib/rpanel/www/beripick-api/current;"));
+        assert!(s.contains("root /var/lib/rpanel/www/example-api/current;"));
         assert!(s.contains("location /api/ {\n        proxy_pass http://127.0.0.1:8101;"));
         assert!(s.contains("try_files $uri $uri/ /index.html;"));
         assert_eq!(s.matches('{').count(), s.matches('}').count());
@@ -937,8 +937,8 @@ mod tests {
         let mut a = app(kind);
         a.source = "files".into();
         a.git_url = None;
-        a.site_user = Some("beripick".into());
-        a.site_root = Some("/home/beripick/htdocs/beripick.com".into());
+        a.site_user = Some("example".into());
+        a.site_root = Some("/home/example/htdocs/example.com".into());
         a
     }
 
@@ -954,8 +954,8 @@ mod tests {
             path_env: "/usr/bin:/bin",
         })
         .unwrap();
-        assert!(unit.contains("User=beripick\n"));
-        assert!(unit.contains("WorkingDirectory=/home/beripick/htdocs/beripick.com\n"));
+        assert!(unit.contains("User=example\n"));
+        assert!(unit.contains("WorkingDirectory=/home/example/htdocs/example.com\n"));
         assert!(unit.contains("ExecStart=/bin/bash -c "));
         assert!(unit.contains("./app --port $$PORT"), "{unit}");
         assert!(unit.contains("MemoryDenyWriteExecute=true"));
@@ -991,8 +991,8 @@ mod tests {
         assert!(http.contains("return 301 https://$host$request_uri;"));
         assert!(!http.contains("root /home"), "http block only redirects");
         assert!(https
-            .contains("ssl_certificate /etc/letsencrypt/live/rpanel-beripick-api/fullchain.pem;"));
-        assert!(https.contains("root /home/beripick/htdocs/beripick.com;"));
+            .contains("ssl_certificate /etc/letsencrypt/live/rpanel-example-api/fullchain.pem;"));
+        assert!(https.contains("root /home/example/htdocs/example.com;"));
         assert!(https.contains("try_files $uri $uri/ =404;"));
         assert_eq!(s.matches('{').count(), s.matches('}').count());
 
@@ -1006,10 +1006,9 @@ mod tests {
         })
         .unwrap();
         assert!(!s.contains("return 301"));
-        assert!(s.contains("ssl_certificate_key /etc/rpanel/certs/beripick-api/key.pem;"));
+        assert!(s.contains("ssl_certificate_key /etc/rpanel/certs/example-api/key.pem;"));
         assert_eq!(
-            s.matches("root /home/beripick/htdocs/beripick.com;")
-                .count(),
+            s.matches("root /home/example/htdocs/example.com;").count(),
             2
         );
     }
@@ -1039,15 +1038,15 @@ mod tests {
             path_env: "/usr/bin",
         })
         .unwrap();
-        assert!(u.contains("User=beripick\n"));
-        assert!(u.contains("WorkingDirectory=/home/beripick/htdocs/beripick.com\n"));
-        assert!(u.contains("ReadWritePaths=/home/beripick\n"));
+        assert!(u.contains("User=example\n"));
+        assert!(u.contains("WorkingDirectory=/home/example/htdocs/example.com\n"));
+        assert!(u.contains("ReadWritePaths=/home/example\n"));
         assert!(!u.contains("ProtectHome"));
     }
 
     #[test]
     fn node_and_java_units() {
-        let p = AppPaths::new(Path::new("/var/lib/rpanel"), "beripick-api");
+        let p = AppPaths::new(Path::new("/var/lib/rpanel"), "example-api");
         for (kind, start) in [
             ("node", "npm start"),
             ("java", "java $$JAVA_OPTS -jar app.jar"),
@@ -1068,7 +1067,7 @@ mod tests {
             // JIT 가 실행 가능한 메모리를 만들므로 W^X 제한 없음
             assert!(!u.contains("MemoryDenyWriteExecute"));
             assert!(u.contains("Environment=PATH=/opt/rpanel/runtimes/node/22/bin:/usr/bin\n"));
-            assert!(u.contains("WorkingDirectory=/var/lib/rpanel/apps/beripick-api/current\n"));
+            assert!(u.contains("WorkingDirectory=/var/lib/rpanel/apps/example-api/current\n"));
             let s = nginx_site(&SiteInput {
                 app: &g,
                 paths: &p,
@@ -1087,7 +1086,7 @@ mod tests {
             path_env: "/usr/bin",
         })
         .unwrap();
-        assert!(u.contains("User=beripick\n"));
+        assert!(u.contains("User=example\n"));
         assert!(u.contains("java $$JAVA_OPTS App.java"), "{u}");
         let mut n = files_app("node");
         n.start_cmd = None;
@@ -1114,11 +1113,11 @@ mod tests {
         })
         .unwrap();
         assert!(u.contains(
-            "Environment=PATH=/home/beripick/htdocs/beripick.com/.venv/bin:/usr/bin:/bin\n"
+            "Environment=PATH=/home/example/htdocs/example.com/.venv/bin:/usr/bin:/bin\n"
         ));
         assert!(u.contains(r#"ExecStart=/bin/bash -c "python app.py""#));
         assert!(!u.contains("MemoryDenyWriteExecute"));
-        assert!(u.contains("User=beripick\n"));
+        assert!(u.contains("User=example\n"));
 
         let mut g = app("python");
         g.start_cmd = Some("gunicorn -b 127.0.0.1:$PORT app:app".into());
@@ -1130,7 +1129,7 @@ mod tests {
         })
         .unwrap();
         assert!(u.contains(
-            "Environment=PATH=/var/lib/rpanel/apps/beripick-api/current/.venv/bin:/usr/bin\n"
+            "Environment=PATH=/var/lib/rpanel/apps/example-api/current/.venv/bin:/usr/bin\n"
         ));
         assert!(u.contains("User=rpanel-app"));
         let job = CronJob {

@@ -1042,7 +1042,7 @@ export function createMockBackend({ needsSetup = false } = {}) {
     }
     // ── DB 웹 관리 ──
     const w = db.dbweb
-    const dbwebTables = () => ({ database: 'beripick_api', user: 'beripick_api', tables: [{ name: 'orders', type: 'BASE TABLE', rows: w.rows.length, size: 16384 }] })
+    const dbwebTables = () => ({ database: 'example_api', user: 'example_api', tables: [{ name: 'orders', type: 'BASE TABLE', rows: w.rows.length, size: 16384 }] })
     const dbwebBrowse = () => ({
       table: 'orders',
       columns: [
@@ -1082,11 +1082,11 @@ export function createMockBackend({ needsSetup = false } = {}) {
       return json(route, 200, dbwebTables())
     }
     if (path === '/dbweb/login') {
-      if (body.username !== 'beripick_api' || body.password !== 'secretpw')
+      if (body.username !== 'example_api' || body.password !== 'secretpw')
         return json(route, 400, { error: 'bad_request', message: '계정 이름 또는 비밀번호가 올바르지 않습니다' })
       const tok = 'ab'.repeat(24)
       db.dbSessions[tok] = true
-      return json(route, 200, { token: tok, username: body.username, databases: ['beripick_api'] })
+      return json(route, 200, { token: tok, username: body.username, databases: ['example_api'] })
     }
     if (path === '/dbweb/logout') {
       delete db.dbSessions[req.headers()['x-db-token']]
@@ -1109,7 +1109,7 @@ export function createMockBackend({ needsSetup = false } = {}) {
       const lines = [
         'Rpanel 배포 #' + m[1],
         '▶ 소스 가져오기',
-        '$ git clone --depth 1 --branch main -- ssh://git@100.100.199.123:2222/beri/backend.git /var/lib/rpanel/builds/x/repo',
+        '$ git clone --depth 1 --branch main -- ssh://git@192.0.2.10:2222/team/backend.git /var/lib/rpanel/builds/x/repo',
         '▶ 빌드',
         '$ bash -c cargo build --release',
         '   Compiling hello-api v0.1.0',

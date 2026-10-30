@@ -199,7 +199,18 @@ pub async fn restore(
         &ip,
     )
     .await;
-    Ok(Json(json!({ "ok": true, "output": out.stdout.trim() })))
+    // 사이트 파일 복원 뒤에는 바로 적용 (백업에 없는 .venv · node_modules 를 다시 설치하고 서비스 재시작)
+    let deployment_id = match (b.kind.as_str(), b.app_id) {
+        ("files", Some(app_id)) => {
+            crate::routes::deployments::enqueue(&state, app_id, Some(user.id))
+                .await
+                .ok()
+        }
+        _ => None,
+    };
+    Ok(Json(
+        json!({ "ok": true, "output": out.stdout.trim(), "deployment_id": deployment_id }),
+    ))
 }
 
 /// DELETE /api/backups/{id}

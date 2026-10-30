@@ -5,7 +5,7 @@ import AppForm, { slugify, toPayload } from './AppForm'
 
 describe('AppForm', () => {
   it('slugify', () => {
-    expect(slugify('Beripick API v2!')).toBe('beripick-api-v2')
+    expect(slugify('Example API v2!')).toBe('example-api-v2')
     expect(slugify('--x--')).toBe('x')
   })
 
@@ -20,11 +20,11 @@ describe('AppForm', () => {
     const onSubmit = vi.fn()
     render(<AppForm onSubmit={onSubmit} />)
 
-    await user.type(screen.getByLabelText('이름'), 'Beripick Front')
-    expect(screen.getByLabelText('Slug')).toHaveValue('beripick-front')
+    await user.type(screen.getByLabelText('이름'), 'Example Front')
+    expect(screen.getByLabelText('Slug')).toHaveValue('example-front')
     expect(screen.getByLabelText(/바이너리 이름/)).toBeInTheDocument()
 
-    // 백엔드: 언어(Rust·Python)만, 프런트엔드: Static
+    // 백엔드: 언어(Rust·Python·Node.js·Java)만, 프런트엔드: Static
     expect(screen.getByRole('radio', { name: /^Python/ })).toBeInTheDocument()
     expect(screen.queryByRole('radio', { name: /^Static/ })).not.toBeInTheDocument()
     await user.click(screen.getByRole('radio', { name: /프런트엔드/ }))
@@ -35,18 +35,18 @@ describe('AppForm', () => {
     expect(screen.queryByLabelText('헬스체크 경로')).not.toBeInTheDocument()
     await user.type(screen.getByLabelText('/api/ 프록시 포트'), '8100')
     await user.type(screen.getByLabelText('Git 저장소'), 'https://github.com/a/front.git')
-    await user.type(screen.getByLabelText('도메인'), 'beripick.com www.beripick.com')
+    await user.type(screen.getByLabelText('도메인'), 'example.com www.example.com')
     await user.click(screen.getByRole('button', { name: '앱 만들기' }))
 
     expect(onSubmit).toHaveBeenCalledTimes(1)
     expect(onSubmit.mock.calls[0][0]).toMatchObject({
       kind: 'static',
       app_role: 'front',
-      name: 'Beripick Front',
-      slug: 'beripick-front',
+      name: 'Example Front',
+      slug: 'example-front',
       api_proxy_port: 8100,
       output_dir: 'dist',
-      domains: 'beripick.com www.beripick.com',
+      domains: 'example.com www.example.com',
     })
   })
 

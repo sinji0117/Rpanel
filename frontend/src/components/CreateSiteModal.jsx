@@ -16,7 +16,7 @@ export const SITE_TYPES = [
 
 export const DEFAULT_START = { rust: './app', python: 'python app.py', node: 'node server.js', java: 'java $JAVA_OPTS App.java' }
 
-/** 서버와 같은 규칙: www.beripick.co.kr → beripick */
+/** 서버와 같은 규칙: www.example.co.kr → example */
 export function userFromDomain(domain) {
   const d =
     (domain || '')

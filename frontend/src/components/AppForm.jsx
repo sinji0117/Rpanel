@@ -203,7 +203,7 @@ export default function AppForm({ initial, mode = 'create', onSubmit, submitting
 
       <div className="grid gap-4 sm:grid-cols-2">
         <Field label={t('이름')} htmlFor="app-name">
-          <input id="app-name" className="input" required value={v.name} onChange={set('name')} placeholder="Beripick API" />
+          <input id="app-name" className="input" required value={v.name} onChange={set('name')} placeholder="Example API" />
         </Field>
         <Field label="Slug" htmlFor="app-slug" hint={mode === 'edit' ? t('생성 후 변경 불가') : t('서비스·경로 이름 (소문자, 숫자, -)')}>
           <input
@@ -216,7 +216,7 @@ export default function AppForm({ initial, mode = 'create', onSubmit, submitting
               set('slug')(e)
             }}
             pattern="[a-z0-9][a-z0-9-]{0,39}"
-            placeholder="beripick-api"
+            placeholder="example-api"
           />
         </Field>
       </div>
@@ -339,10 +339,10 @@ export default function AppForm({ initial, mode = 'create', onSubmit, submitting
             onChange={set('domains')}
             placeholder={
               v.kind === 'static' && v.app_role === 'admin'
-                ? 'admin.beripick.com'
+                ? 'admin.example.com'
                 : role === 'back'
                   ? t('(비워도 됩니다 — 프런트의 /api/ 로 연결)')
-                  : 'beripick.com www.beripick.com'
+                  : 'example.com www.example.com'
             }
           />
         </Field>

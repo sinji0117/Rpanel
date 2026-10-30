@@ -77,29 +77,29 @@ test('프로젝트 → Rust 앱 생성 → 배포 실시간 로그 → 롤백 �
   await page.goto('/projects')
 
   await page.getByRole('button', { name: '첫 프로젝트 만들기' }).click()
-  await page.getByLabel('이름').fill('Beripick')
+  await page.getByLabel('이름').fill('Example')
   await page.getByLabel('설명').fill('메인 서비스')
   await page.getByRole('button', { name: '저장' }).click()
-  await expect(page.getByRole('heading', { name: 'Beripick' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Example' })).toBeVisible()
 
   await page.getByRole('button', { name: '+ 새 앱' }).click()
   const dialog = page.getByRole('dialog', { name: '새 앱' })
   await expect(dialog.getByRole('radio', { name: /^Rust/ })).toHaveAttribute('aria-checked', 'true')
-  await dialog.getByLabel('이름', { exact: true }).fill('Beripick API')
-  await expect(dialog.getByLabel('Slug')).toHaveValue('beripick-api')
-  await dialog.getByLabel('Git 저장소').fill('ssh://git@100.100.199.123:2222/beri/backend.git')
+  await dialog.getByLabel('이름', { exact: true }).fill('Example API')
+  await expect(dialog.getByLabel('Slug')).toHaveValue('example-api')
+  await dialog.getByLabel('Git 저장소').fill('ssh://git@192.0.2.10:2222/team/backend.git')
   await dialog.getByLabel('바이너리 이름').fill('hello-api')
   // 같은 저장소의 React 프런트엔드 → npm 빌드
   await expect(dialog.getByLabel('빌드 결과 폴더')).toHaveCount(0)
   await dialog.getByLabel('프런트엔드 폴더').fill('frontend')
   await expect(dialog.getByText('프로그램에서 frontend/dist 경로로 읽으면 됩니다')).toBeVisible()
-  await dialog.getByLabel('도메인').fill('api.beripick.com')
+  await dialog.getByLabel('도메인').fill('api.example.com')
   await dialog.getByLabel('헬스체크 경로').fill('/api/health')
   await dialog.getByRole('button', { name: '앱 만들기' }).click()
 
-  await expect(page.getByRole('heading', { name: /Beripick API/ })).toBeVisible()
+  await expect(page.getByRole('heading', { name: /Example API/ })).toBeVisible()
   await expect(page.getByText('127.0.0.1:8100')).toBeVisible()
-  expect(backend.db.apps.find((a) => a.name === 'Beripick API')).toMatchObject({ frontend_dir: 'frontend', output_dir: 'dist' })
+  expect(backend.db.apps.find((a) => a.name === 'Example API')).toMatchObject({ frontend_dir: 'frontend', output_dir: 'dist' })
   await expect(page.getByText('아직 배포가 없습니다')).toBeVisible()
 
   // 배포를 눌러도 앱 화면에 머물고, 배포 탭 아래에서 실시간 로그를 봄
@@ -149,7 +149,7 @@ test('환경변수 .env 붙여넣기·저장 + Deploy key·Webhook', async ({ pa
     output_dir: 'dist',
     port: null,
     api_proxy_port: 8100,
-    domains: 'beripick.com www.beripick.com',
+    domains: 'example.com www.example.com',
     health_path: '/',
     status: 'idle',
     current_commit: null,
@@ -182,23 +182,23 @@ test('환경변수 .env 붙여넣기·저장 + Deploy key·Webhook', async ({ pa
 
 function seededBackend() {
   const backend = createMockBackend()
-  backend.db.projects.push({ id: 1, name: 'Beripick', description: '', created_at: '', updated_at: '' })
+  backend.db.projects.push({ id: 1, name: 'Example', description: '', created_at: '', updated_at: '' })
   backend.db.apps.push({
     id: 2,
     project_id: 1,
-    name: 'Beripick API',
-    slug: 'beripick-api',
+    name: 'Example API',
+    slug: 'example-api',
     kind: 'rust',
-    git_url: 'ssh://git@100.100.199.123:2222/b/api.git',
+    git_url: 'ssh://git@192.0.2.10:2222/b/api.git',
     git_branch: 'main',
     root_dir: '',
     build_cmd: null,
     start_cmd: null,
-    binary_name: 'beripick-api',
+    binary_name: 'example-api',
     output_dir: 'dist',
     port: 8100,
     api_proxy_port: null,
-    domains: 'api.beripick.com www.api.beripick.com',
+    domains: 'api.example.com www.api.example.com',
     health_path: '/api/health',
     status: 'running',
     current_commit: 'abc12345',
@@ -221,26 +221,26 @@ test('데이터베이스·Redis 생성 → 환경변수에 자동 주입 표시 
   await page.goto('/apps/2')
   await page.getByRole('tab', { name: '데이터베이스' }).click()
   await page.getByRole('button', { name: '+ 데이터베이스' }).click()
-  await expect(page.getByLabel('DB 이름', { exact: true })).toHaveValue('beripick_api')
+  await expect(page.getByLabel('DB 이름', { exact: true })).toHaveValue('example_api')
   await page.getByRole('button', { name: '만들기' }).click()
-  await expect(page.getByText('데이터베이스 beripick_api 생성됨')).toBeVisible()
+  await expect(page.getByText('데이터베이스 example_api 생성됨')).toBeVisible()
   // 비밀번호는 기본 마스킹
-  await expect(page.getByText('mysql://beripick_api:••••••@127.0.0.1:3306/beripick_api')).toBeVisible()
+  await expect(page.getByText('mysql://example_api:••••••@127.0.0.1:3306/example_api')).toBeVisible()
   await page.getByRole('button', { name: 'Redis 배정' }).click()
   await expect(page.getByText('DB 4')).toBeVisible()
 
   await page.getByRole('tab', { name: '환경변수' }).click()
   await expect(page.getByText('패널이 자동 주입')).toBeVisible()
-  await expect(page.getByText('MariaDB · beripick_api')).toBeVisible()
+  await expect(page.getByText('MariaDB · example_api')).toBeVisible()
   await expect(page.getByText('Redis · DB 4')).toBeVisible()
 
   await menu(page).getByRole('link', { name: 'MariaDB' }).click()
-  await expect(page.getByRole('cell', { name: 'beripick_api' }).first()).toBeVisible()
+  await expect(page.getByRole('cell', { name: 'example_api' }).first()).toBeVisible()
 })
 
 test('백업 → 목록, 크론 등록(잘못된 일정 거부), 사이트·Nginx 로그 통계', async ({ page }) => {
   const backend = seededBackend()
-  backend.db.dbs.push({ id: 30, app_id: 2, name: 'beripick_api', username: 'beripick_api', env_key: 'DATABASE_URL', created_at: '' })
+  backend.db.dbs.push({ id: 30, app_id: 2, name: 'example_api', username: 'example_api', env_key: 'DATABASE_URL', created_at: '' })
   await backend.install(page)
   await page.goto('/apps/2')
 
@@ -262,13 +262,13 @@ test('백업 → 목록, 크론 등록(잘못된 일정 거부), 사이트·Ngin
   await page.getByRole('button', { name: '5분마다' }).click()
   await expect(page.getByText('다음 실행: Wed 2026-10-14 03:00:00 KST')).toBeVisible()
   await page.getByLabel('일정 (systemd OnCalendar)').fill('daily; rm -rf /')
-  await page.getByLabel('명령').fill('./beripick-api --task cleanup')
+  await page.getByLabel('명령').fill('./example-api --task cleanup')
   await page.getByRole('button', { name: '저장' }).click()
   await expect(page.getByRole('alert')).toContainText('일정 형식')
   await page.getByLabel('일정 (systemd OnCalendar)').fill('*:0/5')
   await page.getByRole('button', { name: '저장' }).click()
   await expect(page.getByText('크론 작업을 등록했습니다')).toBeVisible()
-  await expect(page.getByText('$ ./beripick-api --task cleanup')).toBeVisible()
+  await expect(page.getByText('$ ./example-api --task cleanup')).toBeVisible()
 
   await page.getByRole('tab', { name: 'Nginx 로그' }).click()
   await expect(page.getByTestId('stat-2xx')).toHaveText('3')
@@ -280,7 +280,7 @@ test('백업 → 목록, 크론 등록(잘못된 일정 거부), 사이트·Ngin
 
   await menu(page).getByRole('link', { name: '백업' }).click()
   await expect(page.getByRole('heading', { name: '백업', exact: true })).toBeVisible()
-  await expect(page.getByRole('cell', { name: 'Beripick API' }).first()).toBeVisible()
+  await expect(page.getByRole('cell', { name: 'Example API' }).first()).toBeVisible()
 })
 
 test('Rust 사이트 만들기 → 접속 정보 → 실행 파일 업로드·편집 → SSL 인증서', async ({ page }) => {
@@ -406,7 +406,7 @@ test('DB·Redis 계정 추가·삭제, 백업 예약 추가·수정·실행·삭
   await link.getByLabel('앱').selectOption('2')
   await link.getByLabel('환경변수 이름').fill('SHOP_DB_URL')
   await link.getByRole('button', { name: '저장' }).click()
-  await expect(card.getByRole('link', { name: 'Beripick API' })).toBeVisible()
+  await expect(card.getByRole('link', { name: 'Example API' })).toBeVisible()
   await expect(card.getByText('SHOP_DB_URL')).toBeVisible()
 
   // 계정 삭제
@@ -673,7 +673,7 @@ test('? 도움말 · 로그 메뉴 (종류별)', async ({ page }) => {
   await expect(page.getByRole('heading', { name: '로그' })).toBeVisible()
   await expect(page.getByRole('tab', { name: '활동 기록' })).toHaveAttribute('aria-selected', 'true')
   await page.getByRole('tab', { name: '배포 기록' }).click()
-  await expect(page.getByRole('list', { name: '배포 기록' }).getByText('Beripick API')).toBeVisible()
+  await expect(page.getByRole('list', { name: '배포 기록' }).getByText('Example API')).toBeVisible()
   await page.getByRole('tab', { name: '서버 로그' }).click()
   await expect(page.getByText('starting rpanel 0.4.0')).toBeVisible()
   await page.getByRole('button', { name: 'SSH 접속' }).click()
@@ -695,7 +695,7 @@ test('알림: 종 아이콘 · 목록 · 설정 · 시험 알림, 메뉴 순서,
       kind: 'deploy_failed',
       level: 'error',
       title: '배포 실패: {app} #{id}',
-      params: { app: 'Beripick API', id: 9 },
+      params: { app: 'Example API', id: 9 },
       body: 'cargo build 실패',
       link: '/apps/2',
       read_at: null,
@@ -726,7 +726,7 @@ test('알림: 종 아이콘 · 목록 · 설정 · 시험 알림, 메뉴 순서,
   await page.getByRole('button', { name: '알림 2개 안 읽음' }).first().click()
   const pop = page.getByRole('dialog', { name: '알림' })
   await expect(pop.getByText('디스크 사용량 93% (/)')).toBeVisible()
-  await pop.getByText('배포 실패: Beripick API #9').click()
+  await pop.getByText('배포 실패: Example API #9').click()
   await expect(page).toHaveURL(/\/apps\/2$/)
   await expect(page.getByTestId('notification-count').first()).toHaveText('1')
 
@@ -757,21 +757,21 @@ test('알림: 종 아이콘 · 목록 · 설정 · 시험 알림, 메뉴 순서,
   backend.db.apps = []
   await page.reload()
   await expect(page.getByText('앱이 없습니다')).toBeVisible()
-  await page.getByRole('button', { name: 'Beripick 도움말' }).click()
+  await page.getByRole('button', { name: 'Example 도움말' }).click()
   await expect(page.getByRole('tooltip')).toContainText('Git 저장소에서 빌드하는 앱입니다')
 })
 
 test('https Git 주소 → SSH 주소로 바꾸기 안내', async ({ page }) => {
   const backend = seededBackend()
-  backend.db.apps.find((a) => a.id === 2).git_url = 'https://github.com/sinji0117/bandiuri'
+  backend.db.apps.find((a) => a.id === 2).git_url = 'https://github.com/me/myapp'
   await backend.install(page)
   await page.goto('/apps/2')
   await page.getByRole('tab', { name: 'Git · 웹훅' }).click()
-  await expect(page.getByTestId('https-warning')).toContainText('https://github.com/sinji0117/bandiuri')
-  await page.getByRole('button', { name: 'git@github.com:sinji0117/bandiuri.git 로 바꾸기' }).click()
-  await expect(page.getByText('Git 주소를 git@github.com:sinji0117/bandiuri.git 로 바꿨습니다')).toBeVisible()
+  await expect(page.getByTestId('https-warning')).toContainText('https://github.com/me/myapp')
+  await page.getByRole('button', { name: 'git@github.com:me/myapp.git 로 바꾸기' }).click()
+  await expect(page.getByText('Git 주소를 git@github.com:me/myapp.git 로 바꿨습니다')).toBeVisible()
   await expect(page.getByTestId('https-warning')).toHaveCount(0)
-  expect(backend.db.apps.find((a) => a.id === 2).git_url).toBe('git@github.com:sinji0117/bandiuri.git')
+  expect(backend.db.apps.find((a) => a.id === 2).git_url).toBe('git@github.com:me/myapp.git')
 })
 
 test('MariaDB 삭제: 이름을 입력해야 삭제되는 팝업 (브라우저 alert 없음)', async ({ page }) => {
@@ -816,12 +816,12 @@ test('서버가 업데이트됐는데 화면이 옛 버전이면 한 번 새로 
 
 test('DB 웹 관리: 패널 관리자 화면에서 행 추가·수정·삭제, SQL 실행', async ({ page }) => {
   const backend = seededBackend()
-  backend.db.dbs.push({ id: 31, app_id: 2, name: 'beripick_api', username: 'beripick_api', env_key: 'DATABASE_URL', created_at: '' })
+  backend.db.dbs.push({ id: 31, app_id: 2, name: 'example_api', username: 'example_api', env_key: 'DATABASE_URL', created_at: '' })
   await backend.install(page)
   let nativeDialogs = 0
   page.on('dialog', (d) => (nativeDialogs++, d.dismiss()))
   await page.goto('/mariadb')
-  await page.getByTestId('dbweb-beripick_api').click()
+  await page.getByTestId('dbweb-example_api').click()
   await expect(page).toHaveURL(/\/mariadb\/31\/web$/)
   await page
     .getByTestId('db-tables')
@@ -868,13 +868,13 @@ test('DB 웹 관리: 패널 계정 없이 DB 계정으로 로그인 (/db)', asyn
   await backend.install(page)
   await page.goto('/db')
   await expect(page.getByRole('heading', { name: 'DB 웹 관리' })).toBeVisible()
-  await page.getByLabel('DB 계정').fill('beripick_api')
+  await page.getByLabel('DB 계정').fill('example_api')
   await page.getByLabel('비밀번호').fill('wrong')
   await page.getByRole('button', { name: '로그인' }).click()
   await expect(page.getByRole('alert')).toContainText('올바르지 않습니다')
   await page.getByLabel('비밀번호').fill('secretpw')
   await page.getByRole('button', { name: '로그인' }).click()
-  await expect(page.getByTestId('db-user')).toHaveText('beripick_api')
+  await expect(page.getByTestId('db-user')).toHaveText('example_api')
   await page
     .getByTestId('db-tables')
     .getByRole('button', { name: /orders/ })
@@ -882,7 +882,7 @@ test('DB 웹 관리: 패널 계정 없이 DB 계정으로 로그인 (/db)', asyn
   await expect(page.getByTestId('db-rows')).toContainText('사과')
   // 새로 고침해도 세션 유지, 로그아웃하면 로그인 화면
   await page.reload()
-  await expect(page.getByTestId('db-user')).toHaveText('beripick_api')
+  await expect(page.getByTestId('db-user')).toHaveText('example_api')
   await page.getByRole('button', { name: '로그아웃' }).click()
   await expect(page.getByLabel('DB 계정')).toBeVisible()
 })
@@ -894,31 +894,31 @@ test('MongoDB 메뉴와 앱 데이터베이스 탭', async ({ page }) => {
   await page.goto('/apps/2')
   await page.getByRole('tab', { name: '데이터베이스' }).click()
   await page.getByTestId('app-mongo-create').click()
-  await expect(page.getByText('MongoDB beripick_api 생성됨')).toBeVisible()
-  expect(backend.db.mongos[0]).toMatchObject({ name: 'beripick_api', app_id: 2, env_key: 'MONGODB_URL' })
+  await expect(page.getByText('MongoDB example_api 생성됨')).toBeVisible()
+  expect(backend.db.mongos[0]).toMatchObject({ name: 'example_api', app_id: 2, env_key: 'MONGODB_URL' })
   await page.goto('/mongodb')
   await expect(page.getByText('MongoDB 8.0.4')).toBeVisible()
-  await expect(page.getByText('beripick_api', { exact: true }).first()).toBeVisible()
+  await expect(page.getByText('example_api', { exact: true }).first()).toBeVisible()
 })
 
 test('프로젝트: 프런트·백엔드·관리자를 한 화면에서, /api/ 연결과 전체 배포', async ({ page }) => {
   const backend = seededBackend()
   backend.db.apps.push(
-    { ...backend.db.apps[0], id: 3, name: 'Beripick Web', slug: 'beripick-web', kind: 'static', port: null, domains: 'beripick.com', api_proxy_port: null },
-    { ...backend.db.apps[0], id: 4, name: 'Beripick Admin', slug: 'beripick-admin', kind: 'static', port: null, domains: 'admin.beripick.com', api_proxy_port: 8100 },
+    { ...backend.db.apps[0], id: 3, name: 'Example Web', slug: 'example-web', kind: 'static', port: null, domains: 'example.com', api_proxy_port: null },
+    { ...backend.db.apps[0], id: 4, name: 'Example Admin', slug: 'example-admin', kind: 'static', port: null, domains: 'admin.example.com', api_proxy_port: 8100 },
   )
   await backend.install(page)
   await acceptPopups(page)
   await page.goto('/projects/1')
-  await expect(page.getByTestId('project-app-beripick-api')).toContainText('백엔드 (API)')
-  await expect(page.getByTestId('project-app-beripick-admin')).toContainText('관리자 화면')
+  await expect(page.getByTestId('project-app-example-api')).toContainText('백엔드 (API)')
+  await expect(page.getByTestId('project-app-example-admin')).toContainText('관리자 화면')
   // 사용자 화면 · 관리자 화면은 프런트엔드 한 묶음, 백엔드는 따로
   await expect(page.getByTestId('project-group-front').locator('[data-testid^=project-app-]')).toHaveCount(2)
   await expect(page.getByTestId('project-group-back').locator('[data-testid^=project-app-]')).toHaveCount(1)
-  await expect(page.getByTestId('project-group-back')).toContainText('Beripick API')
-  const web = page.getByTestId('project-app-beripick-web')
+  await expect(page.getByTestId('project-group-back')).toContainText('Example API')
+  const web = page.getByTestId('project-app-example-web')
   await expect(web).toContainText('사용자 화면')
-  await web.getByLabel('Beripick Web 의 /api/ 연결').selectOption('8100')
+  await web.getByLabel('Example Web 의 /api/ 연결').selectOption('8100')
   await expect(page.getByText('저장했습니다 — 배포(적용)하면 반영됩니다')).toBeVisible()
   expect(backend.db.apps.find((a) => a.id === 3).api_proxy_port).toBe(8100)
   await page.getByTestId('deploy-all').click()
@@ -930,10 +930,10 @@ test('패널 도메인 설정과 사이트 계정 표시', async ({ page }) => {
   await backend.install(page)
   await acceptPopups(page)
   await page.goto('/settings')
-  await page.getByLabel('도메인', { exact: true }).fill('panel.beripick.com')
+  await page.getByLabel('도메인', { exact: true }).fill('panel.example.com')
   await page.getByLabel('이메일 (인증서 만료 알림)').fill('a@b.co')
   await page.getByRole('button', { name: '연결', exact: true }).click()
-  await expect(page.getByTestId('panel-domain')).toContainText('https://panel.beripick.com')
+  await expect(page.getByTestId('panel-domain')).toContainText('https://panel.example.com')
   await page.getByRole('button', { name: '해제' }).click()
   await expect(page.getByLabel('도메인', { exact: true })).toBeVisible()
   expect(backend.db.panelDomain).toBe(null)
@@ -966,8 +966,8 @@ test('알림 목록: 분류·수준으로 나눠 보기', async ({ page }) => {
   const backend = seededBackend()
   const n = (id, kind, level, title, params = {}) => ({ id, kind, level, title, params, body: null, link: null, read_at: null, created_at: new Date().toISOString() })
   backend.db.notifications.push(
-    n(1, 'deploy_failed', 'error', '배포 실패: {app} #{id}', { app: 'Beripick API', id: 9 }),
-    n(2, 'backup_success', 'success', '백업 완료: {target}', { target: 'beripick_api' }),
+    n(1, 'deploy_failed', 'error', '배포 실패: {app} #{id}', { app: 'Example API', id: 9 }),
+    n(2, 'backup_success', 'success', '백업 완료: {target}', { target: 'example_api' }),
     n(3, 'disk_high', 'warning', '디스크 사용량 {pct}% ({mount})', { pct: 93, mount: '/' }),
   )
   await backend.install(page)
@@ -977,7 +977,7 @@ test('알림 목록: 분류·수준으로 나눠 보기', async ({ page }) => {
   await expect(list.getByText('오늘')).toBeVisible()
   await page.getByRole('tab', { name: /^배포/ }).click()
   await expect(list.locator('li p.text-sm')).toHaveCount(1)
-  await expect(list).toContainText('배포 실패: Beripick API #9')
+  await expect(list).toContainText('배포 실패: Example API #9')
   await page.getByRole('tab', { name: /^전체/ }).click()
   await page.getByLabel('알림 수준').selectOption('warning')
   await expect(list.locator('li p.text-sm')).toHaveCount(1)
@@ -1056,13 +1056,13 @@ test('새 앱: 백엔드 · 프런트 · 관리자 화면을 먼저 고름', asy
   await dlg.getByRole('radio', { name: /프런트엔드/ }).click()
   await dlg.getByRole('radio', { name: /관리자 화면/ }).click()
   await expect(dlg.getByRole('radio', { name: /^Rust/ })).toHaveCount(0)
-  await dlg.getByLabel('이름').fill('Beripick Admin')
+  await dlg.getByLabel('이름').fill('Example Admin')
   await dlg.getByLabel('Git 저장소').fill('https://github.com/a/admin.git')
   await dlg.getByLabel('API 연결 (백엔드)').selectOption('8100')
-  await dlg.getByLabel('도메인').fill('admin.beripick.com')
+  await dlg.getByLabel('도메인').fill('admin.example.com')
   await dlg.getByRole('button', { name: '앱 만들기' }).click()
   await expect(page).toHaveURL(/\/apps\/\d+$/)
-  expect(backend.db.apps.at(-1)).toMatchObject({ kind: 'static', app_role: 'admin', api_proxy_port: 8100, domains: 'admin.beripick.com' })
+  expect(backend.db.apps.at(-1)).toMatchObject({ kind: 'static', app_role: 'admin', api_proxy_port: 8100, domains: 'admin.example.com' })
 })
 
 test('패널 접속 IP: 내 IP 없이는 저장 안 됨', async ({ page }) => {

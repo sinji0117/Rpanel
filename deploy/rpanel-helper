@@ -1421,7 +1421,8 @@ backup_files() {
   valid_stamp "$stamp"
   user="$(site_user_of "$slug")"; [[ -n "$user" ]] || die "사이트 유저가 없는 앱입니다"
   dir="$(backup_dir "$slug")"; out="$dir/$stamp-files.tar.gz"
-  tar -C "/home/$user" -czf "$out.part" htdocs || { rm -f "$out.part"; die "tar 실패"; }
+  # node_modules · .venv 는 빼고 (적용할 때 다시 설치됨 · 안의 심볼릭 링크 때문에 복원도 거부됨)
+  tar -C "/home/$user" --exclude=node_modules --exclude=.venv -czf "$out.part" htdocs || { rm -f "$out.part"; die "tar 실패"; }
   mv "$out.part" "$out"
   finish_file "$out"
 }

@@ -303,13 +303,13 @@ async fn full_flow() {
         .post(
             "/api/projects",
             &t,
-            json!({"name":"Beripick","description":"메인 서비스"}),
+            json!({"name":"Example","description":"메인 서비스"}),
         )
         .await;
     assert_eq!(r.status, StatusCode::CREATED, "{:?}", r.body);
     let pid = r.body["id"].as_u64().unwrap();
     assert_eq!(
-        ctx.post("/api/projects", &t, json!({"name":"Beripick"}))
+        ctx.post("/api/projects", &t, json!({"name":"Example"}))
             .await
             .status,
         StatusCode::CONFLICT
@@ -320,13 +320,13 @@ async fn full_flow() {
         .post(
             &format!("/api/projects/{pid}/apps"),
             &t,
-            json!({"name":"Beripick API","kind":"rust","git_url":"ssh://git@100.100.199.123:2222/beri/backend.git",
-                   "binary_name":"hello-api","domains":"api.beripick.com","health_path":"/api/health"}),
+            json!({"name":"Example API","kind":"rust","git_url":"ssh://git@192.0.2.10:2222/team/backend.git",
+                   "binary_name":"hello-api","domains":"api.example.com","health_path":"/api/health"}),
         )
         .await;
     assert_eq!(r.status, StatusCode::CREATED, "{:?}", r.body);
     let api_id = r.body["id"].as_u64().unwrap();
-    assert_eq!(r.body["slug"], "beripick-api");
+    assert_eq!(r.body["slug"], "example-api");
     assert_eq!(r.body["port"], 8100);
     assert!(
         r.body.get("webhook_token").is_none(),
@@ -334,7 +334,7 @@ async fn full_flow() {
     );
 
     let r = ctx
-        .post(&format!("/api/projects/{pid}/apps"), &t, json!({"name":"Dup","kind":"static","git_url":"https://github.com/a/b.git","domains":"API.beripick.com"}))
+        .post(&format!("/api/projects/{pid}/apps"), &t, json!({"name":"Dup","kind":"static","git_url":"https://github.com/a/b.git","domains":"API.example.com"}))
         .await;
     assert_eq!(r.status, StatusCode::CONFLICT, "domain conflict");
 
@@ -350,7 +350,7 @@ async fn full_flow() {
             StatusCode::BAD_REQUEST,
         ),
         (
-            json!({"domain":"api.beripick.com","email":"a@b.co"}),
+            json!({"domain":"api.example.com","email":"a@b.co"}),
             StatusCode::CONFLICT,
         ),
     ] {
@@ -398,7 +398,7 @@ async fn full_flow() {
         .post(
             &format!("/api/projects/{pid}/apps"),
             &t,
-            json!({"name":"Beripick Front","kind":"static","git_url":"https://github.com/a/front.git","domains":"beripick.com www.beripick.com","api_proxy_port":8100}),
+            json!({"name":"Example Front","kind":"static","git_url":"https://github.com/a/front.git","domains":"example.com www.example.com","api_proxy_port":8100}),
         )
         .await;
     assert_eq!(r.status, StatusCode::CREATED, "{:?}", r.body);
@@ -532,10 +532,10 @@ async fn full_flow() {
         .any(|(_, l)| l.contains("git clone --depth 1 --branch main --")));
     assert!(lines
         .iter()
-        .any(|(_, l)| l.contains("install-unit beripick-api")));
+        .any(|(_, l)| l.contains("install-unit example-api")));
     assert!(lines
         .iter()
-        .any(|(_, l)| l.contains("install-site beripick-api")));
+        .any(|(_, l)| l.contains("install-site example-api")));
 
     // 티켓은 1회용
     assert!(tokio_tungstenite::connect_async(format!(
@@ -606,7 +606,7 @@ async fn full_flow() {
     let r = ctx
         .req(
             Method::POST,
-            "/api/hooks/beripick-front",
+            "/api/hooks/example-front",
             None,
             None,
             Some(json!({"ref":"refs/heads/main"})),
@@ -616,7 +616,7 @@ async fn full_flow() {
     let hook_req = |tok: &str, body: Value| {
         Request::builder()
             .method(Method::POST)
-            .uri("/api/hooks/beripick-front")
+            .uri("/api/hooks/example-front")
             .header("x-gitlab-token", tok)
             .header(header::CONTENT_TYPE, "application/json")
             .body(Body::from(body.to_string()))
@@ -646,7 +646,7 @@ async fn full_flow() {
     let gh_req = |sig: String, event: &str, body: &str| {
         Request::builder()
             .method(Method::POST)
-            .uri("/api/hooks/beripick-front")
+            .uri("/api/hooks/example-front")
             .header("x-hub-signature-256", sig)
             .header("x-github-event", event)
             .header(header::CONTENT_TYPE, "application/json")
@@ -796,7 +796,7 @@ async fn full_flow() {
         .post(&format!("/api/apps/{api_id}/databases"), &t, json!({}))
         .await;
     assert_eq!(r.status, StatusCode::CREATED, "{:?}", r.body);
-    assert_eq!(r.body["name"], "beripick_api");
+    assert_eq!(r.body["name"], "example_api");
     let db_id = r.body["id"].as_u64().unwrap();
     assert_eq!(
         ctx.post(&format!("/api/apps/{api_id}/databases"), &t, json!({}))
@@ -951,7 +951,7 @@ async fn full_flow() {
     let ro_id = r.body["id"].as_u64().unwrap();
     for (body, code) in [
         (json!({"username":"analytics_ro"}), StatusCode::CONFLICT),
-        (json!({"username":"beripick_api"}), StatusCode::CONFLICT),
+        (json!({"username":"example_api"}), StatusCode::CONFLICT),
         (
             json!({"username":"x2","privileges":"admin"}),
             StatusCode::BAD_REQUEST,
@@ -1895,7 +1895,7 @@ async fn full_flow() {
         .post(
             &format!("/api/projects/{pid}/apps"),
             &t,
-            json!({"name":"Full Stack","kind":"rust","git_url":"git@github.com:sinji0117/bandiuri.git","binary_name":"bandiuri",
+            json!({"name":"Full Stack","kind":"rust","git_url":"git@github.com:me/myapp.git","binary_name":"myapp",
                    "frontend_dir":"../web","domains":"full.example.com"}),
         )
         .await;
@@ -1908,7 +1908,7 @@ async fn full_flow() {
         .post(
             &format!("/api/projects/{pid}/apps"),
             &t,
-            json!({"name":"Full Stack","kind":"rust","git_url":"git@github.com:sinji0117/bandiuri.git","binary_name":"bandiuri",
+            json!({"name":"Full Stack","kind":"rust","git_url":"git@github.com:me/myapp.git","binary_name":"myapp",
                    "frontend_dir":"/frontend/","output_dir":"dist","domains":"full.example.com"}),
         )
         .await;
@@ -1934,7 +1934,7 @@ async fn full_flow() {
     pos("/frontend/dist/");
     // static 앱에는 frontend_dir 를 저장하지 않음
     let r = ctx
-        .req(Method::PUT, &format!("/api/apps/{front_id}"), Some(&t), None, Some(json!({"name":"Beripick Front","git_url":"https://github.com/a/front.git","domains":"beripick.com www.beripick.com","api_proxy_port":8100,"frontend_dir":"web"})))
+        .req(Method::PUT, &format!("/api/apps/{front_id}"), Some(&t), None, Some(json!({"name":"Example Front","git_url":"https://github.com/a/front.git","domains":"example.com www.example.com","api_proxy_port":8100,"frontend_dir":"web"})))
         .await;
     assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
     assert!(r.body["frontend_dir"].is_null());
@@ -2447,6 +2447,22 @@ async fn full_flow() {
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
+    // 파일 복원 뒤에는 바로 적용 (패키지 다시 설치 · 서비스 재시작)
+    let l = ctx
+        .get(&format!("/api/backups?app_id={html_id}"), &t)
+        .await
+        .body;
+    assert_eq!(l[0]["status"], "success", "{l}");
+    let r = ctx
+        .post(
+            &format!("/api/backups/{}/restore", l[0]["id"]),
+            &t,
+            json!({}),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+    let d = wait_deploy(&ctx, &t, r.body["deployment_id"].as_u64().unwrap()).await;
+    assert_eq!(d["status"], "success", "{}", d["log"]);
     // 파일 사이트 크론 허용
     let r = ctx
         .post(
@@ -2479,7 +2495,7 @@ async fn full_flow() {
         .map(|s| s["domain"].as_str().unwrap())
         .collect();
     assert!(
-        domains.contains(&"api.beripick.com") && domains.contains(&"www.beripick.com"),
+        domains.contains(&"api.example.com") && domains.contains(&"www.example.com"),
         "{domains:?}"
     );
     assert_eq!(
@@ -2537,7 +2553,7 @@ async fn full_flow() {
     assert!(db_backup["file"]
         .as_str()
         .unwrap()
-        .ends_with("-db-beripick_api.sql.gz"));
+        .ends_with("-db-example_api.sql.gz"));
     let bid = db_backup["id"].as_u64().unwrap();
     assert_eq!(
         ctx.post(&format!("/api/backups/{bid}/restore"), &t, json!({}))
@@ -2568,7 +2584,7 @@ async fn full_flow() {
         )
         .await;
     assert_eq!(r.status, StatusCode::CREATED, "{:?}", r.body);
-    assert_eq!(r.body["target_name"], "Beripick API");
+    assert_eq!(r.body["target_name"], "Example API");
     assert!(r.body["next_run_at"].is_string());
     let job_id = r.body["id"].as_u64().unwrap();
     for body in [

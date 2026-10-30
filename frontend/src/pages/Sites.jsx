@@ -29,7 +29,7 @@ export default function Sites() {
 
                 v: down ? t('응답 이상 {down}개', { down }) : t('모두 응답 중'),
               })
-            : t('Rust · Python · HTML · 리버스 프록시 사이트를 만들고 관리합니다')
+            : t('Rust · Python · Node.js · Java · HTML · 리버스 프록시 사이트를 만들고 관리합니다')
         }
         help={
           <>

@@ -35,10 +35,12 @@ jobs:
         with:
           workspaces: backend
       # MongoDB 는 서비스 컨테이너 대신 직접 띄움 — 시작에 실패하면 컨테이너 로그를 annotation 으로 남김
+      # GLIBC_TUNABLES: 커널 6.19+ 에서 MongoDB 8.0 이 시작을 거부하는 문제(SERVER-121912) 우회
       - name: MongoDB
         shell: bash
         run: |
           docker run -d --name mongo -p 27017:27017 \
+            -e GLIBC_TUNABLES=glibc.pthread.rseq=1 \
             -e MONGO_INITDB_ROOT_USERNAME=root -e MONGO_INITDB_ROOT_PASSWORD=rootpw mongo:8.0
           for i in $(seq 60); do
             if docker exec mongo mongosh -u root -p rootpw --quiet --eval 'db.adminCommand({ping:1}).ok' >/dev/null 2>&1; then

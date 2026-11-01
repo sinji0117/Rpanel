@@ -37,6 +37,16 @@ fn helper_error(e: &anyhow::Error) -> String {
     }
 }
 
+/// 방화벽이 바뀌면 보안 알림
+async fn notify_fw(state: &AppState, level: &'static str, title: &'static str, change: &str) {
+    crate::notify::emit(
+        state,
+        crate::notify::Event::new("security", level, title, json!({ "change": change }))
+            .link("/security?tab=firewall"),
+    )
+    .await;
+}
+
 async fn run(state: &AppState, args: &[&str]) -> AppResult<()> {
     let log = LogSink::capture();
     helper::call(state, args, &log)
@@ -166,12 +176,13 @@ pub async fn allow(
         norm_cidr(&b.from)?
     };
     run(&state, &["firewall-allow", &port, &proto, &from]).await?;
-    audit::log(
+    let change = format!("allow {port}/{proto} from {from}");
+    audit::log(&state, Some(user.id), "firewall.allow", &change, &ip).await;
+    notify_fw(
         &state,
-        Some(user.id),
-        "firewall.allow",
-        &format!("{port}/{proto} from {from}"),
-        &ip,
+        "warning",
+        "방화벽 규칙을 바꿨습니다: {change}",
+        &change,
     )
     .await;
     Ok(Json(firewall_json(&firewall_state(&state).await?)))
@@ -200,6 +211,13 @@ pub async fn block(
     }
     run(&state, &["firewall-block", &cidr]).await?;
     audit::log(&state, Some(user.id), "firewall.block", &cidr, &ip).await;
+    notify_fw(
+        &state,
+        "warning",
+        "방화벽 규칙을 바꿨습니다: {change}",
+        &format!("deny from {cidr}"),
+    )
+    .await;
     Ok(Json(firewall_json(&firewall_state(&state).await?)))
 }
 
@@ -226,12 +244,13 @@ pub async fn delete_rule(
         args.push(to.as_str());
     }
     run(&state, &args).await?;
-    audit::log(
+    let change = format!("delete #{num} {to}");
+    audit::log(&state, Some(user.id), "firewall.delete", &change, &ip).await;
+    notify_fw(
         &state,
-        Some(user.id),
-        "firewall.delete",
-        &format!("#{num} {to}"),
-        &ip,
+        "warning",
+        "방화벽 규칙을 바꿨습니다: {change}",
+        &change,
     )
     .await;
     Ok(Json(firewall_json(&firewall_state(&state).await?)))
@@ -246,6 +265,7 @@ pub async fn enable(
     user.require_admin()?;
     run(&state, &["firewall-enable"]).await?;
     audit::log(&state, Some(user.id), "firewall.enable", "ufw", &ip).await;
+    notify_fw(&state, "info", "방화벽을 켰습니다", "enable").await;
     Ok(Json(firewall_json(&firewall_state(&state).await?)))
 }
 
@@ -258,6 +278,7 @@ pub async fn disable(
     user.require_admin()?;
     run(&state, &["firewall-disable"]).await?;
     audit::log(&state, Some(user.id), "firewall.disable", "ufw", &ip).await;
+    notify_fw(&state, "warning", "방화벽을 껐습니다", "disable").await;
     Ok(Json(firewall_json(&firewall_state(&state).await?)))
 }
 
@@ -389,6 +410,18 @@ async fn cert_days(state: &AppState, apps: &[App]) -> Vec<(String, i64)> {
         .into_iter()
         .flatten()
         .collect()
+}
+
+/// 인증서가 있는 모든 사이트의 남은 날 (알림용)
+pub(crate) async fn cert_expiry(state: &AppState) -> Vec<(String, i64)> {
+    let apps = sqlx::query_as::<_, App>(&format!(
+        "SELECT {} FROM apps WHERE domains <> '' AND ssl_mode <> 'none' ORDER BY name",
+        crate::models::APP_COLUMNS
+    ))
+    .fetch_all(&state.db)
+    .await
+    .unwrap_or_default();
+    cert_days(state, &apps).await
 }
 
 /// GET /api/security/check — 한눈에 보는 보안 점검

@@ -15,6 +15,7 @@ export const CATEGORIES = [
   { id: 'deploy', label: '배포', kinds: ['deploy_failed', 'deploy_success'] },
   { id: 'backup', label: '백업', kinds: ['backup_failed', 'backup_success'] },
   { id: 'server', label: '사이트·서버', kinds: ['site_down', 'disk_high', 'mem_high'] },
+  { id: 'security', label: '보안', kinds: ['security', 'login_blocked', 'cert_expiry'] },
   { id: 'system', label: '시스템', kinds: ['update_available', 'runtime_install', 'db_engine', 'admin_login', 'test'] },
 ]
 const LEVELS = [

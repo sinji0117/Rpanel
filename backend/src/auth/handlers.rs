@@ -164,9 +164,12 @@ pub async fn login(
     // IP당, 계정당 5분에 10회
     let ip_bucket = format!("login:ip:{ip}");
     let acct_bucket = format!("login:acct:{email}");
-    if !session::rate_limit(&state, &ip_bucket, 10, 300).await?
-        || !session::rate_limit(&state, &acct_bucket, 10, 300).await?
-    {
+    if !session::rate_limit(&state, &ip_bucket, 10, 300).await? {
+        notify_blocked(&state, &ip).await;
+        return Err(AppError::TooManyRequests);
+    }
+    if !session::rate_limit(&state, &acct_bucket, 10, 300).await? {
+        notify_blocked(&state, &email).await;
         return Err(AppError::TooManyRequests);
     }
 
@@ -212,6 +215,23 @@ pub async fn login(
 
 /// 2단계 인증 코드 입력 시간 (초)
 const MFA_TTL: u64 = 300;
+
+/// 로그인 시도 제한에 걸리면 알림 (같은 IP·계정은 5분에 한 번)
+async fn notify_blocked(state: &AppState, who: &str) {
+    if crate::notify::cooldown(state, &format!("login_blocked:{who}"), 300).await {
+        crate::notify::emit(
+            state,
+            crate::notify::Event::new(
+                "login_blocked",
+                "warning",
+                "로그인 시도 제한: {who}",
+                json!({ "who": who }),
+            )
+            .link("/security?tab=logins"),
+        )
+        .await;
+    }
+}
 
 /// 비밀번호(와 2단계 코드)까지 확인된 뒤의 로그인 마무리
 async fn complete_login(
@@ -259,6 +279,7 @@ pub async fn login_otp(
         return Err(AppError::bad("잘못된 요청입니다"));
     }
     if !session::rate_limit(&state, &format!("login:ip:{ip}"), 10, 300).await? {
+        notify_blocked(&state, &ip).await;
         return Err(AppError::TooManyRequests);
     }
     let key = state.key(&["mfa", &b.mfa_token]);
@@ -271,6 +292,9 @@ pub async fn login_otp(
     };
     // 계정당 5분에 10회, 같은 로그인 시도에서 5회까지
     if !session::rate_limit(&state, &format!("login:otp:{uid}"), 10, 300).await? {
+        if let Ok(u) = find_user(&state, uid).await {
+            notify_blocked(&state, &u.email).await;
+        }
         return Err(AppError::TooManyRequests);
     }
     let tries: u64 =
@@ -295,6 +319,18 @@ pub async fn login_otp(
             let email = user.email.clone();
             if kind == "recovery" {
                 audit::log(&state, Some(uid), "auth.2fa_recovery_used", &email, &ip).await;
+                crate::notify::emit(
+                    &state,
+                    crate::notify::Event::new(
+                        "security",
+                        "warning",
+                        "복구 코드로 로그인했습니다: {email}",
+                        json!({ "email": email }),
+                    )
+                    .body(format!("IP {ip}"))
+                    .link("/security?tab=2fa"),
+                )
+                .await;
             }
             complete_login(&state, jar, user, &email, &ip).await
         }

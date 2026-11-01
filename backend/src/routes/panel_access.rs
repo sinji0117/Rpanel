@@ -154,6 +154,13 @@ pub async fn set(
     .execute(&state.db)
     .await?;
     audit::log(&state, Some(user.id), "panel.access", &arg, &ip).await;
+    crate::notify::emit(
+        &state,
+        crate::notify::Event::new("security", "info", "패널 접속 IP 를 바꿨습니다", json!({}))
+            .body(arg.clone())
+            .link("/security?tab=logins"),
+    )
+    .await;
     Ok(Json(
         json!({ "allow": allow, "my_ip": ip, "restricted": !allow.is_empty() }),
     ))

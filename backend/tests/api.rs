@@ -337,7 +337,8 @@ async fn full_flow() {
             .as_str()
             .unwrap()
             .starts_with("otpauth://totp/Rpanel:admin%40example.com?secret="));
-        let key = totp::base32_decode(r.body["secret"].as_str().unwrap()).unwrap();
+        let secret_b32 = r.body["secret"].as_str().unwrap().to_string();
+        let key = totp::base32_decode(&secret_b32).unwrap();
         let code_at = |step: u64| format!("{:06}", totp::hotp(&key, step, 6));
 
         // 틀린 코드로는 켜지지 않음
@@ -361,6 +362,18 @@ async fn full_flow() {
             .map(|v| v.as_str().unwrap().to_string())
             .collect();
         assert_eq!(recovery.len(), 10);
+        // 비밀키는 암호화해서 저장 (DB 백업이 새어 나가도 그대로 못 씀)
+        let stored_secret = || async {
+            sqlx::query_scalar::<_, String>(
+                "SELECT totp_secret FROM users WHERE email = 'admin@example.com'",
+            )
+            .fetch_one(&state.db)
+            .await
+            .unwrap()
+        };
+        let stored = stored_secret().await;
+        assert!(stored.starts_with("v1:"), "{stored}");
+        assert!(!stored.contains(&secret_b32));
 
         // 비밀번호만으로는 토큰을 주지 않음
         clear_rl().await;
@@ -397,9 +410,36 @@ async fn full_flow() {
             otp(mfa2.clone(), recovery[0].clone()).await.status,
             StatusCode::BAD_REQUEST
         );
+        // 예전(평문) 저장값도 그대로 동작하고, 로그인하면 암호화됨
+        sqlx::query("UPDATE users SET totp_secret = ? WHERE email = 'admin@example.com'")
+            .bind(&secret_b32)
+            .execute(&state.db)
+            .await
+            .unwrap();
         // 아직 안 쓴 다음 시간 단계의 코드 (앞뒤 30초 허용)
         let r = otp(mfa2, code_at(now() / totp::STEP + 1)).await;
         assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+        assert!(
+            stored_secret().await.starts_with("v1:"),
+            "legacy secret re-sealed"
+        );
+        // 보안 알림: 2단계 인증 켬 · 복구 코드 로그인
+        let r = ctx.get("/api/notifications?limit=50", &t).await;
+        let titles: Vec<&str> = r.body["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|n| n["kind"] == "security")
+            .filter_map(|n| n["title"].as_str())
+            .collect();
+        assert!(
+            titles.contains(&"2단계 인증을 켰습니다: {email}"),
+            "{titles:?}"
+        );
+        assert!(
+            titles.contains(&"복구 코드로 로그인했습니다: {email}"),
+            "{titles:?}"
+        );
 
         let r = ctx.get("/api/auth/2fa", &t).await;
         assert_eq!(r.body["enabled"], true);

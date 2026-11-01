@@ -1202,6 +1202,7 @@ test('보안: 점검 → 방화벽 규칙 · 차단 → 로그인 차단 해제 
   backend.db.admins.push({ id: 1001, email: 'ops@example.com', role: 'admin', created_at: '', last_login_at: null, totp_enabled: true })
   await backend.install(page)
   await acceptPopups(page)
+  await page.goto('/')
   await menu(page).getByRole('link', { name: '보안' }).click()
   await expect(page.getByRole('heading', { name: '보안' })).toBeVisible()
 

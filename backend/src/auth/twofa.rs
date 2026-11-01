@@ -4,6 +4,7 @@
 //! - 로그인: 비밀번호가 맞으면 mfa_token 을 주고, /auth/login/otp 에서 코드까지 맞아야 로그인
 //! - 복구 코드: 휴대폰을 잃었을 때 6자리 코드 대신 한 번씩 쓸 수 있음 (DB 에는 해시만 저장)
 //! - 같은 30초 코드는 두 번 쓸 수 없음 (Redis 에 쓴 시간 단계 기록)
+//! - 비밀키는 패널 비밀키(JWT_SECRET)로 암호화해 저장 (secretbox). 예전 평문 값은 다음 로그인 때 암호화
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -18,7 +19,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
-use super::{password, session, totp, AuthUser, ClientIp};
+use super::{password, secretbox, session, totp, AuthUser, ClientIp};
 use crate::{
     audit,
     error::{AppError, AppResult},
@@ -35,6 +36,28 @@ pub fn now_unix() -> u64 {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0)
+}
+
+/// 2단계 인증 키를 암호화하는 키 (패널 비밀키에서 만듦)
+fn master(state: &AppState) -> &[u8] {
+    state.cfg.jwt_secret.as_bytes()
+}
+
+fn seal_secret(state: &AppState, secret: &str) -> String {
+    let mut nonce = [0u8; 16];
+    rand::thread_rng().fill_bytes(&mut nonce);
+    secretbox::seal(master(state), nonce, secret)
+}
+
+/// 보안 알림 (보안 변경)
+async fn notify(state: &AppState, level: &'static str, title: &'static str, email: &str, ip: &str) {
+    crate::notify::emit(
+        state,
+        crate::notify::Event::new("security", level, title, json!({ "email": email }))
+            .body(format!("IP {ip}"))
+            .link("/security?tab=2fa"),
+    )
+    .await;
 }
 
 fn normalize(code: &str) -> String {
@@ -88,14 +111,40 @@ pub(crate) async fn check_code(
     row: &TotpRow,
     code: &str,
 ) -> AppResult<Option<&'static str>> {
-    let Some(secret) = row.totp_secret.as_deref().filter(|_| row.totp_enabled) else {
+    let Some(stored) = row.totp_secret.as_deref().filter(|_| row.totp_enabled) else {
         return Ok(None);
     };
     let c = code.trim().replace(' ', "");
     if c.len() == totp::DIGITS as usize && c.bytes().all(|b| b.is_ascii_digit()) {
-        let Some(step) = totp::verify(secret, &c, now_unix()) else {
+        let legacy = !secretbox::is_sealed(stored);
+        let secret = if legacy {
+            stored.to_string()
+        } else {
+            match secretbox::open(master(state), stored) {
+                Some(s) => s,
+                None => {
+                    // JWT_SECRET 이 바뀌면 풀 수 없음 → 복구 코드나 관리자 초기화로
+                    tracing::warn!(
+                        uid,
+                        "2FA secret could not be decrypted (JWT_SECRET changed?)"
+                    );
+                    return Ok(None);
+                }
+            }
+        };
+        let Some(step) = totp::verify(&secret, &c, now_unix()) else {
             return Ok(None);
         };
+        if legacy {
+            // 예전(평문) 저장값 → 암호화해서 다시 저장
+            let _ =
+                sqlx::query("UPDATE users SET totp_secret = ? WHERE id = ? AND totp_secret = ?")
+                    .bind(seal_secret(state, &secret))
+                    .bind(uid)
+                    .bind(stored)
+                    .execute(&state.db)
+                    .await;
+        }
         let mut r = state.redis.clone();
         let fresh = redis::cmd("SET")
             .arg(state.key(&["totp_used", &uid.to_string(), &step.to_string()]))
@@ -205,7 +254,7 @@ pub async fn enable(
     sqlx::query(
         "UPDATE users SET totp_secret = ?, totp_enabled = 1, totp_recovery = ? WHERE id = ?",
     )
-    .bind(&secret)
+    .bind(seal_secret(&state, &secret))
     .bind(serde_json::to_string(&hashes).unwrap_or_else(|_| "[]".into()))
     .bind(user.id)
     .execute(&state.db)
@@ -213,6 +262,14 @@ pub async fn enable(
     let _: () = r.del(setup_key(&state, user.id)).await?;
     let row = load(&state, user.id).await?;
     audit::log(&state, Some(user.id), "auth.2fa_enabled", &row.email, &ip).await;
+    notify(
+        &state,
+        "info",
+        "2단계 인증을 켰습니다: {email}",
+        &row.email,
+        &ip,
+    )
+    .await;
     Ok(Json(json!({ "recovery_codes": codes })))
 }
 
@@ -252,6 +309,14 @@ pub async fn disable(
     .execute(&state.db)
     .await?;
     audit::log(&state, Some(user.id), "auth.2fa_disabled", &row.email, &ip).await;
+    notify(
+        &state,
+        "warning",
+        "2단계 인증을 껐습니다: {email}",
+        &row.email,
+        &ip,
+    )
+    .await;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -297,6 +362,14 @@ pub async fn reset_for_user(
     // 그 계정의 로그인도 모두 끊어, 다시 로그인하면서 새로 등록하게 함
     session::revoke_all_for_user(&state, id).await?;
     audit::log(&state, Some(user.id), "admin.2fa_reset", &row.email, &ip).await;
+    notify(
+        &state,
+        "warning",
+        "2단계 인증을 초기화했습니다: {email}",
+        &row.email,
+        &ip,
+    )
+    .await;
     Ok(StatusCode::NO_CONTENT)
 }
 

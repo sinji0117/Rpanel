@@ -26,6 +26,13 @@ pub const EVENTS: &[(&str, &str, bool)] = &[
     ("db_engine", "데이터베이스 버전 변경 결과", true),
     ("storage", "저장 위치 변경 결과", true),
     ("admin_login", "관리자 로그인", false),
+    (
+        "security",
+        "보안 변경 (2단계 인증 · 방화벽 · 접속 IP)",
+        true,
+    ),
+    ("login_blocked", "로그인 시도 제한에 걸림", true),
+    ("cert_expiry", "SSL 인증서 만료 임박", true),
 ];
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
@@ -524,6 +531,41 @@ async fn site_tick(state: &AppState) -> anyhow::Result<()> {
         }
     }
     Ok(())
+}
+
+/// 12시간마다 SSL 인증서 만료 확인 → 14일 안에 만료되면 사이트마다 3일에 한 번 알림
+pub fn spawn_cert_watch(state: AppState) {
+    tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_secs(600)).await;
+        let mut tick = tokio::time::interval(std::time::Duration::from_secs(12 * 3600));
+        loop {
+            tick.tick().await;
+            if !load_settings(&state).await.enabled("cert_expiry") {
+                continue;
+            }
+            for (name, days) in crate::routes::security::cert_expiry(&state).await {
+                if days >= 14 || !cooldown(&state, &format!("cert:{name}"), 3 * 24 * 3600).await {
+                    continue;
+                }
+                let ev = if days < 0 {
+                    Event::new(
+                        "cert_expiry",
+                        "error",
+                        "SSL 인증서가 만료되었습니다: {name}",
+                        json!({ "name": name }),
+                    )
+                } else {
+                    Event::new(
+                        "cert_expiry",
+                        "warning",
+                        "SSL 인증서가 {days}일 뒤 만료됩니다: {name}",
+                        json!({ "name": name, "days": days }),
+                    )
+                };
+                emit(&state, ev.link("/sites")).await;
+            }
+        }
+    });
 }
 
 /// 6시간마다 GitHub 새 버전 확인 → 버전마다 한 번 알림

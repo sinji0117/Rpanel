@@ -563,9 +563,13 @@ async fn full_flow() {
             StatusCode::FORBIDDEN
         );
         assert_eq!(ctx.get("/api/auth/2fa", &t).await.status, StatusCode::OK);
-        // 정책을 끄면(저장) 모든 표시가 풀림
-        assert_eq!(put_policy(false).await.status, StatusCode::OK);
+        // 등록 전에는 설정(정책)도 바꿀 수 없음
+        assert_eq!(put_policy(false).await.status, StatusCode::FORBIDDEN);
+        rpanel::auth::session::set_needs_2fa(&state, me_id, false)
+            .await
+            .unwrap();
         assert_eq!(ctx.get("/api/projects", &t).await.status, StatusCode::OK);
+        assert_eq!(put_policy(false).await.status, StatusCode::OK);
     }
 
     // ── 보기 전용 계정 ──

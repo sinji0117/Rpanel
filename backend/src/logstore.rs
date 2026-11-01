@@ -234,18 +234,39 @@ pub async fn audit_write(
 }
 
 pub async fn audit_list(state: &AppState, limit: u32) -> anyhow::Result<Vec<AuditLog>> {
+    audit_query(state, None, limit).await
+}
+
+/// 감사 기록 (actions 를 주면 그 종류만) — 최신순
+pub async fn audit_query(
+    state: &AppState,
+    actions: Option<&[&str]>,
+    limit: u32,
+) -> anyhow::Result<Vec<AuditLog>> {
     let Some(d) = db(state) else {
-        return Ok(sqlx::query_as::<_, AuditLog>(
+        let filter = match actions {
+            Some(a) if !a.is_empty() => {
+                format!("WHERE l.action IN ({})", vec!["?"; a.len()].join(", "))
+            }
+            _ => String::new(),
+        };
+        let sql = format!(
             "SELECT l.id, l.user_id, u.email, l.action, l.target, l.ip, l.created_at \
-             FROM audit_logs l LEFT JOIN users u ON u.id = l.user_id ORDER BY l.id DESC LIMIT ?",
-        )
-        .bind(limit)
-        .fetch_all(&state.db)
-        .await?);
+             FROM audit_logs l LEFT JOIN users u ON u.id = l.user_id {filter} ORDER BY l.id DESC LIMIT ?"
+        );
+        let mut q = sqlx::query_as::<_, AuditLog>(&sql);
+        for a in actions.unwrap_or_default() {
+            q = q.bind(*a);
+        }
+        return Ok(q.bind(limit).fetch_all(&state.db).await?);
+    };
+    let filter = match actions {
+        Some(a) if !a.is_empty() => doc! { "action": { "$in": a.to_vec() } },
+        _ => doc! {},
     };
     let docs: Vec<Document> = d
         .collection::<Document>("audit")
-        .find(doc! {})
+        .find(filter)
         .with_options(
             FindOptions::builder()
                 .sort(doc! { "_id": -1 })

@@ -17,6 +17,7 @@ pub mod mongo;
 pub mod notify;
 pub mod routes;
 pub mod runtimes;
+pub mod security;
 pub mod state;
 pub mod storage;
 pub mod sysevents;

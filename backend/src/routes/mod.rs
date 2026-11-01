@@ -13,6 +13,7 @@ pub mod panel_access;
 pub mod panel_domain;
 pub mod projects;
 pub mod runtimes;
+pub mod security;
 pub mod site_accounts;
 pub mod site_admin;
 pub mod sites;
@@ -40,6 +41,12 @@ pub fn router(state: AppState) -> Router {
         .route("/auth/status", get(auth::status))
         .route("/auth/setup", post(auth::setup))
         .route("/auth/login", post(auth::login))
+        .route("/auth/login/otp", post(auth::login_otp))
+        .route("/auth/2fa", get(crate::auth::twofa::status))
+        .route("/auth/2fa/setup", post(crate::auth::twofa::setup))
+        .route("/auth/2fa/enable", post(crate::auth::twofa::enable))
+        .route("/auth/2fa/disable", post(crate::auth::twofa::disable))
+        .route("/auth/2fa/recovery", post(crate::auth::twofa::regenerate))
         .route("/auth/refresh", post(auth::refresh))
         .route("/auth/logout", post(auth::logout))
         .route("/auth/me", get(auth::me))
@@ -53,6 +60,16 @@ pub fn router(state: AppState) -> Router {
         .route("/logs/system", get(system::system_log))
         .route("/system/events", get(system::events))
         .route("/system/processes", get(system::processes))
+        // 보안
+        .route("/security/check", get(security::check))
+        .route("/security/firewall", get(security::firewall))
+        .route("/security/firewall/allow", post(security::allow))
+        .route("/security/firewall/block", post(security::block))
+        .route("/security/firewall/delete", post(security::delete_rule))
+        .route("/security/firewall/enable", post(security::enable))
+        .route("/security/firewall/disable", post(security::disable))
+        .route("/security/logins", get(security::logins))
+        .route("/security/unblock", post(security::unblock))
         // 알림
         .route(
             "/notifications",
@@ -222,6 +239,10 @@ pub fn router(state: AppState) -> Router {
         // 관리자 계정
         .route("/users", get(users::list).post(users::create))
         .route("/users/{id}", put(users::update).delete(users::delete))
+        .route(
+            "/users/{id}/2fa",
+            delete(crate::auth::twofa::reset_for_user),
+        )
         .route(
             "/apps/{id}/ssl",
             get(site_admin::ssl_get).delete(site_admin::ssl_delete),

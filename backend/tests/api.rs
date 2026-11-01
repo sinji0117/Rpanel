@@ -298,6 +298,168 @@ async fn full_flow() {
     let t = r.body["access_token"].as_str().unwrap().to_string();
     let rt = r.set_cookie.clone().unwrap();
 
+    // ── 2단계 인증 (TOTP) ──
+    {
+        use rpanel::auth::totp;
+        // 로그인 시도 제한 카운터 비우기 (이 구간에서 로그인을 여러 번 함)
+        let clear_rl = || async {
+            let mut rc = state.redis.clone();
+            let keys: Vec<String> = redis::cmd("KEYS")
+                .arg(state.key(&["rl", "*"]))
+                .query_async(&mut rc)
+                .await
+                .unwrap();
+            for k in keys {
+                let _: () = redis::AsyncCommands::del(&mut rc, k).await.unwrap();
+            }
+        };
+        let login = |c: Value| ctx.req(Method::POST, "/api/auth/login", None, None, Some(c));
+        let otp = |mfa: String, code: String| {
+            ctx.req(
+                Method::POST,
+                "/api/auth/login/otp",
+                None,
+                None,
+                Some(json!({ "mfa_token": mfa, "code": code })),
+            )
+        };
+        let now = || {
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs()
+        };
+
+        assert_eq!(ctx.get("/api/auth/2fa", &t).await.body["enabled"], false);
+        let r = ctx.post("/api/auth/2fa/setup", &t, json!({})).await;
+        assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+        assert!(r.body["uri"]
+            .as_str()
+            .unwrap()
+            .starts_with("otpauth://totp/Rpanel:admin%40example.com?secret="));
+        let key = totp::base32_decode(r.body["secret"].as_str().unwrap()).unwrap();
+        let code_at = |step: u64| format!("{:06}", totp::hotp(&key, step, 6));
+
+        // 틀린 코드로는 켜지지 않음
+        let step = now() / totp::STEP;
+        let good = code_at(step);
+        let bad = format!("{:06}", (good.parse::<u32>().unwrap() + 1) % 1_000_000);
+        assert_eq!(
+            ctx.post("/api/auth/2fa/enable", &t, json!({ "code": bad }))
+                .await
+                .status,
+            StatusCode::BAD_REQUEST
+        );
+        let r = ctx
+            .post("/api/auth/2fa/enable", &t, json!({ "code": good }))
+            .await;
+        assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+        let recovery: Vec<String> = r.body["recovery_codes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap().to_string())
+            .collect();
+        assert_eq!(recovery.len(), 10);
+
+        // 비밀번호만으로는 토큰을 주지 않음
+        clear_rl().await;
+        let r = login(creds.clone()).await;
+        assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+        assert_eq!(r.body["mfa_required"], true);
+        assert!(r.body.get("access_token").is_none());
+        assert!(r.set_cookie.is_none());
+        let mfa = r.body["mfa_token"].as_str().unwrap().to_string();
+        // 켤 때 쓴 코드는 다시 못 씀 (재사용 방지)
+        assert_eq!(
+            otp(mfa.clone(), good.clone()).await.status,
+            StatusCode::BAD_REQUEST
+        );
+        assert_eq!(
+            otp("ab".repeat(24), recovery[0].clone()).await.status,
+            StatusCode::BAD_REQUEST,
+            "unknown mfa token"
+        );
+        // 복구 코드로 로그인 (대소문자 · 하이픈 무시)
+        let r = otp(mfa.clone(), recovery[0].to_uppercase().replace('-', "")).await;
+        assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+        assert!(r.body["access_token"].is_string());
+        // 쓴 로그인 토큰 · 쓴 복구 코드는 다시 못 씀
+        assert_eq!(
+            otp(mfa, recovery[1].clone()).await.status,
+            StatusCode::BAD_REQUEST
+        );
+        let mfa2 = login(creds.clone()).await.body["mfa_token"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        assert_eq!(
+            otp(mfa2.clone(), recovery[0].clone()).await.status,
+            StatusCode::BAD_REQUEST
+        );
+        // 아직 안 쓴 다음 시간 단계의 코드 (앞뒤 30초 허용)
+        let r = otp(mfa2, code_at(now() / totp::STEP + 1)).await;
+        assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+
+        let r = ctx.get("/api/auth/2fa", &t).await;
+        assert_eq!(r.body["enabled"], true);
+        assert_eq!(r.body["recovery_left"], 9);
+        let r = ctx.get("/api/users", &t).await;
+        assert_eq!(r.body["users"][0]["totp_enabled"], true);
+
+        // 끄기: 비밀번호와 코드가 모두 맞아야 함
+        let pw = creds["password"].as_str().unwrap();
+        assert_eq!(
+            ctx.post(
+                "/api/auth/2fa/disable",
+                &t,
+                json!({ "password": "wrong-password", "code": recovery[1] })
+            )
+            .await
+            .status,
+            StatusCode::BAD_REQUEST
+        );
+        assert_eq!(
+            ctx.post(
+                "/api/auth/2fa/disable",
+                &t,
+                json!({ "password": pw, "code": recovery[1] })
+            )
+            .await
+            .status,
+            StatusCode::NO_CONTENT
+        );
+        clear_rl().await;
+        let r = login(creds.clone()).await;
+        assert_eq!(r.status, StatusCode::OK);
+        assert!(r.body["access_token"].is_string(), "2FA off → token again");
+
+        // 보안 화면 API: 로그인 실패 기록 · 시도 제한
+        let r = ctx.get("/api/security/logins", &t).await;
+        assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+        assert!(r.body["failures"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|f| f["action"] == "auth.otp_failed"));
+        assert!(r.body["counters"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|c| c["kind"] == "ip"));
+        assert_eq!(
+            ctx.post(
+                "/api/security/unblock",
+                &t,
+                json!({ "bucket": "lock:setup" })
+            )
+            .await
+            .status,
+            StatusCode::BAD_REQUEST
+        );
+        clear_rl().await;
+    }
+
     // ── 프로젝트 ──
     let r = ctx
         .post(

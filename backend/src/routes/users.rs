@@ -27,11 +27,12 @@ pub struct AdminView {
     pub role: String,
     pub created_at: DateTime<Utc>,
     pub last_login_at: Option<DateTime<Utc>>,
+    pub totp_enabled: bool,
 }
 
 async fn fetch(state: &AppState, id: u64) -> AppResult<AdminView> {
     sqlx::query_as::<_, AdminView>(
-        "SELECT id, email, role, created_at, last_login_at FROM users WHERE id = ?",
+        "SELECT id, email, role, created_at, last_login_at, totp_enabled FROM users WHERE id = ?",
     )
     .bind(id)
     .fetch_optional(&state.db)
@@ -46,7 +47,7 @@ pub async fn list(
 ) -> AppResult<Json<serde_json::Value>> {
     user.require_admin()?;
     let rows = sqlx::query_as::<_, AdminView>(
-        "SELECT id, email, role, created_at, last_login_at FROM users ORDER BY id",
+        "SELECT id, email, role, created_at, last_login_at, totp_enabled FROM users ORDER BY id",
     )
     .fetch_all(&state.db)
     .await?;

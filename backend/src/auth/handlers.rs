@@ -8,7 +8,7 @@ use axum_extra::extract::cookie::{Cookie, CookieJar, SameSite};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
-use super::{jwt, password, session, AuthUser, ClientIp};
+use super::{jwt, password, session, twofa, AuthUser, ClientIp};
 use crate::{
     audit,
     error::{AppError, AppResult},
@@ -189,14 +189,46 @@ pub async fn login(
             "이메일 또는 비밀번호가 올바르지 않습니다".into(),
         ));
     }
-    session::reset_rate_limit(&state, &acct_bucket).await?;
+    // 2단계 인증을 켠 계정: 코드까지 확인한 뒤 로그인 (/auth/login/otp)
+    let mfa: bool = sqlx::query_scalar("SELECT totp_enabled FROM users WHERE id = ?")
+        .bind(user.id)
+        .fetch_one(&state.db)
+        .await?;
+    if mfa {
+        let token = session::random_token(24);
+        let mut r = state.redis.clone();
+        let _: () =
+            redis::AsyncCommands::set_ex(&mut r, state.key(&["mfa", &token]), user.id, MFA_TTL)
+                .await?;
+        return Ok(Json(
+            json!({ "mfa_required": true, "mfa_token": token, "expires_in": MFA_TTL }),
+        )
+        .into_response());
+    }
+    Ok(complete_login(&state, jar, user, &email, &ip)
+        .await?
+        .into_response())
+}
+
+/// 2단계 인증 코드 입력 시간 (초)
+const MFA_TTL: u64 = 300;
+
+/// 비밀번호(와 2단계 코드)까지 확인된 뒤의 로그인 마무리
+async fn complete_login(
+    state: &AppState,
+    jar: CookieJar,
+    user: User,
+    email: &str,
+    ip: &str,
+) -> AppResult<(CookieJar, Json<TokenResponse>)> {
+    session::reset_rate_limit(state, &format!("login:acct:{email}")).await?;
     let _ = sqlx::query("UPDATE users SET last_login_at = CURRENT_TIMESTAMP(3) WHERE id = ?")
         .bind(user.id)
         .execute(&state.db)
         .await;
-    audit::log(&state, Some(user.id), "auth.login", &email, &ip).await;
+    audit::log(state, Some(user.id), "auth.login", email, ip).await;
     crate::notify::emit(
-        &state,
+        state,
         crate::notify::Event::new(
             "admin_login",
             "info",
@@ -207,7 +239,70 @@ pub async fn login(
         .link("/logs?tab=audit"),
     )
     .await;
-    issue_tokens(&state, jar, user).await
+    issue_tokens(state, jar, user).await
+}
+
+#[derive(Deserialize)]
+pub struct OtpInput {
+    pub mfa_token: String,
+    pub code: String,
+}
+
+/// POST /api/auth/login/otp — 로그인 두 번째 단계: 인증 앱의 6자리 코드 또는 복구 코드
+pub async fn login_otp(
+    State(state): State<AppState>,
+    ClientIp(ip): ClientIp,
+    jar: CookieJar,
+    Json(b): Json<OtpInput>,
+) -> AppResult<impl IntoResponse> {
+    if b.mfa_token.len() != 48 || !b.mfa_token.chars().all(|c| c.is_ascii_hexdigit()) {
+        return Err(AppError::bad("잘못된 요청입니다"));
+    }
+    if !session::rate_limit(&state, &format!("login:ip:{ip}"), 10, 300).await? {
+        return Err(AppError::TooManyRequests);
+    }
+    let key = state.key(&["mfa", &b.mfa_token]);
+    let mut r = state.redis.clone();
+    let uid: Option<u64> = redis::AsyncCommands::get(&mut r, &key).await?;
+    let Some(uid) = uid else {
+        return Err(AppError::bad(
+            "로그인 시간이 지났습니다. 처음부터 다시 로그인하세요",
+        ));
+    };
+    // 계정당 5분에 10회, 같은 로그인 시도에서 5회까지
+    if !session::rate_limit(&state, &format!("login:otp:{uid}"), 10, 300).await? {
+        return Err(AppError::TooManyRequests);
+    }
+    let tries: u64 =
+        redis::AsyncCommands::incr(&mut r, state.key(&["mfa_tries", &b.mfa_token]), 1).await?;
+    let _: () = redis::AsyncCommands::expire(
+        &mut r,
+        state.key(&["mfa_tries", &b.mfa_token]),
+        MFA_TTL as i64,
+    )
+    .await?;
+    if tries > 5 {
+        let _: () = redis::AsyncCommands::del(&mut r, &key).await?;
+        return Err(AppError::bad(
+            "시도가 너무 많습니다. 처음부터 다시 로그인하세요",
+        ));
+    }
+    let user = find_user(&state, uid).await?;
+    let row = twofa::load(&state, uid).await?;
+    match twofa::check_code(&state, uid, &row, &b.code).await? {
+        Some(kind) => {
+            let _: () = redis::AsyncCommands::del(&mut r, &key).await?;
+            let email = user.email.clone();
+            if kind == "recovery" {
+                audit::log(&state, Some(uid), "auth.2fa_recovery_used", &email, &ip).await;
+            }
+            complete_login(&state, jar, user, &email, &ip).await
+        }
+        None => {
+            audit::log(&state, Some(uid), "auth.otp_failed", &user.email, &ip).await;
+            Err(AppError::bad("인증 코드가 맞지 않습니다"))
+        }
+    }
 }
 
 /// POST /api/auth/refresh — 리프레시 쿠키로 새 액세스 토큰 (토큰 회전)

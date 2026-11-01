@@ -97,8 +97,17 @@ export const post = (p, body = {}) => api(p, { method: 'POST', body })
 export const put = (p, body) => api(p, { method: 'PUT', body })
 export const del = (p) => api(p, { method: 'DELETE' })
 
+/** 로그인. 2단계 인증을 켠 계정이면 { mfa: 토큰 } 을 돌려주고 loginOtp 로 이어서 */
 export async function login(email, password) {
   const data = await api('/auth/login', { method: 'POST', body: { email, password }, retry: false })
+  if (data?.mfa_required) return { mfa: data.mfa_token }
+  setSession(data.access_token, data.user)
+  return data.user
+}
+
+/** 로그인 두 번째 단계: 인증 앱의 6자리 코드 또는 복구 코드 */
+export async function loginOtp(mfaToken, code) {
+  const data = await api('/auth/login/otp', { method: 'POST', body: { mfa_token: mfaToken, code }, retry: false })
   setSession(data.access_token, data.user)
   return data.user
 }

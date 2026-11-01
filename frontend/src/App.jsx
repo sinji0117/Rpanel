@@ -13,6 +13,7 @@ import Projects from './pages/Projects'
 import Settings from './pages/Settings'
 import Sites from './pages/Sites'
 import AdminsPage from './pages/Admins'
+import SecurityPage from './pages/Security'
 import RuntimesPage from './pages/Runtimes'
 import LogsPage from './pages/Logs'
 import NotificationsPage from './pages/Notifications'
@@ -53,6 +54,7 @@ function Gate() {
         <Route path="db-versions" element={<Navigate to="/runtimes?tab=db" replace />} />
         <Route path="databases" element={<Navigate to="/mariadb" replace />} />
         <Route path="admins" element={<AdminsPage />} />
+        <Route path="security" element={<SecurityPage />} />
         <Route path="runtimes" element={<RuntimesPage />} />
         <Route path="logs" element={<LogsPage />} />
         <Route path="notifications" element={<NotificationsPage />} />

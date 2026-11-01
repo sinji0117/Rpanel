@@ -309,6 +309,12 @@ npx playwright install chromium && npm run e2e # E2E (가짜 API, 백엔드 불�
 | POST/GET | `/api/dbweb/login`, `/logout`, `/me`, `/api/dbweb/s/{db}/…` (`X-DB-Token`) | DB 웹 관리 (DB 계정) |
 | GET/PUT/DELETE | `/api/system/panel-domain` | 패널 도메인 |
 | GET/PUT | `/api/system/panel-access` | 패널 접속 허용 IP |
+| GET | `/api/security/check` | 보안 점검 (방화벽 · SSH · 자동 업데이트 · 접속 IP · 2단계 인증 · HTTPS · 인증서 · 로그인 실패) |
+| GET · POST | `/api/security/firewall`, `/firewall/{allow,block,delete,enable,disable}` | ufw (helper `firewall-*`, SSH · 패널 · 80 · 443 허용 규칙은 helper 가 삭제 거부) |
+| GET · POST | `/api/security/logins`, `/api/security/unblock` | 로그인 실패 기록, 시도 제한(Redis `rl:login:*`) 조회 · 해제 |
+| POST | `/api/auth/login/otp` | 로그인 2단계 (`/auth/login` 이 `mfa_required` + `mfa_token` 을 주면 코드 · 복구 코드로) |
+| GET · POST | `/api/auth/2fa`, `/2fa/{setup,enable,disable,recovery}` | 내 2단계 인증 (TOTP · RFC 6238, 복구 코드는 SHA-256 해시만 저장) |
+| DELETE | `/api/users/{id}/2fa` | 다른 관리자의 2단계 인증 초기화 |
 | GET/PUT | `/api/system/storage`, `/api/system/storage/{kind}` | 저장 위치 (백업 · 프로젝트 파일) |
 | GET/POST | `/api/db-engines`, `/api/db-engines/{engine}` | DB 서버 버전 |
 | GET/POST | `/api/dbweb/mongo/{id}`, `/collections`, `/c/{coll}`, `/c/{coll}/{insert,update,delete}` | MongoDB 웹 관리 |

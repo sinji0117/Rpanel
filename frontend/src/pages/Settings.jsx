@@ -115,8 +115,8 @@ function PanelDomain() {
   )
 }
 
-/** 패널 접속 허용 IP */
-function PanelAccess() {
+/** 패널 접속 허용 IP (보안 → 로그인 보안 에도 보임) */
+export function PanelAccess() {
   const { user } = useAuth()
   const toast = useToast()
   const d = useFetch(() => (user?.role === 'admin' ? get('/system/panel-access') : Promise.resolve(null)), [user?.role])

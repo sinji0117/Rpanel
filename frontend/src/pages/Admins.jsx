@@ -94,6 +94,7 @@ export default function AdminsPage() {
               <thead className="text-left text-xs text-ink-400">
                 <tr>
                   <th className="py-2 pr-3 font-medium">{t('이메일')}</th>
+                  <th className="px-3 py-2 font-medium">{t('2단계 인증')}</th>
                   <th className="px-3 py-2 font-medium">{t('마지막 로그인')}</th>
                   <th className="px-3 py-2 font-medium">{t('만든 날')}</th>
                   <th className="py-2 pl-3" />
@@ -106,6 +107,9 @@ export default function AdminsPage() {
                       {u.email}
                       {u.id === list.data.me && <span className="ml-2 rounded border border-signal/40 px-1.5 text-[11px] text-signal">{t('나')}</span>}
                     </td>
+                    <td className="px-3 py-2.5 text-xs" data-testid={`tfa-${u.id}`}>
+                      {u.totp_enabled ? <span className="text-signal">● {t('켜짐')}</span> : <span className="text-ink-400">{t('꺼짐')}</span>}
+                    </td>
                     <td className="px-3 py-2.5 text-xs text-ink-400" title={dateTime(u.last_login_at)}>
                       {u.last_login_at ? ago(u.last_login_at) : t('없음')}
                     </td>
@@ -114,6 +118,23 @@ export default function AdminsPage() {
                       <button className="btn-ghost mr-1.5 px-2.5 py-1 text-xs" onClick={() => setEditing(u)}>
                         {t('수정')}
                       </button>
+                      {u.id !== list.data.me && u.totp_enabled && (
+                        <button
+                          className="btn-ghost mr-1.5 px-2.5 py-1 text-xs"
+                          onClick={async () => {
+                            if (!(await confirmDialog(t('{email} 의 2단계 인증을 초기화할까요? 그 계정은 로그아웃되고, 다시 로그인한 뒤 새로 등록해야 합니다.', { email: u.email }), { danger: true }))) return
+                            try {
+                              await del(`/users/${u.id}/2fa`)
+                              toast.push(t('2단계 인증을 초기화했습니다'), 'success')
+                              list.reload(true)
+                            } catch (e) {
+                              toast.push(e.message, 'error')
+                            }
+                          }}
+                        >
+                          {t('2단계 인증 초기화')}
+                        </button>
+                      )}
                       {u.id !== list.data.me && (
                         <button
                           className="btn-ghost px-2.5 py-1 text-xs text-red-300"

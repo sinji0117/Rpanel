@@ -402,7 +402,7 @@ pub async fn set_password(
 
 // ───────────── SSL ─────────────
 
-fn parse_ssl_info(out: &str) -> serde_json::Value {
+pub(crate) fn parse_ssl_info(out: &str) -> serde_json::Value {
     let mut certs = Vec::new();
     let mut cur: Option<serde_json::Map<String, serde_json::Value>> = None;
     for line in out.lines() {

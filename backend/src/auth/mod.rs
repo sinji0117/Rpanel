@@ -2,6 +2,8 @@ pub mod handlers;
 pub mod jwt;
 pub mod password;
 pub mod session;
+pub mod totp;
+pub mod twofa;
 
 use std::net::{IpAddr, SocketAddr};
 

@@ -49,6 +49,7 @@ export const NAV = [
     icon: 'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM4 12h2m12 0h2M12 4v2m0 12v2',
     children: [
       { to: '/runtimes', label: '런타임' },
+      { to: '/security', label: '보안' },
       { to: '/settings', label: '설정' },
       { to: '/admins', label: '관리자' },
     ],

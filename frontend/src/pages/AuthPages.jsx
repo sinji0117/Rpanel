@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { login, setup } from '../lib/api'
+import { login, loginOtp, setup } from '../lib/api'
 import { Logo, ThemeLangSwitch } from '../components/Layout'
 import { ErrorBox, Field } from '../components/ui'
 import { t } from '../i18n'
@@ -30,6 +30,58 @@ export function LoginPage() {
   const [password, setPassword] = useState('')
   const [error, setError] = useState(null)
   const [busy, setBusy] = useState(false)
+  // 2단계 인증: 비밀번호가 맞으면 받는 토큰
+  const [mfa, setMfa] = useState(null)
+  const [code, setCode] = useState('')
+
+  if (mfa)
+    return (
+      <Shell title={t('2단계 인증')} subtitle={t('휴대폰 인증 앱의 6자리 코드를 넣으세요. 휴대폰이 없으면 복구 코드를 넣으세요.')}>
+        <form
+          className="space-y-4"
+          onSubmit={async (e) => {
+            e.preventDefault()
+            setBusy(true)
+            setError(null)
+            try {
+              await loginOtp(mfa, code)
+            } catch (err) {
+              setError(err)
+            } finally {
+              setBusy(false)
+            }
+          }}
+        >
+          <Field label={t('인증 코드')} htmlFor="otp">
+            <input
+              id="otp"
+              autoFocus
+              required
+              autoComplete="one-time-code"
+              inputMode="numeric"
+              className="input text-center font-mono text-lg tracking-[0.3em]"
+              value={code}
+              onChange={(e) => setCode(e.target.value)}
+            />
+          </Field>
+          <ErrorBox error={error} />
+          <button className="btn-primary w-full" disabled={busy}>
+            {busy ? t('로그인 중…') : t('확인')}
+          </button>
+          <button
+            type="button"
+            className="w-full text-center text-xs text-ink-400 hover:text-ink-100"
+            onClick={() => {
+              setMfa(null)
+              setCode('')
+              setError(null)
+            }}
+          >
+            {t('← 처음으로')}
+          </button>
+        </form>
+      </Shell>
+    )
 
   return (
     <Shell title={t('로그인')} subtitle={t('Rpanel 관리자 계정으로 로그인하세요')}>
@@ -40,7 +92,11 @@ export function LoginPage() {
           setBusy(true)
           setError(null)
           try {
-            await login(email, password)
+            const r = await login(email, password)
+            if (r?.mfa) {
+              setMfa(r.mfa)
+              setCode('')
+            }
           } catch (err) {
             setError(err)
           } finally {

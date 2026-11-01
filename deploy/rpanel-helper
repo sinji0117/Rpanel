@@ -1418,6 +1418,136 @@ panel_access() {
   echo "panel access: $list"
 }
 
+# ───────────────────────── 방화벽 (ufw) · 보안 점검 ─────────────────────────
+# 보안 메뉴에서 씁니다. 서버·패널에 못 들어오게 되는 일을 막기 위해
+# SSH 포트 · 패널 포트 · 80 · 443 의 허용 규칙은 지우지 못하게 합니다.
+
+ssh_port() {
+  local p; p="$(sshd -T 2>/dev/null | awk '$1=="port"{print $2; exit}')" || true
+  [[ "$p" =~ ^[0-9]{1,5}$ ]] && echo "$p" || echo 22
+}
+
+need_ufw() { command -v ufw >/dev/null || die "ufw 가 설치되어 있지 않습니다 (sudo apt install ufw)"; }
+
+# 3000 | 3000:3010
+valid_port_spec() {
+  local s="$1" a b
+  if [[ "$s" =~ ^([0-9]{1,5})$ ]]; then a=$((10#${BASH_REMATCH[1]})); b=$a
+  elif [[ "$s" =~ ^([0-9]{1,5}):([0-9]{1,5})$ ]]; then
+    a=$((10#${BASH_REMATCH[1]})); b=$((10#${BASH_REMATCH[2]})); (( a < b )) || die "잘못된 포트 범위: $s"
+  else die "잘못된 포트: $s"; fi
+  (( a >= 1 && b <= 65535 )) || die "잘못된 포트: $s"
+}
+
+protected_ports() { echo "$(ssh_port) $(panel_port) 80 443"; }
+
+# a b → 보호 포트가 범위 안에 있으면 0
+hits_protected() {
+  local a=$1 b=$2 p
+  for p in $(protected_ports); do (( p >= a && p <= b )) && return 0; done
+  return 1
+}
+
+firewall_status() {
+  echo "ssh_port=$(ssh_port)"
+  echo "panel_port=$(panel_port)"
+  if ! command -v ufw >/dev/null; then echo "Status: missing"; return 0; fi
+  local st; st="$(ufw status numbered 2>/dev/null || true)"
+  echo "$st"
+  # 꺼져 있으면 번호 목록이 안 나오므로, 켰을 때 적용될 규칙을 보여 줌
+  if ! grep -q '^Status: active' <<<"$st"; then
+    ufw show added 2>/dev/null | sed -n 's/^ufw /added=ufw /p' || true
+  fi
+}
+
+# firewall-allow <port|a:b> <tcp|udp|any> <CIDR|any>
+firewall_allow() {
+  local port="$1" proto="$2" from="$3"
+  need_ufw; valid_port_spec "$port"
+  [[ "$proto" =~ ^(tcp|udp|any)$ ]] || die "잘못된 프로토콜: $proto"
+  [[ "$port" == *:* && "$proto" == any ]] && die "포트 범위는 tcp 또는 udp 를 골라야 합니다"
+  local args=(allow)
+  [[ "$proto" != any ]] && args+=(proto "$proto")
+  if [[ "$from" == any ]]; then args+=(from any); else valid_cidr "$from"; args+=(from "$from"); fi
+  args+=(to any port "$port")
+  ufw "${args[@]}"
+}
+
+# firewall-block <CIDR> — 이 주소에서 오는 모든 접속을 막음 (맨 앞 규칙으로)
+firewall_block() {
+  local c="$1"
+  need_ufw; valid_cidr "$c"
+  case "$c" in
+    127.*|::1|0.0.0.0*|::/*|*/0) die "이 주소는 막을 수 없습니다: $c" ;;
+  esac
+  if ufw status numbered 2>/dev/null | grep -qE '^\[ *1\]'; then
+    ufw insert 1 deny from "$c"
+  else
+    ufw deny from "$c"
+  fi
+}
+
+# firewall-delete <번호> [대상] — 대상을 주면 그 번호의 규칙이 맞는지 다시 확인
+firewall_delete() {
+  local num="$1" expect="${2:-}" line to spec a b p
+  need_ufw
+  [[ "$num" =~ ^[0-9]{1,4}$ ]] || die "잘못된 규칙 번호: $num"
+  [[ -z "$expect" || "$expect" =~ ^[A-Za-z0-9\ /:,._()-]{1,80}$ ]] || die "잘못된 대상: $expect"
+  line="$(ufw status numbered 2>/dev/null | grep -E "^\[ *$num\] " | head -n1)" || true
+  [[ -n "$line" ]] || die "규칙 #$num 이 없습니다 (목록을 새로고침하세요)"
+  to="$(sed -E 's/^\[ *[0-9]+\] +//; s/  .*//; s/ \(v6\)$//' <<<"$line")"
+  [[ -z "$expect" || "$to" == "$expect" ]] || die "규칙 #$num 이 바뀌었습니다 (목록을 새로고침하세요)"
+  if grep -qE '(ALLOW|LIMIT)' <<<"$line"; then
+    spec="${to%% *}"; spec="${spec%%/*}"
+    if [[ "$spec" =~ ^[0-9]+:[0-9]+$ ]]; then
+      a="${spec%%:*}"; b="${spec##*:}"; hits_protected "$a" "$b" && die "SSH·패널·웹(80·443) 포트를 여는 규칙은 지울 수 없습니다"
+    elif [[ "$spec" =~ ^[0-9,]+$ ]]; then
+      for p in ${spec//,/ }; do hits_protected "$p" "$p" && die "SSH·패널·웹(80·443) 포트를 여는 규칙은 지울 수 없습니다"; done
+    elif grep -qiE 'openssh|nginx|www' <<<"$to"; then
+      die "SSH·웹 서버 규칙은 지울 수 없습니다"
+    fi
+  fi
+  ufw --force delete "$num"
+}
+
+# 켜기 전에 SSH·패널 포트가 막히지 않게 열어 둠
+firewall_enable() {
+  need_ufw
+  local p added; added="$(ufw show added 2>/dev/null || true)"
+  for p in $(ssh_port) $(panel_port); do
+    grep -qE "( |^)$p(/tcp)?( |$)|port $p( |$)" <<<"$added" || ufw allow "$p/tcp" >/dev/null
+  done
+  ufw default deny incoming >/dev/null
+  ufw default allow outgoing >/dev/null
+  ufw --force enable
+}
+
+firewall_disable() { need_ufw; ufw disable; }
+
+# 보안 점검용 서버 상태 (key=value)
+security_scan() {
+  if command -v ufw >/dev/null; then
+    if ufw status 2>/dev/null | grep -q '^Status: active'; then echo ufw=active; else echo ufw=inactive; fi
+  else
+    echo ufw=missing
+  fi
+  echo "ssh_port=$(ssh_port)"
+  echo "panel_port=$(panel_port)"
+  local t; t="$(sshd -T 2>/dev/null || true)"
+  echo "ssh_root=$(awk '$1=="permitrootlogin"{print $2; exit}' <<<"$t")"
+  echo "ssh_password=$(awk '$1=="passwordauthentication"{print $2; exit}' <<<"$t")"
+  if dpkg -s unattended-upgrades >/dev/null 2>&1; then
+    if apt-config dump 2>/dev/null | grep -qE '^APT::Periodic::Unattended-Upgrade "1"'; then echo unattended=on; else echo unattended=off; fi
+  else
+    echo unattended=missing
+  fi
+  if command -v fail2ban-client >/dev/null; then
+    if systemctl is-active --quiet fail2ban; then echo fail2ban=active; else echo fail2ban=inactive; fi
+  else
+    echo fail2ban=missing
+  fi
+}
+
 # ───────────────────────── 파일 사이트 백업 ─────────────────────────
 
 backup_files() {
@@ -1958,6 +2088,13 @@ case "$cmd" in
   db-engine-upgrade)   db_engine_upgrade "${1:-}" "${2:-}" ;;
   db-engine-downgrade) db_engine_downgrade "${1:-}" "${2:-}" ;;
   panel-access)        panel_access "${1:-}" ;;
+  firewall-status)     firewall_status ;;
+  firewall-allow)      firewall_allow "${1:-}" "${2:-}" "${3:-}" ;;
+  firewall-block)      firewall_block "${1:-}" ;;
+  firewall-delete)     firewall_delete "${1:-}" "${2:-}" ;;
+  firewall-enable)     firewall_enable ;;
+  firewall-disable)    firewall_disable ;;
+  security-scan)       security_scan ;;
   runtime-remove)  runtime_remove "${1:-}" "${2:-}" ;;
   storage-set)     storage_set "${1:-}" "${2:-}" ;;
   purge-app)
@@ -1973,7 +2110,7 @@ case "$cmd" in
     echo "purged $1"
     ;;
   *)
-    die "usage: rpanel-helper {prepare-app|install-unit|remove-unit|install-site|remove-site|purge-app} <slug> | svc {start|stop|restart} <slug> | status|journal <slug> | {install,remove,run}-cron|cron-status|cron-log <slug> <id> | db-{create,drop,password} <db> <user> | db-user-create <db> <user> <all|read> (pw stdin) | db-user-drop <db> <user> | db-user-password <db> <user> (pw stdin) | redis-user-set <user> <pattern> <rw|ro> (pw stdin) | redis-user-drop <user> | backup-db <slug> <db> <stamp> | backup-data <slug> <stamp> | restore-db <slug> <db> <file> | restore-data <slug> <file> | nginx-log <slug> access|error <lines> | site-create <slug> <user> <domain> <static|rust|python|node|java> | site-password <slug> (stdin) | site-account-create <slug> <user> <ssh|sftp> (pw stdin) | site-account-update <slug> <user> <ssh|sftp> <on|off> | site-account-password <slug> <user> (stdin) | site-account-keys <slug> <user> (stdin) | site-account-delete <slug> <user> | ssl-issue <slug> <email> <domain>... | ssl-custom|ssl-info|ssl-remove <slug> | backup-files <slug> <stamp> | restore-files <slug> <file> | backup-mongo <slug> <db> <stamp> | restore-mongo <slug> <db> <file> | runtime-install|runtime-remove <python|node|java|maven|gradle> <version> | system-log <panel|nginx|ssh|mariadb|redis> <lines> | system-events <count> | panel-domain-set <domain> <email> | panel-domain-remove | db-engine-upgrade|db-engine-downgrade <mariadb|mongodb|redis> <version> | panel-access <any|CIDR,...> | storage-set <backups|projects> <path|default>"
+    die "usage: rpanel-helper {prepare-app|install-unit|remove-unit|install-site|remove-site|purge-app} <slug> | svc {start|stop|restart} <slug> | status|journal <slug> | {install,remove,run}-cron|cron-status|cron-log <slug> <id> | db-{create,drop,password} <db> <user> | db-user-create <db> <user> <all|read> (pw stdin) | db-user-drop <db> <user> | db-user-password <db> <user> (pw stdin) | redis-user-set <user> <pattern> <rw|ro> (pw stdin) | redis-user-drop <user> | backup-db <slug> <db> <stamp> | backup-data <slug> <stamp> | restore-db <slug> <db> <file> | restore-data <slug> <file> | nginx-log <slug> access|error <lines> | site-create <slug> <user> <domain> <static|rust|python|node|java> | site-password <slug> (stdin) | site-account-create <slug> <user> <ssh|sftp> (pw stdin) | site-account-update <slug> <user> <ssh|sftp> <on|off> | site-account-password <slug> <user> (stdin) | site-account-keys <slug> <user> (stdin) | site-account-delete <slug> <user> | ssl-issue <slug> <email> <domain>... | ssl-custom|ssl-info|ssl-remove <slug> | backup-files <slug> <stamp> | restore-files <slug> <file> | backup-mongo <slug> <db> <stamp> | restore-mongo <slug> <db> <file> | runtime-install|runtime-remove <python|node|java|maven|gradle> <version> | system-log <panel|nginx|ssh|mariadb|redis> <lines> | system-events <count> | panel-domain-set <domain> <email> | panel-domain-remove | db-engine-upgrade|db-engine-downgrade <mariadb|mongodb|redis> <version> | panel-access <any|CIDR,...> | firewall-status | firewall-allow <port|a:b> <tcp|udp|any> <CIDR|any> | firewall-block <CIDR> | firewall-delete <num> [to] | firewall-enable | firewall-disable | security-scan | storage-set <backups|projects> <path|default>"
     ;;
 esac
 }

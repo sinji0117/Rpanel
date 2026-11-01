@@ -167,13 +167,15 @@
 ## 알림
 
 - 테이블 `notifications`(제목은 한국어 템플릿 + `params` JSON → 화면에서 번역), 설정은 `panel_settings`(k=`notifications`, JSON).
-- 이벤트: 배포 결과(runner `finish`), 백업 결과(실행 단위로 한 번), 런타임 설치, 관리자 로그인, 1분 지표 샘플러의 디스크·메모리 기준(Redis 쿨다운), 5분 사이트 확인(상태가 바뀔 때만, real 모드), 6시간 GitHub 버전 확인(버전마다 한 번).
+- 이벤트: 배포 결과(runner `finish`), 백업 결과(실행 단위로 한 번), 런타임 설치, 관리자 로그인, 1분 지표 샘플러의 디스크·메모리 기준(Redis 쿨다운), 5분 사이트 확인(상태가 바뀔 때만, real 모드), 6시간 GitHub 버전 확인(버전마다 한 번), 보안 변경(`security`), 로그인 시도 제한(`login_blocked`, 대상마다 5분 쿨다운), 12시간 인증서 만료 확인(`cert_expiry`, 14일 이내, 사이트마다 3일 쿨다운).
 - 외부 전송은 curl 로 JSON POST. 주소·토큰은 명령줄이 아니라 stdin 설정(`-K -`)으로 넘기고, 오류 메시지의 토큰은 가립니다. Discord·Slack 주소는 공식 도메인만, Telegram 토큰·chat id 는 형식 검사.
 - API: `GET/DELETE /api/notifications`, `POST /api/notifications/read`, `GET/PUT /api/notifications/settings`, `POST /api/notifications/test`.
 
 ## 관리자 · 화면 설정
 
-- 관리자는 모두 같은 권한입니다. 자기 자신과 마지막 관리자는 지울 수 없고, 비밀번호 변경·삭제 시 그 관리자의 세션을 모두 끊습니다. 로그인 시각은 `users.last_login_at`.
+- 역할(`users.role`): `admin`(모두) · `viewer`(보기 전용). `AuthUser` 추출기가 viewer 의 GET 이외 요청을 `/auth/*` 말고는 403 으로 막고, `require_admin()` 은 viewer 의 조회를 허용, `require_full_admin()` 은 관리자만 (환경변수 · 웹훅 토큰 · DB 접속 정보 · DB 웹 관리 · 파일 · 백업 내려받기 · 알림 채널 설정). 화면도 api.js 에서 viewer 의 바꾸는 요청을 미리 막습니다.
+- 자기 자신과 마지막 관리자는 지울 수 없고, 내 역할은 바꿀 수 없으며, 마지막 관리자를 보기 전용으로 바꿀 수 없습니다. 비밀번호·역할 변경·삭제 시 그 계정의 세션을 모두 끊습니다. 로그인 시각은 `users.last_login_at`.
+- 2단계 인증 비밀키(`users.totp_secret`)는 `JWT_SECRET` 에서 만든 키로 암호화해 저장합니다 (`auth/secretbox.rs`: HMAC-SHA256 CTR + 16바이트 태그, `v1:` + hex). `JWT_SECRET` 을 바꾸면 기존 2단계 인증은 풀 수 없으니 복구 코드나 관리자 초기화로 다시 등록합니다.
 - 테마(낮·밤·자동)와 언어는 브라우저 `localStorage`(`rpanel.theme`, `rpanel.lang`)에 저장합니다. 번역은 `frontend/src/i18n/<언어>.js` (한국어 원문이 키) 이고, 영어(`en.js`) 외의 언어 파일은 고를 때 따로 내려받습니다. 빠진 문구는 영어로 보입니다.
 - 새 문구를 넣으면 `src/i18n/en.test.js` 가 영어 번역 누락을, 그리고 모든 언어 파일이 영어와 같은 키·같은 자리표시자(`{n}` 등)를 갖는지 확인합니다. 언어를 더하려면 `<id>.js` 를 만들고 `src/i18n/index.js` 의 `LANGS` 에 한 줄을 넣고, `LangPicker.jsx` 에 국기를 더합니다.
 
@@ -315,6 +317,9 @@ npx playwright install chromium && npm run e2e # E2E (가짜 API, 백엔드 불�
 | POST | `/api/auth/login/otp` | 로그인 2단계 (`/auth/login` 이 `mfa_required` + `mfa_token` 을 주면 코드 · 복구 코드로) |
 | GET · POST | `/api/auth/2fa`, `/2fa/{setup,enable,disable,recovery}` | 내 2단계 인증 (TOTP · RFC 6238, 복구 코드는 SHA-256 해시만 저장) |
 | DELETE | `/api/users/{id}/2fa` | 다른 관리자의 2단계 인증 초기화 |
+| GET · DELETE · POST | `/api/auth/sessions`, `/api/auth/sessions/{id}`, `/api/auth/sessions/revoke-others` | 내 로그인 세션 (Redis `fammeta:{세션}` 에 IP · User-Agent · 시각) |
+| GET/PUT | `/api/security/policy` (`require_2fa`) | 모든 관리자 2단계 인증 필수 (미등록자는 Redis `need2fa:{uid}` → `/auth/*` 외 403) |
+| GET | `/api/logs/deployments?active=true` | 진행 중(대기·실행)인 배포만 |
 | GET/PUT | `/api/system/storage`, `/api/system/storage/{kind}` | 저장 위치 (백업 · 프로젝트 파일) |
 | GET/POST | `/api/db-engines`, `/api/db-engines/{engine}` | DB 서버 버전 |
 | GET/POST | `/api/dbweb/mongo/{id}`, `/collections`, `/c/{coll}`, `/c/{coll}/{insert,update,delete}` | MongoDB 웹 관리 |

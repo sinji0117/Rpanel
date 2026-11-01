@@ -509,14 +509,12 @@ async fn full_flow() {
         assert!(list.len() >= 2, "{list:?}");
         assert!(list.iter().any(|s| s["id"] == current.as_str()));
         assert!(list.iter().all(|s| s["created_at"].as_i64().unwrap() > 0));
-        let del = |id: String| {
-            ctx.req(
-                Method::DELETE,
-                &format!("/api/auth/sessions/{id}"),
-                Some(&t),
-                None,
-                None,
-            )
+        let (ctx_ref, token) = (&ctx, &t);
+        let del = move |id: String| async move {
+            let uri = format!("/api/auth/sessions/{id}");
+            ctx_ref
+                .req(Method::DELETE, &uri, Some(token.as_str()), None, None)
+                .await
         };
         assert_eq!(del(current.clone()).await.status, StatusCode::BAD_REQUEST);
         let other = list.iter().find(|s| s["id"] != current.as_str()).unwrap()["id"]

@@ -1187,4 +1187,11 @@ export default {
   "배포 중지": "Deploy stoppen",
   "적용 중지": "Toepassen stoppen",
   "진행 중인 작업을 중지할까요? 지금 실행 중인 버전은 그대로 유지됩니다.": "De lopende taak stoppen? De versie die nu draait blijft ongewijzigd.",
+  "삭제 중": "Verwijderen",
+  "로그 보기": "Log bekijken",
+  "진행 중인 배포": "Lopende deploys",
+  "진행 중인 배포 {n}개": "{n} lopende deploys",
+  "진행 중인 배포가 없습니다": "Geen lopende deploys",
+  "모든 배포 기록": "Alle deploys",
+  "배포 #{id} 이(가) 진행 중이라 지금은 삭제할 수 없습니다. 끝나거나 중지한 뒤 삭제하세요.": "Deploy #{id} loopt nog, dus verwijderen kan nog niet. Verwijder na afloop of nadat hij is gestopt.",
 }

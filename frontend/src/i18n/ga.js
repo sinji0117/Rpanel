@@ -1187,4 +1187,11 @@ export default {
   "배포 중지": "Stop an t-imscaradh",
   "적용 중지": "Stop an cur i bhfeidhm",
   "진행 중인 작업을 중지할까요? 지금 실행 중인 버전은 그대로 유지됩니다.": "An bhfuil tú ag iarraidh an jab atá ar siúl a stopadh? Fanfaidh an leagan atá ag rith anois mar atá.",
+  "삭제 중": "Á scriosadh",
+  "로그 보기": "Féach ar an loga",
+  "진행 중인 배포": "Imscaradh ar siúl",
+  "진행 중인 배포 {n}개": "Imscaradh ar siúl: {n}",
+  "진행 중인 배포가 없습니다": "Níl aon imscaradh ar siúl",
+  "모든 배포 기록": "Gach imscaradh",
+  "배포 #{id} 이(가) 진행 중이라 지금은 삭제할 수 없습니다. 끝나거나 중지한 뒤 삭제하세요.": "Tá imscaradh #{id} ar siúl, mar sin ní féidir é a scriosadh fós. Scrios é nuair a bheidh sé críochnaithe nó stoptha.",
 }

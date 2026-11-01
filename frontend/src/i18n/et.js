@@ -1187,4 +1187,11 @@ export default {
   "배포 중지": "Peata juurutus",
   "적용 중지": "Peata rakendamine",
   "진행 중인 작업을 중지할까요? 지금 실행 중인 버전은 그대로 유지됩니다.": "Kas peatada käimasolev töö? Praegu töötav versioon jääb alles.",
+  "삭제 중": "Kustutamine",
+  "로그 보기": "Vaata logi",
+  "진행 중인 배포": "Käimasolevad juurutused",
+  "진행 중인 배포 {n}개": "Käimasolevaid juurutusi: {n}",
+  "진행 중인 배포가 없습니다": "Käimasolevaid juurutusi pole",
+  "모든 배포 기록": "Kõik juurutused",
+  "배포 #{id} 이(가) 진행 중이라 지금은 삭제할 수 없습니다. 끝나거나 중지한 뒤 삭제하세요.": "Juurutus #{id} on pooleli, seega veel kustutada ei saa. Kustuta pärast selle lõppu või peatamist.",
 }

@@ -1187,4 +1187,11 @@ export default {
   "배포 중지": "Telepítés leállítása",
   "적용 중지": "Alkalmazás leállítása",
   "진행 중인 작업을 중지할까요? 지금 실행 중인 버전은 그대로 유지됩니다.": "Leállítod a folyamatban lévő feladatot? A most futó verzió változatlan marad.",
+  "삭제 중": "Törlés",
+  "로그 보기": "Napló megtekintése",
+  "진행 중인 배포": "Folyamatban lévő telepítések",
+  "진행 중인 배포 {n}개": "Folyamatban lévő telepítések: {n}",
+  "진행 중인 배포가 없습니다": "Nincs folyamatban lévő telepítés",
+  "모든 배포 기록": "Összes telepítés",
+  "배포 #{id} 이(가) 진행 중이라 지금은 삭제할 수 없습니다. 끝나거나 중지한 뒤 삭제하세요.": "A(z) #{id} telepítés folyamatban van, ezért még nem törölhető. Törölje, miután befejeződött vagy leállt.",
 }

@@ -346,13 +346,24 @@ pub struct LimitQuery {
     pub limit: Option<u32>,
 }
 
-/// GET /api/logs/deployments?limit=100 — 모든 앱의 배포·적용 기록
+#[derive(Deserialize)]
+pub struct DeployLogQuery {
+    pub limit: Option<u32>,
+    /// true 면 진행 중(대기·실행)인 배포만
+    #[serde(default)]
+    pub active: bool,
+}
+
+/// GET /api/logs/deployments?limit=100 — 모든 앱의 배포·적용 기록 (&active=true: 진행 중만)
 pub async fn deployment_log(
     State(state): State<AppState>,
     user: AuthUser,
-    Query(q): Query<LimitQuery>,
+    Query(q): Query<DeployLogQuery>,
 ) -> AppResult<Json<serde_json::Value>> {
     user.require_admin()?;
+    if q.active {
+        return Ok(Json(json!(deployments::active(&state).await?)));
+    }
     Ok(Json(json!(
         deployments::recent(&state, q.limit.unwrap_or(100).clamp(1, 500)).await?
     )))

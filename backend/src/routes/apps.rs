@@ -489,11 +489,21 @@ pub async fn delete(
 ) -> AppResult<StatusCode> {
     user.require_admin()?;
     let app = fetch(&state, id).await?;
+    // 배포 시작(enqueue)과 같은 앱 행 잠금 → 확인한 뒤 파일을 지우는 동안 새 배포가 끼어들지 못함
+    let mut tx = state.db.begin().await?;
+    let (_, prev_status): (u64, String) =
+        sqlx::query_as("SELECT id, status FROM apps WHERE id = ? FOR UPDATE")
+            .bind(id)
+            .fetch_one(&mut *tx)
+            .await?;
+    if prev_status == "deleting" {
+        return Err(AppError::Conflict("이미 삭제하는 중입니다".into()));
+    }
     let active: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM deployments WHERE app_id = ? AND status IN ('queued','running')",
     )
     .bind(id)
-    .fetch_one(&state.db)
+    .fetch_one(&mut *tx)
     .await?;
     if active > 0 {
         return Err(AppError::Conflict(
@@ -502,17 +512,29 @@ pub async fn delete(
     }
     let dbs: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM app_databases WHERE app_id = ?")
         .bind(id)
-        .fetch_one(&state.db)
+        .fetch_one(&mut *tx)
         .await?;
     if dbs > 0 {
         return Err(AppError::Conflict(format!(
             "이 앱에 연결된 MariaDB 데이터베이스 {dbs}개가 있습니다. 데이터베이스 탭에서 먼저 삭제(필요하면 백업)하세요"
         )));
     }
+    sqlx::query("UPDATE apps SET status = 'deleting' WHERE id = ?")
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
+    tx.commit().await?;
+
     let log = LogSink::capture();
-    helper::call(&state, &["purge-app", &app.slug], &log)
-        .await
-        .map_err(|e| AppError::Internal(e.context("서비스/사이트/파일 정리 실패")))?;
+    if let Err(e) = helper::call(&state, &["purge-app", &app.slug], &log).await {
+        // 정리에 실패하면 원래 상태로 되돌려 다시 시도·배포할 수 있게
+        let _ = sqlx::query("UPDATE apps SET status = ? WHERE id = ? AND status = 'deleting'")
+            .bind(&prev_status)
+            .bind(id)
+            .execute(&state.db)
+            .await;
+        return Err(AppError::Internal(e.context("서비스/사이트/파일 정리 실패")));
+    }
     // 배정된 Redis DB 는 비워서 반납 (다음 앱이 남은 키를 물려받지 않도록)
     if let Some(n) = app.redis_db {
         if let Err(e) = crate::routes::databases::flush(&state, n).await {

@@ -1187,4 +1187,11 @@ export default {
   "배포 중지": "Dağıtımı durdur",
   "적용 중지": "Uygulamayı durdur",
   "진행 중인 작업을 중지할까요? 지금 실행 중인 버전은 그대로 유지됩니다.": "Devam eden iş durdurulsun mu? Şu anda çalışan sürüm olduğu gibi kalır.",
+  "삭제 중": "Siliniyor",
+  "로그 보기": "Günlüğü gör",
+  "진행 중인 배포": "Devam eden dağıtımlar",
+  "진행 중인 배포 {n}개": "{n} dağıtım devam ediyor",
+  "진행 중인 배포가 없습니다": "Devam eden dağıtım yok",
+  "모든 배포 기록": "Tüm dağıtımlar",
+  "배포 #{id} 이(가) 진행 중이라 지금은 삭제할 수 없습니다. 끝나거나 중지한 뒤 삭제하세요.": "#{id} dağıtımı devam ettiği için henüz silinemez. Bittikten veya durdurulduktan sonra silin.",
 }

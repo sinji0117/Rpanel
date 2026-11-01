@@ -1187,4 +1187,11 @@ export default {
   "배포 중지": "Dừng triển khai",
   "적용 중지": "Dừng áp dụng",
   "진행 중인 작업을 중지할까요? 지금 실행 중인 버전은 그대로 유지됩니다.": "Dừng tác vụ đang chạy? Phiên bản đang chạy hiện tại vẫn được giữ nguyên.",
+  "삭제 중": "Đang xóa",
+  "로그 보기": "Xem log",
+  "진행 중인 배포": "Triển khai đang chạy",
+  "진행 중인 배포 {n}개": "{n} triển khai đang chạy",
+  "진행 중인 배포가 없습니다": "Không có triển khai nào đang chạy",
+  "모든 배포 기록": "Tất cả triển khai",
+  "배포 #{id} 이(가) 진행 중이라 지금은 삭제할 수 없습니다. 끝나거나 중지한 뒤 삭제하세요.": "Triển khai #{id} đang chạy nên chưa thể xóa. Hãy xóa sau khi nó kết thúc hoặc đã dừng.",
 }

@@ -4,6 +4,7 @@ import { useAuth } from '../context/AuthContext'
 import { t, useLang } from '../i18n'
 import { LangPicker } from './LangPicker'
 import { getTheme, setTheme } from '../lib/prefs'
+import ActiveDeployments from './ActiveDeployments'
 import NotificationBell from './NotificationBell'
 import { StaleBundleBanner, VersionBadge } from './VersionInfo'
 
@@ -247,7 +248,10 @@ export default function Layout() {
       <aside className="hidden border-r border-ink-800 bg-ink-900/60 md:flex md:min-h-screen md:flex-col md:px-3 md:py-5">
         <div className="flex items-center justify-between px-2 pb-6">
           <Logo />
-          <NotificationBell />
+          <span className="flex items-center gap-0.5">
+            <ActiveDeployments />
+            <NotificationBell />
+          </span>
         </div>
         {nav}
         <div className="mt-auto space-y-3 border-t border-ink-800 px-2 pt-4">
@@ -268,7 +272,8 @@ export default function Layout() {
 
       <header className="flex items-center justify-between border-b border-ink-800 px-4 py-3 md:hidden">
         <Logo />
-        <span className="ml-auto mr-2">
+        <span className="ml-auto mr-2 flex items-center gap-0.5">
+          <ActiveDeployments />
           <NotificationBell />
         </span>
         <button className="btn-ghost px-2.5 py-1.5" onClick={() => setOpen((o) => !o)} aria-expanded={open} aria-label={t('메뉴')}>

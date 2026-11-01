@@ -36,10 +36,14 @@ pub async fn enqueue(state: &AppState, app_id: u64, user_id: Option<u64>) -> App
     }
     let mut tx = state.db.begin().await?;
     // 앱 행 잠금으로 동시 트리거 직렬화
-    let _: (u64,) = sqlx::query_as("SELECT id FROM apps WHERE id = ? FOR UPDATE")
-        .bind(app_id)
-        .fetch_one(&mut *tx)
-        .await?;
+    let (_, app_status): (u64, String) =
+        sqlx::query_as("SELECT id, status FROM apps WHERE id = ? FOR UPDATE")
+            .bind(app_id)
+            .fetch_one(&mut *tx)
+            .await?;
+    if app_status == "deleting" {
+        return Err(AppError::Conflict("삭제 중인 앱입니다".into()));
+    }
     let active: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM deployments WHERE app_id = ? AND status IN ('queued','running')",
     )
@@ -222,6 +226,16 @@ pub struct RecentDeployment {
     pub finished_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
+/// 지금 진행 중(대기·실행)인 배포 — 모든 앱
+pub async fn active(state: &AppState) -> AppResult<Vec<RecentDeployment>> {
+    Ok(sqlx::query_as::<_, RecentDeployment>(
+        "SELECT d.id, d.app_id, a.name AS app_name, a.slug AS app_slug, d.status, d.commit_sha, d.created_at, d.finished_at \
+         FROM deployments d JOIN apps a ON a.id = d.app_id WHERE d.status IN ('queued','running') ORDER BY d.id DESC LIMIT 100",
+    )
+    .fetch_all(&state.db)
+    .await?)
+}
+
 pub async fn recent(state: &AppState, limit: u32) -> AppResult<Vec<RecentDeployment>> {
     Ok(sqlx::query_as::<_, RecentDeployment>(
         "SELECT d.id, d.app_id, a.name AS app_name, a.slug AS app_slug, d.status, d.commit_sha, d.created_at, d.finished_at \
@@ -241,7 +255,7 @@ pub async fn recover_orphans(state: &AppState) -> anyhow::Result<()> {
     .execute(&state.db)
     .await?
     .rows_affected();
-    sqlx::query("UPDATE apps SET status = IF(current_release IS NULL, 'failed', 'running') WHERE status = 'deploying'")
+    sqlx::query("UPDATE apps SET status = IF(current_release IS NULL, 'failed', 'running') WHERE status IN ('deploying','deleting')")
         .execute(&state.db)
         .await?;
     if n > 0 {

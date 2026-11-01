@@ -1248,4 +1248,11 @@ export default {
   "배포 중지": "Stop deploy",
   "적용 중지": "Stop apply",
   "진행 중인 작업을 중지할까요? 지금 실행 중인 버전은 그대로 유지됩니다.": "Stop the job in progress? The version running now stays as it is.",
+  "삭제 중": "Deleting",
+  "로그 보기": "View log",
+  "진행 중인 배포": "Deployments in progress",
+  "진행 중인 배포 {n}개": "{n} deployments in progress",
+  "진행 중인 배포가 없습니다": "No deployments in progress",
+  "모든 배포 기록": "All deployments",
+  "배포 #{id} 이(가) 진행 중이라 지금은 삭제할 수 없습니다. 끝나거나 중지한 뒤 삭제하세요.": "Deployment #{id} is in progress, so this can’t be deleted yet. Delete it after it finishes or is stopped.",
 }

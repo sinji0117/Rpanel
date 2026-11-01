@@ -1187,4 +1187,11 @@ export default {
   "배포 중지": "Zatrzymaj wdrożenie",
   "적용 중지": "Zatrzymaj stosowanie",
   "진행 중인 작업을 중지할까요? 지금 실행 중인 버전은 그대로 유지됩니다.": "Zatrzymać trwające zadanie? Obecnie działająca wersja pozostanie bez zmian.",
+  "삭제 중": "Usuwanie",
+  "로그 보기": "Zobacz log",
+  "진행 중인 배포": "Trwające wdrożenia",
+  "진행 중인 배포 {n}개": "Trwające wdrożenia: {n}",
+  "진행 중인 배포가 없습니다": "Brak trwających wdrożeń",
+  "모든 배포 기록": "Wszystkie wdrożenia",
+  "배포 #{id} 이(가) 진행 중이라 지금은 삭제할 수 없습니다. 끝나거나 중지한 뒤 삭제하세요.": "Wdrożenie #{id} trwa, więc nie można jeszcze usunąć. Usuń po jego zakończeniu lub zatrzymaniu.",
 }

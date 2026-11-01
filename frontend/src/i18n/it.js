@@ -1187,4 +1187,11 @@ export default {
   "배포 중지": "Interrompi deploy",
   "적용 중지": "Interrompi applicazione",
   "진행 중인 작업을 중지할까요? 지금 실행 중인 버전은 그대로 유지됩니다.": "Interrompere l’operazione in corso? La versione attualmente in esecuzione resta invariata.",
+  "삭제 중": "Eliminazione",
+  "로그 보기": "Vedi log",
+  "진행 중인 배포": "Deploy in corso",
+  "진행 중인 배포 {n}개": "{n} deploy in corso",
+  "진행 중인 배포가 없습니다": "Nessun deploy in corso",
+  "모든 배포 기록": "Tutti i deploy",
+  "배포 #{id} 이(가) 진행 중이라 지금은 삭제할 수 없습니다. 끝나거나 중지한 뒤 삭제하세요.": "Il deploy #{id} è in corso, quindi non si può ancora eliminare. Elimina dopo che è terminato o è stato interrotto.",
 }

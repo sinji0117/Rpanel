@@ -111,19 +111,43 @@ function AuditLog() {
   )
 }
 
+const isActive = (d) => d.status === 'queued' || d.status === 'running'
+
 function DeploymentLog() {
   const list = useFetch(() => get('/logs/deployments?limit=200'), [])
-  useInterval(() => list.reload(true), 10000)
+  const [onlyActive, setOnlyActive] = useState(false)
+  const activeCount = (list.data ?? []).filter(isActive).length
+  // 진행 중인 배포가 있으면 상태 변화를 빨리 보여 줌
+  useInterval(() => list.reload(true), activeCount ? 3000 : 10000)
+  const rows = onlyActive ? (list.data ?? []).filter(isActive) : list.data
   return (
     <section className="card">
-      <div className="flex items-center justify-between border-b border-ink-700/70 px-5 py-3">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-ink-700/70 px-5 py-3">
         <p className="text-xs text-ink-400">{t('모든 앱·사이트의 배포·적용 기록. 줄을 누르면 전체 로그를 봅니다.')}</p>
-        <RefreshButton onClick={() => list.reload()} busy={list.refreshing} />
+        <div className="flex items-center gap-2">
+          <div className="flex rounded-lg border border-ink-700 p-0.5 text-xs" role="group" aria-label={t('진행 중인 배포')}>
+            {[
+              [false, t('전체')],
+              [true, `${t('진행 중')} ${activeCount}`],
+            ].map(([v, label]) => (
+              <button
+                key={String(v)}
+                type="button"
+                aria-pressed={onlyActive === v}
+                onClick={() => setOnlyActive(v)}
+                className={`rounded-md px-2.5 py-1 ${onlyActive === v ? 'bg-ink-800 text-ink-100' : 'text-ink-400 hover:text-ink-100'}`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <RefreshButton onClick={() => list.reload()} busy={list.refreshing} />
+        </div>
       </div>
       <ErrorBox error={list.error} />
       {list.loading && <Loading compact />}
       <ul className="max-h-[65vh] divide-y divide-ink-800 overflow-auto" aria-label={t('배포 기록')}>
-        {list.data?.map((d) => (
+        {rows?.map((d) => (
           <li key={d.id}>
             <Link to={`/deployments/${d.id}`} className="flex items-center gap-4 px-5 py-2.5 text-sm hover:bg-ink-850">
               <StatusBadge status={d.status} deployment />
@@ -136,7 +160,7 @@ function DeploymentLog() {
             </Link>
           </li>
         ))}
-        {list.data && !list.data.length && <li className="px-5 py-8 text-center text-sm text-ink-400">{t('아직 배포가 없습니다')}</li>}
+        {rows && !rows.length && <li className="px-5 py-8 text-center text-sm text-ink-400">{onlyActive ? t('진행 중인 배포가 없습니다') : t('아직 배포가 없습니다')}</li>}
       </ul>
     </section>
   )

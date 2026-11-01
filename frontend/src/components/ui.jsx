@@ -12,6 +12,7 @@ const STATUS = {
   cancelled: { label: '취소됨', cls: 'text-warn bg-warn/10 border-warn/30', dot: 'bg-warn' },
   stopped: { label: '중지됨', cls: 'text-warn bg-warn/10 border-warn/30', dot: 'bg-warn' },
   idle: { label: '미배포', cls: 'text-ink-300 bg-ink-700/40 border-ink-600', dot: 'bg-ink-400' },
+  deleting: { label: '삭제 중', cls: 'text-fail bg-fail/10 border-fail/30', dot: 'bg-fail animate-pulse' },
 }
 
 /** status: 앱 상태 또는 배포 상태. deployment=true면 running을 '진행 중'으로 표시 */

@@ -1187,4 +1187,11 @@ export default {
   "배포 중지": "Parar implementação",
   "적용 중지": "Parar aplicação",
   "진행 중인 작업을 중지할까요? 지금 실행 중인 버전은 그대로 유지됩니다.": "Parar a tarefa em curso? A versão em execução mantém-se como está.",
+  "삭제 중": "A eliminar",
+  "로그 보기": "Ver registo",
+  "진행 중인 배포": "Implementações em curso",
+  "진행 중인 배포 {n}개": "{n} implementações em curso",
+  "진행 중인 배포가 없습니다": "Nenhuma implementação em curso",
+  "모든 배포 기록": "Todas as implementações",
+  "배포 #{id} 이(가) 진행 중이라 지금은 삭제할 수 없습니다. 끝나거나 중지한 뒤 삭제하세요.": "A implementação #{id} está em curso, por isso ainda não é possível eliminar. Elimine depois de terminar ou ser parada.",
 }

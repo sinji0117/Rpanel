@@ -4,11 +4,43 @@ import { useToast } from '../context/ToastContext'
 import { t } from '../i18n'
 import { get, post } from '../lib/api'
 import { dateTime, duration, shortSha } from '../lib/format'
-import { useFetch } from '../lib/useFetch'
+import { useFetch, useInterval } from '../lib/useFetch'
 import { useDeploymentLog } from '../lib/useSockets'
 import LogViewer from './LogViewer'
 import { ErrorBox, Loading, Spinner, StatusBadge } from './ui'
 import { confirmDialog } from './Dialog'
+
+/** 배포를 시작·중지했을 때 헤더의 '진행 중인 배포' 표시를 바로 갱신 */
+export function deploymentsChanged() {
+  window.dispatchEvent(new Event('rpanel:deployments'))
+}
+
+/** 앱의 진행 중(대기·실행) 배포 — 없으면 null. 진행 중인 동안 3초마다 다시 확인 */
+export function useActiveDeployment(appId, appStatus) {
+  const latest = useFetch(() => get(`/apps/${appId}/deployments?limit=1`), [appId, appStatus])
+  const d = latest.data?.[0]
+  const active = d && ['queued', 'running'].includes(d.status) ? d : null
+  useInterval(() => latest.reload(true), 3000, !!active)
+  return { active, reload: () => latest.reload(true) }
+}
+
+/** 진행 중인 배포 안내 줄 — 상태 · 로그 보기 · 중지 */
+export function ActiveDeployNotice({ dep, onChanged, children }) {
+  return (
+    <div role="status" className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border border-sky-400/30 bg-sky-400/5 px-3 py-2.5 text-sm">
+      <StatusBadge status={dep.status} deployment />
+      <span className="min-w-0 flex-1 text-ink-300">{children}</span>
+      <span className="flex items-center gap-1.5">
+        <Link to={`/deployments/${dep.id}`} className="btn-ghost px-2.5 py-1 text-xs">
+          {t('로그 보기')}
+        </Link>
+        <CancelDeployButton id={dep.id} className="btn-danger px-2.5 py-1 text-xs" onDone={onChanged}>
+          ■ {t('중지')}
+        </CancelDeployButton>
+      </span>
+    </div>
+  )
+}
 
 /** 진행 중(queued·running)인 배포를 중지 — 확인을 받은 뒤 취소 요청. 보냈으면 true */
 export async function cancelDeployment(id, toast) {
@@ -16,6 +48,7 @@ export async function cancelDeployment(id, toast) {
   try {
     await post(`/deployments/${id}/cancel`)
     toast.push(t('취소 요청을 보냈습니다'))
+    deploymentsChanged()
     return true
   } catch (e) {
     toast.push(e.message, 'error')

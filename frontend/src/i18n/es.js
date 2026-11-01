@@ -1187,4 +1187,11 @@ export default {
   "배포 중지": "Detener despliegue",
   "적용 중지": "Detener aplicación",
   "진행 중인 작업을 중지할까요? 지금 실행 중인 버전은 그대로 유지됩니다.": "¿Detener la tarea en curso? La versión que se está ejecutando ahora se mantiene.",
+  "삭제 중": "Eliminando",
+  "로그 보기": "Ver registro",
+  "진행 중인 배포": "Despliegues en curso",
+  "진행 중인 배포 {n}개": "{n} despliegues en curso",
+  "진행 중인 배포가 없습니다": "No hay despliegues en curso",
+  "모든 배포 기록": "Todos los despliegues",
+  "배포 #{id} 이(가) 진행 중이라 지금은 삭제할 수 없습니다. 끝나거나 중지한 뒤 삭제하세요.": "El despliegue #{id} está en curso, así que aún no se puede eliminar. Elimínalo cuando termine o se detenga.",
 }

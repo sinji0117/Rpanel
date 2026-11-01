@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router'
 import AppForm, { sshUrl, toPayload } from '../components/AppForm'
-import DeploymentLogPanel, { CancelDeployButton, cancelDeployment } from '../components/DeploymentLog'
+import DeploymentLogPanel, { ActiveDeployNotice, CancelDeployButton, cancelDeployment, deploymentsChanged, useActiveDeployment } from '../components/DeploymentLog'
 import LogViewer from '../components/LogViewer'
 import { CardHeader, CopyButton, ErrorBox, HelpTip, KindBadge, Loading, PageHeader, RefreshButton, Spinner, StatusBadge, Tabs } from '../components/ui'
 import { useToast } from '../context/ToastContext'
@@ -53,6 +53,7 @@ export default function AppDetail() {
       setTab('deployments')
       app.reload(true)
       latest.reload(true)
+      deploymentsChanged()
     } catch (e) {
       toast.push(e.message, 'error')
     } finally {
@@ -707,6 +708,7 @@ function GitTab({ app, onSaved }) {
 }
 
 function SettingsTab({ app, onSaved }) {
+  const { active: activeDeploy, reload: reloadActive } = useActiveDeployment(app.id, app.status)
   const toast = useToast()
   const nav = useNavigate()
   const [busy, setBusy] = useState(false)
@@ -743,8 +745,14 @@ function SettingsTab({ app, onSaved }) {
             unit: <span className="font-mono">rpanel-app-{app.slug}</span>,
           })}
         </p>
+        {activeDeploy && (
+          <ActiveDeployNotice dep={activeDeploy} onChanged={reloadActive}>
+            {t('배포 #{id} 이(가) 진행 중이라 지금은 삭제할 수 없습니다. 끝나거나 중지한 뒤 삭제하세요.', { id: activeDeploy.id })}
+          </ActiveDeployNotice>
+        )}
         <button
           className="btn-danger mt-4"
+          disabled={!!activeDeploy}
           onClick={async () => {
             const ok = await confirmDialog(t('앱 {slug} 을(를) 삭제합니다. 서비스·Nginx 설정·빌드 파일·배포 기록이 모두 지워지며 되돌릴 수 없습니다.', { slug: app.slug }), {
               title: t('앱 삭제'),
@@ -758,6 +766,7 @@ function SettingsTab({ app, onSaved }) {
               nav(`/projects/${app.project_id}`)
             } catch (e) {
               toast.push(e.message, 'error')
+              reloadActive()
             }
           }}
         >

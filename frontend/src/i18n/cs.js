@@ -1187,4 +1187,11 @@ export default {
   "배포 중지": "Zastavit nasazení",
   "적용 중지": "Zastavit použití",
   "진행 중인 작업을 중지할까요? 지금 실행 중인 버전은 그대로 유지됩니다.": "Zastavit probíhající úlohu? Aktuálně běžící verze zůstane beze změny.",
+  "삭제 중": "Mazání",
+  "로그 보기": "Zobrazit log",
+  "진행 중인 배포": "Probíhající nasazení",
+  "진행 중인 배포 {n}개": "Probíhající nasazení: {n}",
+  "진행 중인 배포가 없습니다": "Žádné probíhající nasazení",
+  "모든 배포 기록": "Všechna nasazení",
+  "배포 #{id} 이(가) 진행 중이라 지금은 삭제할 수 없습니다. 끝나거나 중지한 뒤 삭제하세요.": "Nasazení #{id} probíhá, proto zatím nelze mazat. Smažte po jeho dokončení nebo zastavení.",
 }

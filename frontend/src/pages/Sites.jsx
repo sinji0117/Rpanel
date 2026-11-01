@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Link, useSearchParams } from 'react-router'
 import CreateSiteModal from '../components/CreateSiteModal'
-import { Empty, ErrorBox, KindBadge, PageHeader, Spinner, StatusBadge } from '../components/ui'
+import { Empty, ErrorBox, KindBadge, Loading, PageHeader, Spinner, StatusBadge } from '../components/ui'
 import { get } from '../lib/api'
 import { ago, httpClass } from '../lib/format'
 import { useFetch } from '../lib/useFetch'
@@ -44,8 +44,8 @@ export default function Sites() {
         }
         actions={
           <>
-            <button className="btn-ghost" onClick={() => sites.reload()} disabled={sites.loading}>
-              {sites.loading ? <Spinner /> : t('다시 확인')}
+            <button className="btn-ghost" onClick={() => sites.reload()} disabled={sites.loading || sites.refreshing}>
+              {sites.loading || sites.refreshing ? <Spinner /> : t('다시 확인')}
             </button>
             <button className="btn-primary" onClick={() => setCreating(true)}>
               {t('+ 사이트 추가')}
@@ -55,7 +55,7 @@ export default function Sites() {
       />
       <ErrorBox error={sites.error} />
       {sites.loading && !sites.data ? (
-        <Spinner className="text-ink-400" />
+        <Loading />
       ) : rows.length === 0 ? (
         <Empty
           title={t('사이트가 없습니다')}

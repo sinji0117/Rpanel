@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router'
-import { Empty, ErrorBox, Field, Modal, PageHeader, Spinner } from '../components/ui'
+import { Empty, ErrorBox, Field, Loading, Modal, PageHeader } from '../components/ui'
 import { useToast } from '../context/ToastContext'
 import { get, post } from '../lib/api'
 import { useFetch } from '../lib/useFetch'
@@ -76,7 +76,7 @@ export default function Projects() {
       />
       <ErrorBox error={error} />
       {loading ? (
-        <Spinner className="text-ink-400" />
+        <Loading />
       ) : data?.length ? (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {data.map((p) => (

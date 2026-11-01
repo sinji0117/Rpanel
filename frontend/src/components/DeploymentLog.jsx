@@ -7,7 +7,7 @@ import { dateTime, duration, shortSha } from '../lib/format'
 import { useFetch } from '../lib/useFetch'
 import { useDeploymentLog } from '../lib/useSockets'
 import LogViewer from './LogViewer'
-import { ErrorBox, Spinner, StatusBadge } from './ui'
+import { ErrorBox, Loading, Spinner, StatusBadge } from './ui'
 import { confirmDialog } from './Dialog'
 
 /** 진행 중(queued·running)인 배포를 중지 — 확인을 받은 뒤 취소 요청. 보냈으면 true */
@@ -60,7 +60,7 @@ export default function DeploymentLogPanel({ id, onFinished, height = 'h-[50vh]'
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status])
 
-  if (d.loading) return <Spinner className="text-ink-400" />
+  if (d.loading) return <Loading compact className="card" />
   if (d.error) return <ErrorBox error={d.error} />
   const dep = d.data
   const live = status ?? dep.status

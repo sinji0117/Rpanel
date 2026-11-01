@@ -3,7 +3,7 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router'
 import AppForm, { sshUrl, toPayload } from '../components/AppForm'
 import DeploymentLogPanel, { CancelDeployButton, cancelDeployment } from '../components/DeploymentLog'
 import LogViewer from '../components/LogViewer'
-import { CardHeader, CopyButton, ErrorBox, HelpTip, KindBadge, PageHeader, Spinner, StatusBadge, Tabs } from '../components/ui'
+import { CardHeader, CopyButton, ErrorBox, HelpTip, KindBadge, Loading, PageHeader, RefreshButton, Spinner, StatusBadge, Tabs } from '../components/ui'
 import { useToast } from '../context/ToastContext'
 import { del, get, post, put } from '../lib/api'
 import { ago, duration, mergeEnv, parseDotenv, shortSha } from '../lib/format'
@@ -35,7 +35,7 @@ export default function AppDetail() {
   // 슬롯을 기다리는 동안: 실행으로 넘어가거나 취소되는지 확인
   useInterval(() => (latest.reload(true), app.reload(true)), 3000, queued)
 
-  if (app.loading) return <Spinner className="text-ink-400" />
+  if (app.loading) return <Loading />
   if (app.error) return <ErrorBox error={app.error} />
   const a = app.data
   const isService = isServiceKind(a.kind)
@@ -304,7 +304,7 @@ function DeploymentsTab({ app, selected, onSelect, onChanged }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [app.status, selected])
 
-  if (list.loading) return <Spinner className="text-ink-400" />
+  if (list.loading) return <Loading />
   if (!list.data?.length) return <p className="card px-5 py-10 text-center text-sm text-ink-400">{t('아직 배포가 없습니다. 오른쪽 위 “배포”를 누르세요.')}</p>
   const shown = selected && list.data.some((d) => d.id === selected) ? selected : list.data[0].id
 
@@ -393,7 +393,7 @@ export function EnvTab({ app }) {
     if (env.data) setRows(env.data.vars)
   }, [env.data])
 
-  if (!rows) return <Spinner className="text-ink-400" />
+  if (!rows) return <Loading />
   const update = (i, k, v) => setRows((rs) => rs.map((r, j) => (j === i ? { ...r, [k]: v } : r)))
 
   return (
@@ -547,9 +547,7 @@ export function JournalTab({ app }) {
           <label className="flex items-center gap-1.5 text-xs text-ink-300">
             <input type="checkbox" checked={follow} onChange={(e) => setFollow(e.target.checked)} /> {t('3초마다 갱신')}
           </label>
-          <button className="btn-ghost px-2.5 py-1 text-xs" onClick={() => j.reload()}>
-            {t('새로고침')}
-          </button>
+          <RefreshButton onClick={() => j.reload()} busy={j.refreshing} />
         </div>
       </div>
       <ErrorBox error={j.error} />

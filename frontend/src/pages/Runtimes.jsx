@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Link, useSearchParams } from 'react-router'
-import { ErrorBox, Modal, PageHeader, Section, Spinner, Tabs } from '../components/ui'
+import { ErrorBox, Loading, Modal, PageHeader, Section, Spinner, Tabs } from '../components/ui'
 import { DbEngineList } from './DbVersions'
 import { useToast } from '../context/ToastContext'
 import { t } from '../i18n'
@@ -244,7 +244,7 @@ function LangRuntimes() {
 
   return (
     <>
-      {data.loading && <Spinner className="text-ink-400" />}
+      {data.loading && <Loading />}
       <ErrorBox error={data.error} />
       {data.data && (
         <div className="space-y-4">

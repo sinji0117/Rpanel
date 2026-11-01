@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Link } from 'react-router'
 import { genPassword } from '../components/CreateSiteModal'
 import { confirmDialog } from '../components/Dialog'
-import { CopyButton, Empty, ErrorBox, Field, Modal, PageHeader, Spinner } from '../components/ui'
+import { CopyButton, Empty, ErrorBox, Field, Loading, Modal, PageHeader } from '../components/ui'
 import { useToast } from '../context/ToastContext'
 import { t } from '../i18n'
 import { del, get, post, put } from '../lib/api'
@@ -398,7 +398,7 @@ export default function MongoPage() {
           </button>
         }
       />
-      {data.loading && <Spinner className="text-ink-400" />}
+      {data.loading && <Loading />}
       <ErrorBox error={data.error} />
       {d && !d.available && (
         <div className="mb-4 rounded-lg border border-warn/40 bg-warn/10 px-4 py-3 text-sm" data-testid="mongo-unavailable">

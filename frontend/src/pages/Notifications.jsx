@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router'
 import { LEVEL, notificationsChanged, notificationTitle } from '../components/NotificationBell'
-import { ErrorBox, Field, PageHeader, Section, Spinner, Tabs } from '../components/ui'
+import { ErrorBox, Field, Loading, PageHeader, Section, Tabs } from '../components/ui'
 import { useToast } from '../context/ToastContext'
 import { t } from '../i18n'
 import { del, get, post, put } from '../lib/api'
@@ -79,7 +79,7 @@ function NotificationList() {
         </div>
       </div>
       <ErrorBox error={list.error} />
-      {list.loading && <Spinner className="m-5 text-ink-400" />}
+      {list.loading && <Loading compact />}
       <div className="flex flex-wrap items-center gap-2 border-b border-ink-700/70 px-5 py-2.5">
         <div className="flex flex-wrap gap-1" role="tablist" aria-label={t('알림 분류')}>
           {CATEGORIES.map((c) => {
@@ -168,7 +168,7 @@ function NotificationSettings() {
   useEffect(() => {
     if (data.data) setV(data.data.settings)
   }, [data.data])
-  if (!v) return data.error ? <ErrorBox error={data.error} /> : <Spinner className="text-ink-400" />
+  if (!v) return data.error ? <ErrorBox error={data.error} /> : <Loading />
   const events = data.data.events
   const setEvent = (k, on) => setV({ ...v, events: { ...v.events, [k]: on } })
   const setChannel = (k, val) => setV({ ...v, channels: { ...v.channels, [k]: val } })

@@ -3,6 +3,7 @@ import { Link } from 'react-router'
 import { get } from '../lib/api'
 import { useFetch, useInterval } from '../lib/useFetch'
 import { t } from '../i18n'
+import { RefreshButton } from './ui'
 
 const LEVELS = [
   { id: 'all', label: '전체' },
@@ -208,14 +209,7 @@ export default function SystemLogViewer({ autoRefresh = true, height = 'h-72' })
             {copied ? t('복사 완료') : t('로그 복사')}
           </button>
 
-          <button
-            type="button"
-            onClick={() => eventsFetch.reload()}
-            className="btn-ghost px-2 py-1 text-xs cursor-pointer"
-            title={t('새로고침')}
-          >
-            ↻
-          </button>
+          <RefreshButton onClick={() => eventsFetch.reload()} busy={eventsFetch.refreshing} iconOnly className="px-2 py-1 text-xs" />
 
           <Link to="/logs?tab=system" className="text-xs text-signal hover:underline">
             {t('전체 로그 보기 →')}

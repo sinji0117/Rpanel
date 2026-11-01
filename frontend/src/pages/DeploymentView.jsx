@@ -1,7 +1,7 @@
 import { Link, useParams } from 'react-router'
 import { CancelDeployButton } from '../components/DeploymentLog'
 import LogViewer from '../components/LogViewer'
-import { ErrorBox, PageHeader, Spinner, StatusBadge } from '../components/ui'
+import { ErrorBox, Loading, PageHeader, StatusBadge } from '../components/ui'
 import { get } from '../lib/api'
 import { dateTime, duration, shortSha } from '../lib/format'
 import { useFetch } from '../lib/useFetch'
@@ -20,7 +20,7 @@ export default function DeploymentView() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status])
 
-  if (d.loading) return <Spinner className="text-ink-400" />
+  if (d.loading) return <Loading />
   if (d.error) return <ErrorBox error={d.error} />
   const dep = d.data
   const live = status ?? dep.status

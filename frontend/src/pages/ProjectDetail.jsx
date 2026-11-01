@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router'
 import AppForm, { roleOfApp } from '../components/AppForm'
-import { Empty, ErrorBox, KindBadge, Modal, PageHeader, Spinner, StatusBadge } from '../components/ui'
+import { Empty, ErrorBox, KindBadge, Loading, Modal, PageHeader, StatusBadge } from '../components/ui'
 import { useToast } from '../context/ToastContext'
 import { del, get, post, put } from '../lib/api'
 import { shortSha } from '../lib/format'
@@ -234,7 +234,7 @@ export default function ProjectDetail() {
 
   useInterval(() => apps.reload(true), 5000, !!apps.data?.some((a) => a.status === 'deploying'))
 
-  if (project.loading) return <Spinner className="text-ink-400" />
+  if (project.loading) return <Loading />
   if (project.error) return <ErrorBox error={project.error} />
   const p = project.data
 

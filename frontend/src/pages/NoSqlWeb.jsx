@@ -1,7 +1,7 @@
 // DB 웹 관리 — MongoDB(컬렉션·문서) · Redis(키)
 import { useState } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router'
-import { ErrorBox, Modal, PageHeader, Spinner } from '../components/ui'
+import { ErrorBox, Loading, Modal, PageHeader } from '../components/ui'
 import { confirmDialog, promptDialog } from '../components/Dialog'
 import { useToast } from '../context/ToastContext'
 import { get, post } from '../lib/api'
@@ -88,7 +88,7 @@ function Collection({ base, name, onChanged }) {
       </form>
       <ErrorBox error={d.error} />
       {d.loading && !d.data ? (
-        <Spinner className="text-ink-400" />
+        <Loading />
       ) : (
         <>
           <p className="text-xs text-ink-400">{t('문서 {n}개', { n: d.data?.total ?? 0 })}</p>
@@ -234,7 +234,7 @@ function RedisKey({ db, k, onChanged }) {
   const toast = useToast()
   const d = useFetch(() => get(`/dbweb/redis/${db}/key?k=${encodeURIComponent(k)}`), [db, k])
   const [value, setValue] = useState(null)
-  if (d.loading && !d.data) return <Spinner className="text-ink-400" />
+  if (d.loading && !d.data) return <Loading />
   if (d.error) return <ErrorBox error={d.error} />
   const v = d.data
   const editable = v.type === 'string'

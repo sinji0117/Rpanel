@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router'
 import LogViewer from '../components/LogViewer'
-import { CardHeader, CopyButton, ErrorBox, Field, Modal, Spinner } from '../components/ui'
+import { CardHeader, CopyButton, ErrorBox, Field, Loading, Modal, RefreshButton } from '../components/ui'
 import { useToast } from '../context/ToastContext'
 import { del, download, get, post, put, uploadFile } from '../lib/api'
 import { bytes, dateTime } from '../lib/format'
@@ -160,9 +160,7 @@ export function FileManager({ app }) {
           {t('업로드')}
         </button>
         <input ref={fileInput} type="file" multiple className="hidden" aria-label={t('파일 업로드')} onChange={(e) => doUpload(e.target.files)} />
-        <button className="btn-ghost px-2.5 py-1 text-xs" onClick={() => load()} aria-label={t('새로고침')}>
-          ↻
-        </button>
+        <RefreshButton onClick={() => load()} busy={loading} iconOnly />
       </div>
 
       {uploads.length > 0 && (
@@ -185,9 +183,7 @@ export function FileManager({ app }) {
         </div>
       )}
       {loading && !data ? (
-        <div className="p-6">
-          <Spinner className="text-ink-400" />
-        </div>
+        <Loading compact />
       ) : (
         data && (
           <div className="overflow-x-auto">
@@ -356,7 +352,7 @@ export function SslTab({ app, onChanged }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
 
-  if (info.loading) return <Spinner className="text-ink-400" />
+  if (info.loading) return <Loading />
   const d = info.data
   const proxyMode = d?.edge_mode === 'proxy'
 

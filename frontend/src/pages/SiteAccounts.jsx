@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { genPassword } from '../components/CreateSiteModal'
-import { CopyButton, ErrorBox, Field, Modal, Section, Spinner } from '../components/ui'
+import { CopyButton, ErrorBox, Field, Loading, Modal, Section } from '../components/ui'
 import { useToast } from '../context/ToastContext'
 import { t } from '../i18n'
 import { del, get, post, put } from '../lib/api'
@@ -244,7 +244,7 @@ export function AccountsTab({ app }) {
           {t('호스트')} <span className="kbd">{host}</span> · {t('포트')} <span className="kbd">22</span> · {t('문서 루트')} <span className="kbd">{app.site_root}</span>
         </p>
         {list.loading ? (
-          <Spinner className="text-ink-400" />
+          <Loading compact />
         ) : (
           <>
             <ErrorBox error={list.error} />

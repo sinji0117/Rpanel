@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Link } from 'react-router'
 import LogViewer from '../components/LogViewer'
-import { CopyButton, ErrorBox, Field, Section, Spinner, StatusBadge } from '../components/ui'
+import { CopyButton, ErrorBox, Field, Loading, RefreshButton, Section, StatusBadge } from '../components/ui'
 import { BackupJobs } from './BackupJobs'
 import { useToast } from '../context/ToastContext'
 import { api, del, download, get, post, put } from '../lib/api'
@@ -147,7 +147,7 @@ export function DatabaseTab({ app, onChanged }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
 
-  if (data.loading) return <Spinner className="text-ink-400" />
+  if (data.loading) return <Loading />
   const d = data.data
 
   const act = async (fn, okMsg) => {
@@ -371,7 +371,7 @@ export function BackupTab({ app }) {
 
 export function BackupTable({ rows, loading, onChanged, showApp = false }) {
   const toast = useToast()
-  if (loading) return <Spinner className="text-ink-400" />
+  if (loading) return <Loading />
   if (!rows?.length) return <p className="card px-5 py-8 text-center text-sm text-ink-400">{t('백업이 없습니다')}</p>
   return (
     <div className="card overflow-x-auto">
@@ -608,7 +608,7 @@ export function CronTab({ app }) {
           </div>
         )}
         {jobs.loading ? (
-          <Spinner className="text-ink-400" />
+          <Loading compact />
         ) : !jobs.data?.length ? (
           editing === null && <p className="text-sm text-ink-400">{t('등록된 작업이 없습니다.')}</p>
         ) : (
@@ -726,9 +726,7 @@ export function NginxLogTab({ app }) {
             </option>
           ))}
         </select>
-        <button className="btn-ghost px-2.5 py-1 text-xs" onClick={() => logs.reload()}>
-          {t('새로고침')}
-        </button>
+        <RefreshButton onClick={() => logs.reload()} busy={logs.refreshing} />
       </div>
 
       {kind === 'access' && stats && total > 0 && (

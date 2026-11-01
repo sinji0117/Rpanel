@@ -2,7 +2,7 @@
 import { useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router'
 import DbManager, { qs } from '../components/DbManager'
-import { ErrorBox, Field, PageHeader, Spinner } from '../components/ui'
+import { ErrorBox, Field, Loading, PageHeader } from '../components/ui'
 import { get, post } from '../lib/api'
 import { useFetch } from '../lib/useFetch'
 import { Shell } from './AuthPages'
@@ -36,7 +36,7 @@ export function DbWebAdminPage() {
           </Link>
         }
       />
-      {list.loading ? <Spinner className="text-ink-400" /> : <DbManager client={client} database={id} />}
+      {list.loading ? <Loading /> : <DbManager client={client} database={id} />}
     </>
   )
 }

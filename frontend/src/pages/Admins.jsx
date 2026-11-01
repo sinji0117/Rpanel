@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Link } from 'react-router'
 import { genPassword } from '../components/CreateSiteModal'
-import { ErrorBox, Field, Modal, PageHeader, Section, Spinner } from '../components/ui'
+import { ErrorBox, Field, Loading, Modal, PageHeader, Section } from '../components/ui'
 import { useToast } from '../context/ToastContext'
 import { t } from '../i18n'
 import { del, get, post, put } from '../lib/api'
@@ -88,7 +88,7 @@ export default function AdminsPage() {
       />
       <div className="space-y-4">
         <Section title={t('관리자 계정')}>
-          {list.loading ? <Spinner className="text-ink-400" /> : <ErrorBox error={list.error} />}
+          {list.loading ? <Loading /> : <ErrorBox error={list.error} />}
           {list.data && (
             <table className="w-full text-sm" aria-label={t('관리자 목록')}>
               <thead className="text-left text-xs text-ink-400">

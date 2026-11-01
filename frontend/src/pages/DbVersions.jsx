@@ -1,6 +1,6 @@
 // 데이터베이스 서버 버전 (MariaDB · MongoDB · Redis) — 지금 버전 · 더 높은 버전으로 바꾸기
 import { useState } from 'react'
-import { ErrorBox, Section, Spinner } from '../components/ui'
+import { ErrorBox, Loading, Section } from '../components/ui'
 import { confirmDialog } from '../components/Dialog'
 import { useToast } from '../context/ToastContext'
 import { get, post } from '../lib/api'
@@ -111,7 +111,7 @@ export function DbEngineList() {
   useInterval(() => data.reload(true), 2000, running)
   return (
     <>
-      {data.loading && <Spinner className="text-ink-400" />}
+      {data.loading && <Loading />}
       <ErrorBox error={data.error} />
       <div className="space-y-4">
         {engines.map((e) => (

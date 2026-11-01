@@ -13,6 +13,7 @@ import {
 import { get } from '../lib/api'
 import { useFetch, useInterval } from '../lib/useFetch'
 import { t } from '../i18n'
+import { RefreshButton } from './ui'
 
 const RANGES = [
   { id: '30m', label: '30분' },
@@ -129,14 +130,7 @@ export default function HistoricalTrendChart({ autoRefresh = true }) {
             ))}
           </div>
 
-          <button
-            type="button"
-            onClick={() => metricsFetch.reload()}
-            className="btn-ghost px-2 py-1 text-xs cursor-pointer"
-            title={t('새로고침')}
-          >
-            ↻
-          </button>
+          <RefreshButton onClick={() => metricsFetch.reload()} busy={metricsFetch.refreshing} iconOnly className="px-2 py-1 text-xs" />
         </div>
       </div>
 

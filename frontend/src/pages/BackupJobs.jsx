@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { ErrorBox, Field, Modal, Section, Spinner, StatusBadge } from '../components/ui'
+import { ErrorBox, Field, Loading, Modal, Section, StatusBadge } from '../components/ui'
 import { useToast } from '../context/ToastContext'
 import { api, get, post, put } from '../lib/api'
 import { ago, dateTime } from '../lib/format'
@@ -228,7 +228,7 @@ export function BackupJobs({ appId, onRan }) {
       }
     >
       {list.loading ? (
-        <Spinner className="text-ink-400" />
+        <Loading compact />
       ) : jobs.length === 0 ? (
         <p className="text-sm text-ink-400">{t('백업 예약이 없습니다. “+ 예약 추가”로 자동 백업을 켜세요.')}</p>
       ) : (

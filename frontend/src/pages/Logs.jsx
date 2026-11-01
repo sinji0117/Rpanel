@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router'
 import LogViewer from '../components/LogViewer'
-import { ErrorBox, PageHeader, Spinner, StatusBadge, Tabs } from '../components/ui'
+import { ErrorBox, Loading, PageHeader, RefreshButton, StatusBadge, Tabs } from '../components/ui'
 import { t } from '../i18n'
 import { get } from '../lib/api'
 import { dateTime, duration, shortSha } from '../lib/format'
@@ -78,9 +78,7 @@ function AuditLog() {
         <div className="flex flex-wrap items-center gap-2">
           <input className="input w-full py-1 text-xs sm:w-48" placeholder={t('검색…')} aria-label={t('활동 검색')} value={q} onChange={(e) => setQ(e.target.value)} />
           <LinesSelect value={n} onChange={setN} options={[100, 200, 500]} />
-          <button className="btn-ghost px-2.5 py-1 text-xs" onClick={() => audit.reload()}>
-            {t('새로고침')}
-          </button>
+          <RefreshButton onClick={() => audit.reload()} busy={audit.refreshing} />
         </div>
       </div>
       <ErrorBox error={audit.error} />
@@ -120,12 +118,10 @@ function DeploymentLog() {
     <section className="card">
       <div className="flex items-center justify-between border-b border-ink-700/70 px-5 py-3">
         <p className="text-xs text-ink-400">{t('모든 앱·사이트의 배포·적용 기록. 줄을 누르면 전체 로그를 봅니다.')}</p>
-        <button className="btn-ghost px-2.5 py-1 text-xs" onClick={() => list.reload()}>
-          {t('새로고침')}
-        </button>
+        <RefreshButton onClick={() => list.reload()} busy={list.refreshing} />
       </div>
       <ErrorBox error={list.error} />
-      {list.loading && <Spinner className="m-5 text-ink-400" />}
+      {list.loading && <Loading compact />}
       <ul className="max-h-[65vh] divide-y divide-ink-800 overflow-auto" aria-label={t('배포 기록')}>
         {list.data?.map((d) => (
           <li key={d.id}>
@@ -150,7 +146,7 @@ function PerApp({ apps, filter, label, render, empty }) {
   const targets = (apps ?? []).filter(filter)
   const [id, setId] = useState(null)
   const app = targets.find((a) => a.id === id) ?? targets[0]
-  if (!apps) return <Spinner className="text-ink-400" />
+  if (!apps) return <Loading />
   if (!targets.length) return <p className="card px-5 py-10 text-center text-sm text-ink-400">{empty}</p>
   return (
     <div className="space-y-4">
@@ -166,7 +162,7 @@ function CronLog({ app }) {
   const job = jobs.data?.find((j) => j.id === jobId) ?? jobs.data?.[0]
   const log = useFetch(() => (job ? get(`/cron/${job.id}/log`) : Promise.resolve({ lines: [] })), [job?.id])
   const [lines, search] = useFilter(log.data?.lines ?? [])
-  if (jobs.loading) return <Spinner className="text-ink-400" />
+  if (jobs.loading) return <Loading />
   if (!jobs.data?.length) return <p className="card px-5 py-10 text-center text-sm text-ink-400">{t('이 앱에는 크론 작업이 없습니다')}</p>
   return (
     <div className="space-y-3">
@@ -180,9 +176,7 @@ function CronLog({ app }) {
         </select>
         <span className="ml-auto" />
         {search}
-        <button className="btn-ghost px-2.5 py-1 text-xs" onClick={() => log.reload()}>
-          {t('새로고침')}
-        </button>
+        <RefreshButton onClick={() => log.reload()} busy={log.refreshing} />
       </div>
       <ErrorBox error={log.error} />
       <LogViewer lines={lines} emptyText={log.loading ? t('불러오는 중…') : t('아직 실행 기록이 없습니다')} />
@@ -220,9 +214,7 @@ function SystemLog() {
         <label className="flex items-center gap-1.5 text-xs text-ink-300">
           <input type="checkbox" checked={follow} onChange={(e) => setFollow(e.target.checked)} /> {t('3초마다 갱신')}
         </label>
-        <button className="btn-ghost px-2.5 py-1 text-xs" onClick={() => log.reload()}>
-          {t('새로고침')}
-        </button>
+        <RefreshButton onClick={() => log.reload()} busy={log.refreshing} />
       </div>
       <ErrorBox error={log.error} />
       <LogViewer lines={lines} emptyText={log.loading ? t('불러오는 중…') : t('로그가 없습니다')} />

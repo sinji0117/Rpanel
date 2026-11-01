@@ -35,6 +35,71 @@ export function Spinner({ className = '' }) {
   return <span className={`inline-block h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent ${className}`} aria-label={t('로딩 중')} />
 }
 
+/** 로고 둘레를 도는 링 — 첫 화면(전체) 로딩용 */
+function LoadingMark() {
+  return (
+    <span className="relative flex h-16 w-16 items-center justify-center" aria-hidden="true">
+      <span className="absolute inset-0 animate-spin rounded-full border-[3px] border-ink-700 border-t-signal" />
+      <svg viewBox="0 0 32 32" className="h-8 w-8">
+        <rect width="32" height="32" rx="7" fill="#141922" stroke="#252d39" />
+        <path d="M9 23V9h7.5a4.5 4.5 0 0 1 0 9H13l7 5" fill="none" stroke="#34d399" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    </span>
+  )
+}
+
+/**
+ * 데이터를 불러오는 동안 보여 주는 화면
+ * - 기본: 화면(콘텐츠) 가운데에 큰 스피너 + 문구
+ * - compact: 카드·목록 안에서 한 줄로
+ * - full: 화면 전체 (로그인 확인 등 첫 로딩)
+ */
+export function Loading({ full = false, compact = false, label, className = '' }) {
+  const text = label ?? t('불러오는 중…')
+  if (full) {
+    return (
+      <div role="status" aria-live="polite" className={`flex min-h-screen animate-fade-in flex-col items-center justify-center gap-5 bg-ink-950 text-sm text-ink-400 ${className}`}>
+        <LoadingMark />
+        <span>{text}</span>
+      </div>
+    )
+  }
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      className={`flex animate-fade-in items-center justify-center text-sm text-ink-400 ${compact ? 'gap-2.5 px-5 py-6' : 'min-h-[40vh] flex-col gap-4 py-16'} ${className}`}
+    >
+      <span
+        className={`inline-block animate-spin rounded-full border-ink-700 border-t-signal ${compact ? 'h-4 w-4 border-2' : 'h-9 w-9 border-[3px]'}`}
+        aria-hidden="true"
+      />
+      <span>{text}</span>
+    </div>
+  )
+}
+
+/** 새로고침 버튼 — 불러오는 동안 아이콘이 돌고 눌리지 않음. iconOnly 면 ↻ 만 */
+export function RefreshButton({ onClick, busy = false, iconOnly = false, className = 'px-2.5 py-1 text-xs' }) {
+  return (
+    <button
+      type="button"
+      className={`btn-ghost ${className}`}
+      onClick={onClick}
+      disabled={busy}
+      aria-busy={busy || undefined}
+      aria-label={iconOnly ? t('새로고침') : undefined}
+      title={t('새로고침')}
+    >
+      <svg viewBox="0 0 24 24" className={`h-3.5 w-3.5 ${busy ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="M21 12a9 9 0 1 1-2.64-6.36" />
+        <path d="M21 3v6h-6" />
+      </svg>
+      {!iconOnly && t('새로고침')}
+    </button>
+  )
+}
+
 /** ? 아이콘 — 누르면 설명이 말풍선으로 열림 (바깥 클릭·Esc 로 닫힘) */
 export function HelpTip({ children, label, align = 'right' }) {
   const [open, setOpen] = useState(false)

@@ -1,7 +1,7 @@
 import { BrowserRouter, Link, Navigate, Route, Routes } from 'react-router'
 import { DialogHost } from './components/Dialog'
 import Layout from './components/Layout'
-import { Spinner } from './components/ui'
+import { Loading } from './components/ui'
 import { AuthProvider, useAuth } from './context/AuthContext'
 import { ToastProvider } from './context/ToastContext'
 import AppDetail from './pages/AppDetail'
@@ -36,13 +36,7 @@ function NotFound() {
 function Gate() {
   const { status } = useAuth()
   const lang = useLang() // 언어를 바꾸면 화면 전체를 새 언어로 다시 그림
-  if (status === 'loading') {
-    return (
-      <div className="flex min-h-screen items-center justify-center text-ink-400">
-        <Spinner />
-      </div>
-    )
-  }
+  if (status === 'loading') return <Loading full />
   if (status === 'setup') return <SetupPage key={lang} />
   if (status === 'anon') return <LoginPage key={lang} />
   return (

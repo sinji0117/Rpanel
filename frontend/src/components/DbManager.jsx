@@ -2,7 +2,7 @@
 // 패널 관리자 화면과 DB 계정 로그인 화면이 같은 컴포넌트를 씁니다 (client 만 다름).
 import { useEffect, useState } from 'react'
 import { useFetch } from '../lib/useFetch'
-import { ErrorBox, Modal, Spinner, Tabs } from './ui'
+import { ErrorBox, Loading, Modal, RefreshButton, Tabs } from './ui'
 import { confirmDialog } from './Dialog'
 import { useToast } from '../context/ToastContext'
 import { bytes } from '../lib/format'
@@ -163,7 +163,7 @@ function Browse({ client, table }) {
     setDesc(false)
     setView('rows')
   }, [table])
-  if (d.loading && !d.data) return <Spinner className="text-ink-400" />
+  if (d.loading && !d.data) return <Loading />
   if (d.error) return <ErrorBox error={d.error} />
   const b = d.data
   const pk = b.primary_key || []
@@ -183,9 +183,7 @@ function Browse({ client, table }) {
         />
         <span className="text-xs text-ink-400">{t('{n}행', { n: b.total })}</span>
         <span className="ml-auto flex gap-1.5">
-          <button className="btn-ghost px-2.5 py-1 text-xs" onClick={() => d.reload(true)}>
-            {t('새로고침')}
-          </button>
+          <RefreshButton onClick={() => d.reload()} busy={d.refreshing} />
           <button className="btn-primary px-2.5 py-1 text-xs" onClick={() => setEditing('new')}>
             {t('+ 행 추가')}
           </button>
@@ -356,7 +354,7 @@ export default function DbManager({ client, database, header }) {
           ▶ {t('SQL 실행')}
         </button>
         <p className="px-2 pt-1 pb-1 text-xs text-ink-500">{t('테이블 {n}개', { n: tables.length })}</p>
-        {d.loading && <Spinner className="text-ink-400" />}
+        {d.loading && <Loading compact />}
         <ErrorBox error={d.error} />
         <ul className="max-h-[60vh] space-y-0.5 overflow-y-auto" data-testid="db-tables">
           {tables.map((tb) => (

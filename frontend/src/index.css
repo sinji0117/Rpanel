@@ -18,6 +18,17 @@
   --color-signal-dim: #10b98126;
   --color-warn: #fbbf24;
   --color-fail: #f87171;
+
+  /* 로딩 화면: 0.15초 안에 끝나는 로딩은 아예 보이지 않게 살짝 늦게 나타남 */
+  --animate-fade-in: rp-fade-in 0.25s ease-out 0.15s both;
+  @keyframes rp-fade-in {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
 }
 
 /* 낮(라이트) 테마 — 같은 이름의 색을 밝은 값으로 바꿔서 모든 화면에 적용 */

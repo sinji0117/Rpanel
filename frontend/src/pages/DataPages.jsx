@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Link } from 'react-router'
-import { CopyButton, Empty, ErrorBox, Field, Modal, PageHeader, Section, Spinner } from '../components/ui'
+import { CopyButton, Empty, ErrorBox, Field, Loading, Modal, PageHeader, Section } from '../components/ui'
 import { useToast } from '../context/ToastContext'
 import { genPassword } from '../components/CreateSiteModal'
 import { del, get, post, put } from '../lib/api'
@@ -557,7 +557,7 @@ export function MariaDBPage() {
   const [creating, setCreating] = useState(false)
   const [cred, setCred] = useState(null)
   const toast = useToast()
-  if (d.loading) return <Spinner className="text-ink-400" />
+  if (d.loading) return <Loading />
   if (d.error) return <ErrorBox error={d.error} />
   const { databases } = d.data
   const reload = () => d.reload(true)
@@ -619,7 +619,7 @@ export function MariaDBPage() {
 export function RedisPage() {
   const d = useFetch(() => get('/databases'), [])
   const [cred, setCred] = useState(null)
-  if (d.loading) return <Spinner className="text-ink-400" />
+  if (d.loading) return <Loading />
   if (d.error) return <ErrorBox error={d.error} />
   const { redis, redis_users = [], redis_range, panel_redis_db } = d.data
   const reload = () => d.reload(true)

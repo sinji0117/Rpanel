@@ -249,7 +249,9 @@ export function createMockBackend({ needsSetup = false } = {}) {
       return json(
         route,
         200,
-        db.deployments.map((d) => ({ ...d, app_name: db.apps.find((a) => a.id === d.app_id)?.name, app_slug: '' })),
+        db.deployments
+          .filter((d) => url.searchParams.get('active') !== 'true' || ['queued', 'running'].includes(d.status))
+          .map((d) => ({ ...d, app_name: db.apps.find((a) => a.id === d.app_id)?.name, app_slug: '' })),
       )
     if (path === '/logs/system') {
       const kind = url.searchParams.get('kind')

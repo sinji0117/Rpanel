@@ -533,7 +533,9 @@ pub async fn delete(
             .bind(id)
             .execute(&state.db)
             .await;
-        return Err(AppError::Internal(e.context("서비스/사이트/파일 정리 실패")));
+        return Err(AppError::Internal(
+            e.context("서비스/사이트/파일 정리 실패"),
+        ));
     }
     // 배정된 Redis DB 는 비워서 반납 (다음 앱이 남은 키를 물려받지 않도록)
     if let Some(n) = app.redis_db {

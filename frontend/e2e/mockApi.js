@@ -31,6 +31,11 @@ export function createMockBackend({ needsSetup = false } = {}) {
     panelAllow: [],
     // 2단계 인증 (인증 앱 코드는 항상 123456 으로 가정)
     totp: { enabled: false, recovery: [] },
+    require2fa: false,
+    sessions: [
+      { id: 'sess-current', ip: '203.0.113.9', user_agent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/130.0 Safari/537.36', created_at: 1793500000, last_seen: 1793530000 },
+      { id: 'sess-phone', ip: '198.51.100.20', user_agent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) Version/18.0 Mobile Safari/604.1', created_at: 1793400000, last_seen: 1793410000 },
+    ],
     firewall: {
       active: true,
       rules: [
@@ -196,7 +201,26 @@ export function createMockBackend({ needsSetup = false } = {}) {
     if (path === '/auth/ws-ticket') return json(route, 200, { ticket: 'a'.repeat(48), expires_in: 30 })
 
     // ── 2단계 인증 ──
-    if (path === '/auth/2fa') return json(route, 200, { enabled: db.totp.enabled, recovery_left: db.totp.enabled ? db.totp.recovery.length : 0 })
+    if (path === '/auth/2fa') return json(route, 200, { enabled: db.totp.enabled, recovery_left: db.totp.enabled ? db.totp.recovery.length : 0, required: db.require2fa })
+    if (path === '/auth/sessions') return json(route, 200, { sessions: db.sessions, current: 'sess-current' })
+    if (path === '/auth/sessions/revoke-others' && method === 'POST') {
+      const n = db.sessions.length - 1
+      db.sessions = db.sessions.filter((x) => x.id === 'sess-current')
+      return json(route, 200, { revoked: n })
+    }
+    const sm = path.match(/^\/auth\/sessions\/([\w-]+)$/)
+    if (sm && method === 'DELETE') {
+      if (sm[1] === 'sess-current') return json(route, 400, { error: 'bad_request', message: '지금 쓰는 세션은 로그아웃으로 끝내세요' })
+      db.sessions = db.sessions.filter((x) => x.id !== sm[1])
+      return json(route, 204)
+    }
+    if (path === '/security/policy') {
+      if (method === 'PUT') {
+        if (body.require_2fa && !db.totp.enabled) return json(route, 400, { error: 'bad_request', message: '먼저 내 2단계 인증을 켜세요.' })
+        db.require2fa = body.require_2fa
+      }
+      return json(route, 200, { require_2fa: db.require2fa })
+    }
     if (path === '/auth/2fa/setup' && method === 'POST') {
       const secret = 'JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP'
       return json(route, 200, { secret, uri: `otpauth://totp/Rpanel:admin%40example.com?secret=${secret}&issuer=Rpanel&algorithm=SHA1&digits=6&period=30`, expires_in: 600 })
@@ -210,6 +234,7 @@ export function createMockBackend({ needsSetup = false } = {}) {
       if (body.password !== db.password) return json(route, 400, { error: 'bad_request', message: '비밀번호가 올바르지 않습니다' })
       if (!checkCode(body.code)) return json(route, 400, { error: 'bad_request', message: '인증 코드가 맞지 않습니다' })
       if (path.endsWith('/disable')) {
+        if (db.require2fa) return json(route, 400, { error: 'bad_request', message: '2단계 인증이 필수로 정해져 있어 끌 수 없습니다' })
         db.totp = { enabled: false, recovery: [] }
         return json(route, 204)
       }

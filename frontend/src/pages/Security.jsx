@@ -2,9 +2,10 @@ import { useState } from 'react'
 import { Link, useSearchParams } from 'react-router'
 import { confirmDialog } from '../components/Dialog'
 import { CopyButton, ErrorBox, Field, Loading, Modal, PageHeader, RefreshButton, Section, Tabs } from '../components/ui'
+import { useAuth } from '../context/AuthContext'
 import { useToast } from '../context/ToastContext'
 import { t } from '../i18n'
-import { get, post } from '../lib/api'
+import { del, get, post, put } from '../lib/api'
 import { ago, dateTime } from '../lib/format'
 import { qrPath } from '../lib/qr'
 import { useFetch } from '../lib/useFetch'
@@ -335,6 +336,90 @@ function FirewallTab() {
 
 const KIND = { ip: 'IP', acct: '계정', otp: '2단계 코드' }
 
+/** User-Agent → "Chrome · Windows" 같은 짧은 이름 */
+export function deviceName(ua) {
+  if (!ua) return t('알 수 없는 기기')
+  const browser = /Edg\//.test(ua)
+    ? 'Edge'
+    : /OPR\//.test(ua)
+      ? 'Opera'
+      : /Firefox\//.test(ua)
+        ? 'Firefox'
+        : /Chrome\//.test(ua)
+          ? 'Chrome'
+          : /Safari\//.test(ua)
+            ? 'Safari'
+            : ua.split(/[/ ]/)[0]
+  const os = /Windows/.test(ua) ? 'Windows' : /Android/.test(ua) ? 'Android' : /iPhone|iPad/.test(ua) ? 'iOS' : /Mac OS X/.test(ua) ? 'macOS' : /Linux/.test(ua) ? 'Linux' : ''
+  return os ? `${browser} · ${os}` : browser
+}
+
+const fromUnix = (s) => (s ? new Date(s * 1000).toISOString() : null)
+
+/** 내 로그인 세션 — 기기 · IP, 다른 기기 로그아웃 */
+function SessionsSection() {
+  const toast = useToast()
+  const d = useFetch(() => get('/auth/sessions'), [])
+  const run = async (fn, msg) => {
+    try {
+      const r = await fn()
+      toast.push(typeof msg === 'function' ? msg(r) : msg, 'success')
+      d.reload(true)
+    } catch (e) {
+      toast.push(e.message, 'error')
+    }
+  }
+  if (d.loading) return <Loading compact />
+  if (d.error) return <ErrorBox error={d.error} />
+  const { sessions, current } = d.data
+  const others = sessions.filter((x) => x.id !== current)
+  return (
+    <Section
+      title={t('내 로그인 세션')}
+      desc={t('지금 로그인되어 있는 기기입니다. 모르는 기기가 있으면 로그아웃시키고 비밀번호를 바꾸세요.')}
+      actions={
+        others.length > 0 && (
+          <button
+            className="btn-danger px-3 py-1.5 text-xs"
+            onClick={async () =>
+              (await confirmDialog(t('다른 기기를 모두 로그아웃시킬까요?'), { danger: true })) &&
+              run(
+                () => post('/auth/sessions/revoke-others'),
+                (r) => t('다른 기기 {n}개를 로그아웃시켰습니다', { n: r.revoked }),
+              )
+            }
+          >
+            {t('다른 기기 모두 로그아웃')}
+          </button>
+        )
+      }
+    >
+      <ul className="divide-y divide-ink-800" aria-label={t('내 로그인 세션')}>
+        {sessions.map((x) => (
+          <li key={x.id} className="flex flex-wrap items-center gap-x-4 gap-y-1 py-2.5 text-sm" data-testid="session-row">
+            <span className="min-w-0 flex-1">
+              <span className="font-medium">{deviceName(x.user_agent)}</span>
+              {x.id === current && <span className="ml-2 rounded border border-signal/40 px-1.5 text-[11px] text-signal">{t('이 기기')}</span>}
+              <span className="block font-mono text-xs text-ink-400">{x.ip || '–'}</span>
+            </span>
+            <span className="text-xs text-ink-400" title={dateTime(fromUnix(x.created_at))}>
+              {t('마지막 사용')} {x.last_seen ? ago(fromUnix(x.last_seen)) : '–'}
+            </span>
+            {x.id !== current && (
+              <button
+                className="btn-ghost px-2.5 py-1 text-xs"
+                onClick={async () => (await confirmDialog(t('이 기기를 로그아웃시킬까요?'))) && run(() => del(`/auth/sessions/${x.id}`), t('로그아웃시켰습니다'))}
+              >
+                {t('로그아웃')}
+              </button>
+            )}
+          </li>
+        ))}
+      </ul>
+    </Section>
+  )
+}
+
 function LoginsTab() {
   const toast = useToast()
   const d = useFetch(() => get('/security/logins'), [])
@@ -343,6 +428,7 @@ function LoginsTab() {
   const { counters, failures, limit } = d.data
   return (
     <div className="space-y-4">
+      <SessionsSection />
       <PanelAccess />
       <Section title={t('로그인 시도 제한')} desc={t('IP·계정마다 5분에 {n}번까지 로그인을 시도할 수 있습니다. 넘으면 5분 동안 막힙니다.', { n: limit })} actions={<RefreshButton onClick={() => d.reload()} busy={d.refreshing} />}>
         {counters.length ? (
@@ -512,7 +598,47 @@ function ConfirmModal({ title, danger, onClose, onSubmit }) {
   )
 }
 
-function TwoFactorTab() {
+/** 모든 관리자에게 2단계 인증 필수 (관리자만) */
+function PolicyCard({ myEnabled }) {
+  const { user } = useAuth()
+  const toast = useToast()
+  const p = useFetch(() => (user?.role === 'admin' ? get('/security/policy') : Promise.resolve(null)), [user?.role])
+  const [busy, setBusy] = useState(false)
+  if (!p.data) return null
+  const on = p.data.require_2fa
+  const label = t('모든 관리자에게 2단계 인증 필수')
+  return (
+    <Section title={label} desc={t('켜면 2단계 인증을 등록하지 않은 관리자는 등록을 마칠 때까지 패널을 쓸 수 없습니다.')}>
+      <label className="flex items-center gap-2.5 text-sm">
+        <input
+          type="checkbox"
+          role="switch"
+          aria-label={label}
+          checked={on}
+          disabled={busy || (!on && !myEnabled)}
+          onChange={async (e) => {
+            const next = e.target.checked
+            if (next && !(await confirmDialog(t('2단계 인증 필수를 켤까요? 아직 등록하지 않은 관리자는 바로 등록 화면으로 넘어갑니다.')))) return
+            setBusy(true)
+            try {
+              p.setData(await put('/security/policy', { require_2fa: next }))
+              toast.push(next ? t('2단계 인증 필수를 켰습니다') : t('2단계 인증 필수를 껐습니다'), 'success')
+            } catch (err) {
+              toast.push(err.message, 'error')
+            } finally {
+              setBusy(false)
+            }
+          }}
+        />
+        <span data-testid="policy-state">{on ? t('켜짐') : t('꺼짐')}</span>
+      </label>
+      {!on && !myEnabled && <p className="mt-2 text-xs text-warn">{t('먼저 내 2단계 인증을 켜세요.')}</p>}
+    </Section>
+  )
+}
+
+/** forced: 필수 정책 때문에 등록하는 화면 (관리자 링크 · 정책 카드 숨김), onChange: 켜기·끄기를 마쳤을 때 */
+export function TwoFactorTab({ forced = false, onChange }) {
   const toast = useToast()
   const st = useFetch(() => get('/auth/2fa'), [])
   const [setup, setSetup] = useState(null)
@@ -533,6 +659,7 @@ function TwoFactorTab() {
           onDone={() => {
             setCodes(null)
             st.reload(true)
+            onChange?.()
           }}
         />
       </Section>
@@ -615,6 +742,7 @@ function TwoFactorTab() {
 
   const s = st.data
   return (
+    <div className="space-y-4">
     <Section title={t('내 계정의 2단계 인증')} desc={t('로그인할 때 비밀번호와 함께 휴대폰 인증 앱의 6자리 코드를 입력합니다. 비밀번호가 새어 나가도 로그인을 막아 줍니다.')}>
       <p className="flex flex-wrap items-center gap-3 text-sm">
         <span className={s.enabled ? 'text-signal' : 'text-warn'} data-testid="tfa-state">
@@ -629,9 +757,11 @@ function TwoFactorTab() {
             <button className="btn-ghost" onClick={() => setModal('recovery')}>
               {t('복구 코드 새로 만들기')}
             </button>
-            <button className="btn-danger" onClick={() => setModal('disable')}>
-              {t('끄기')}
-            </button>
+            {!s.required && (
+              <button className="btn-danger" onClick={() => setModal('disable')}>
+                {t('끄기')}
+              </button>
+            )}
           </>
         ) : (
           <button className="btn-primary" disabled={busy} onClick={start}>
@@ -639,12 +769,14 @@ function TwoFactorTab() {
           </button>
         )}
       </div>
-      <p className="mt-4 text-xs text-ink-400">
-        {t('다른 관리자가 휴대폰을 잃었다면 관리자 화면에서 그 계정의 2단계 인증을 초기화할 수 있습니다.')}{' '}
-        <Link to="/admins" className="text-signal hover:underline">
-          {t('관리자')} →
-        </Link>
-      </p>
+      {!forced && (
+        <p className="mt-4 text-xs text-ink-400">
+          {t('다른 관리자가 휴대폰을 잃었다면 관리자 화면에서 그 계정의 2단계 인증을 초기화할 수 있습니다.')}{' '}
+          <Link to="/admins" className="text-signal hover:underline">
+            {t('관리자')} →
+          </Link>
+        </p>
+      )}
       {modal === 'disable' && (
         <ConfirmModal
           title={t('2단계 인증 끄기')}
@@ -655,6 +787,7 @@ function TwoFactorTab() {
             setModal(null)
             toast.push(t('2단계 인증을 껐습니다'), 'success')
             st.reload(true)
+            onChange?.()
           }}
         />
       )}
@@ -670,6 +803,27 @@ function TwoFactorTab() {
         />
       )}
     </Section>
+    {!forced && <PolicyCard myEnabled={s.enabled} />}
+    </div>
+  )
+}
+
+/** 2단계 인증 필수인데 아직 등록하지 않은 관리자: 등록을 마칠 때까지 이 화면만 */
+export function ForcedTwoFactor({ onDone }) {
+  const { logout } = useAuth()
+  return (
+    <div className="min-h-screen bg-ink-950 px-4 py-10">
+      <div className="mx-auto max-w-2xl space-y-4">
+        <div className="card border-warn/40 p-5">
+          <h1 className="text-lg font-semibold">{t('2단계 인증 등록이 필요합니다')}</h1>
+          <p className="mt-1 text-sm text-ink-400">{t('관리자가 모든 계정에 2단계 인증을 필수로 정했습니다. 등록을 마쳐야 패널을 쓸 수 있습니다.')}</p>
+        </div>
+        <TwoFactorTab forced onChange={onDone} />
+        <button type="button" className="text-xs text-ink-400 hover:text-ink-100" onClick={logout}>
+          {t('로그아웃')}
+        </button>
+      </div>
+    </div>
   )
 }
 

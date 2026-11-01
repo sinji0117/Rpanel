@@ -52,6 +52,12 @@ pub fn router(state: AppState) -> Router {
         .route("/auth/me", get(auth::me))
         .route("/auth/password", post(auth::change_password))
         .route("/auth/ws-ticket", post(auth::ws_ticket))
+        .route("/auth/sessions", get(auth::sessions))
+        .route(
+            "/auth/sessions/revoke-others",
+            post(auth::revoke_other_sessions),
+        )
+        .route("/auth/sessions/{id}", delete(auth::revoke_session))
         // 시스템
         .route("/system/info", get(system::info))
         .route("/system/overview", get(system::overview))
@@ -69,6 +75,10 @@ pub fn router(state: AppState) -> Router {
         .route("/security/firewall/enable", post(security::enable))
         .route("/security/firewall/disable", post(security::disable))
         .route("/security/logins", get(security::logins))
+        .route(
+            "/security/policy",
+            get(security::policy).put(security::set_policy),
+        )
         .route("/security/unblock", post(security::unblock))
         // 알림
         .route(

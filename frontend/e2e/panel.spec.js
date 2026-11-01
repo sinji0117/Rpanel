@@ -1166,6 +1166,14 @@ test('2단계 인증: 켜기 → 로그인 두 번째 단계 · 복구 코드 �
   await page.getByRole('button', { name: '저장했습니다' }).click()
   await expect(page.getByTestId('tfa-state')).toContainText('켜짐')
   await expect(page.getByText('남은 복구 코드 10개')).toBeVisible()
+  // 2단계 인증 필수: 켜면 끄기 버튼이 사라짐 (다시 끄고 진행)
+  const policy = page.getByRole('switch', { name: '모든 관리자에게 2단계 인증 필수' })
+  await page.addLocatorHandler(page.getByRole('alertdialog'), (d) => d.locator('button[type=submit]').click(), { noWaitAfter: true, times: 1 })
+  await policy.click() // 제어 컴포넌트: 서버 응답 뒤에 바뀌므로 check() 대신 click
+  await expect(page.getByTestId('policy-state')).toHaveText('켜짐')
+  await expect(page.getByRole('button', { name: '끄기' })).toHaveCount(0)
+  await policy.click()
+  await expect(page.getByTestId('policy-state')).toHaveText('꺼짐')
   await page.goto('/admins')
   await expect(page.getByTestId('tfa-1')).toContainText('켜짐')
 
@@ -1233,8 +1241,17 @@ test('보안: 점검 → 방화벽 규칙 · 차단 → 로그인 차단 해제 
   await expect(page.getByTestId('firewall-state')).toContainText('꺼짐')
   await expect(page.getByText('ufw allow 5000/tcp')).toBeVisible()
 
-  // 로그인 보안: 막힌 IP 해제, 실패 기록
+  // 로그인 보안: 내 로그인 세션 → 다른 기기 로그아웃
   await page.getByRole('tab', { name: '로그인 보안' }).click()
+  const sessions = page.getByTestId('session-row')
+  await expect(sessions).toHaveCount(2)
+  await expect(sessions.first()).toContainText('Chrome · Windows')
+  await expect(sessions.first()).toContainText('이 기기')
+  await expect(sessions.nth(1)).toContainText('Safari · iOS')
+  await page.getByRole('button', { name: '다른 기기 모두 로그아웃' }).click()
+  await expect(page.getByText('다른 기기 1개를 로그아웃시켰습니다')).toBeVisible()
+  await expect(sessions).toHaveCount(1)
+  // 막힌 IP 해제, 실패 기록
   await expect(page.getByTestId('panel-access-state')).toHaveText('어디서나 접속 가능')
   const limits = page.getByRole('table', { name: '로그인 시도 제한' })
   await expect(limits).toContainText('차단됨')
@@ -1247,4 +1264,19 @@ test('보안: 점검 → 방화벽 규칙 · 차단 → 로그인 차단 해제 
   await expect(page.getByTestId('tfa-1001')).toContainText('켜짐')
   await page.getByRole('button', { name: '2단계 인증 초기화' }).click()
   await expect(page.getByTestId('tfa-1001')).toContainText('꺼짐')
+})
+
+test('2단계 인증 필수: 등록 전에는 등록 화면만 → 등록하면 패널', async ({ page }) => {
+  const backend = createMockBackend()
+  backend.db.require2fa = true
+  await loginAs(page, backend)
+  await page.goto('/')
+  await expect(page.getByRole('heading', { name: '2단계 인증 등록이 필요합니다' })).toBeVisible()
+  await expect(page.getByRole('navigation', { name: /주 메뉴/ })).toHaveCount(0)
+  await page.getByRole('button', { name: '켜기', exact: true }).click()
+  await page.getByLabel('인증 코드').fill('123456')
+  await page.getByRole('button', { name: '확인하고 켜기' }).click()
+  await expect(page.getByTestId('recovery-codes').locator('li')).toHaveCount(10)
+  await page.getByRole('button', { name: '저장했습니다' }).click()
+  await expect(page.getByRole('heading', { name: '대시보드' })).toBeVisible()
 })

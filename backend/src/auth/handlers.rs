@@ -1,5 +1,5 @@
 use axum::{
-    extract::State,
+    extract::{Path, State},
     http::{HeaderMap, StatusCode},
     response::IntoResponse,
     Json,
@@ -8,7 +8,7 @@ use axum_extra::extract::cookie::{Cookie, CookieJar, SameSite};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
-use super::{jwt, password, session, twofa, AuthUser, ClientIp};
+use super::{jwt, password, session, twofa, AuthUser, ClientIp, UserAgent};
 use crate::{
     audit,
     error::{AppError, AppResult},
@@ -85,8 +85,10 @@ async fn issue_tokens(
     state: &AppState,
     jar: CookieJar,
     user: User,
+    ip: &str,
+    ua: &str,
 ) -> AppResult<(CookieJar, Json<TokenResponse>)> {
-    let issued = session::create(state, user.id).await?;
+    let issued = session::create(state, user.id, ip, ua).await?;
     let (access, exp) = jwt::issue(
         &state.cfg.jwt_secret,
         user.id,
@@ -117,6 +119,7 @@ pub async fn status(State(state): State<AppState>) -> AppResult<Json<serde_json:
 pub async fn setup(
     State(state): State<AppState>,
     ClientIp(ip): ClientIp,
+    UserAgent(ua): UserAgent,
     jar: CookieJar,
     Json(body): Json<Credentials>,
 ) -> AppResult<impl IntoResponse> {
@@ -149,7 +152,7 @@ pub async fn setup(
         .await?;
     let user = find_user(&state, res.last_insert_id()).await?;
     audit::log(&state, Some(user.id), "auth.setup", &email, &ip).await;
-    let (jar, body) = issue_tokens(&state, jar, user).await?;
+    let (jar, body) = issue_tokens(&state, jar, user, &ip, &ua).await?;
     Ok((StatusCode::CREATED, jar, body))
 }
 
@@ -157,6 +160,7 @@ pub async fn setup(
 pub async fn login(
     State(state): State<AppState>,
     ClientIp(ip): ClientIp,
+    UserAgent(ua): UserAgent,
     jar: CookieJar,
     Json(body): Json<Credentials>,
 ) -> AppResult<impl IntoResponse> {
@@ -208,7 +212,7 @@ pub async fn login(
         )
         .into_response());
     }
-    Ok(complete_login(&state, jar, user, &email, &ip)
+    Ok(complete_login(&state, jar, user, &email, &ip, &ua)
         .await?
         .into_response())
 }
@@ -240,8 +244,16 @@ async fn complete_login(
     user: User,
     email: &str,
     ip: &str,
+    ua: &str,
 ) -> AppResult<(CookieJar, Json<TokenResponse>)> {
     session::reset_rate_limit(state, &format!("login:acct:{email}")).await?;
+    if twofa::required(state).await {
+        let enabled: bool = sqlx::query_scalar("SELECT totp_enabled FROM users WHERE id = ?")
+            .bind(user.id)
+            .fetch_one(&state.db)
+            .await?;
+        session::set_needs_2fa(state, user.id, !enabled).await?;
+    }
     let _ = sqlx::query("UPDATE users SET last_login_at = CURRENT_TIMESTAMP(3) WHERE id = ?")
         .bind(user.id)
         .execute(&state.db)
@@ -259,7 +271,7 @@ async fn complete_login(
         .link("/logs?tab=audit"),
     )
     .await;
-    issue_tokens(state, jar, user).await
+    issue_tokens(state, jar, user, ip, ua).await
 }
 
 #[derive(Deserialize)]
@@ -272,6 +284,7 @@ pub struct OtpInput {
 pub async fn login_otp(
     State(state): State<AppState>,
     ClientIp(ip): ClientIp,
+    UserAgent(ua): UserAgent,
     jar: CookieJar,
     Json(b): Json<OtpInput>,
 ) -> AppResult<impl IntoResponse> {
@@ -332,7 +345,7 @@ pub async fn login_otp(
                 )
                 .await;
             }
-            complete_login(&state, jar, user, &email, &ip).await
+            complete_login(&state, jar, user, &email, &ip, &ua).await
         }
         None => {
             audit::log(&state, Some(uid), "auth.otp_failed", &user.email, &ip).await;
@@ -344,6 +357,7 @@ pub async fn login_otp(
 /// POST /api/auth/refresh — 리프레시 쿠키로 새 액세스 토큰 (토큰 회전)
 pub async fn refresh(
     State(state): State<AppState>,
+    ClientIp(ip): ClientIp,
     headers: HeaderMap,
     jar: CookieJar,
 ) -> AppResult<impl IntoResponse> {
@@ -354,6 +368,7 @@ pub async fn refresh(
         .ok_or(AppError::Unauthorized)?;
     match session::rotate(&state, &token).await? {
         session::RotateResult::Ok { uid, issued } => {
+            let _ = session::touch(&state, &issued.family, &ip).await;
             let user = match find_user(&state, uid).await {
                 Ok(u) => u,
                 Err(_) => return Err(AppError::Unauthorized),
@@ -441,6 +456,59 @@ pub async fn change_password(
     )
     .await;
     Ok((StatusCode::NO_CONTENT, jar.add(clear_cookie())))
+}
+
+/// GET /api/auth/sessions — 내 로그인 세션 (기기 · IP · 마지막 사용)
+pub async fn sessions(
+    State(state): State<AppState>,
+    user: AuthUser,
+) -> AppResult<Json<serde_json::Value>> {
+    Ok(Json(json!({
+        "sessions": session::list_for_user(&state, user.id).await?,
+        "current": user.sid,
+    })))
+}
+
+/// DELETE /api/auth/sessions/{id} — 다른 기기의 로그인 끝내기
+pub async fn revoke_session(
+    State(state): State<AppState>,
+    user: AuthUser,
+    ClientIp(ip): ClientIp,
+    Path(id): Path<String>,
+) -> AppResult<StatusCode> {
+    if id == user.sid {
+        return Err(AppError::bad("지금 쓰는 세션은 로그아웃으로 끝내세요"));
+    }
+    if !session::revoke_for_user(&state, user.id, &id).await? {
+        return Err(AppError::NotFound);
+    }
+    let u = find_user(&state, user.id).await?;
+    audit::log(&state, Some(user.id), "auth.session_revoked", &u.email, &ip).await;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// POST /api/auth/sessions/revoke-others — 지금 기기만 남기고 모두 로그아웃
+pub async fn revoke_other_sessions(
+    State(state): State<AppState>,
+    user: AuthUser,
+    ClientIp(ip): ClientIp,
+) -> AppResult<Json<serde_json::Value>> {
+    let mut n = 0;
+    for s in session::list_for_user(&state, user.id).await? {
+        if s.id != user.sid && session::revoke_for_user(&state, user.id, &s.id).await? {
+            n += 1;
+        }
+    }
+    let u = find_user(&state, user.id).await?;
+    audit::log(
+        &state,
+        Some(user.id),
+        "auth.sessions_revoked",
+        &format!("{} ({n})", u.email),
+        &ip,
+    )
+    .await;
+    Ok(Json(json!({ "revoked": n })))
 }
 
 /// POST /api/auth/ws-ticket — WebSocket 접속용 30초 1회성 티켓

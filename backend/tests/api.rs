@@ -500,6 +500,76 @@ async fn full_flow() {
         clear_rl().await;
     }
 
+    // ── 내 로그인 세션 · 다른 기기 로그아웃 ──
+    {
+        let r = ctx.get("/api/auth/sessions", &t).await;
+        assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+        let current = r.body["current"].as_str().unwrap().to_string();
+        let list = r.body["sessions"].as_array().unwrap().clone();
+        assert!(list.len() >= 2, "{list:?}");
+        assert!(list.iter().any(|s| s["id"] == current.as_str()));
+        assert!(list.iter().all(|s| s["created_at"].as_i64().unwrap() > 0));
+        let del = |id: String| {
+            ctx.req(
+                Method::DELETE,
+                &format!("/api/auth/sessions/{id}"),
+                Some(&t),
+                None,
+                None,
+            )
+        };
+        assert_eq!(del(current.clone()).await.status, StatusCode::BAD_REQUEST);
+        let other = list.iter().find(|s| s["id"] != current.as_str()).unwrap()["id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        assert_eq!(del(other.clone()).await.status, StatusCode::NO_CONTENT);
+        assert_eq!(del(other).await.status, StatusCode::NOT_FOUND);
+        let r = ctx
+            .post("/api/auth/sessions/revoke-others", &t, json!({}))
+            .await;
+        assert_eq!(r.status, StatusCode::OK);
+        let r = ctx.get("/api/auth/sessions", &t).await;
+        assert_eq!(r.body["sessions"].as_array().unwrap().len(), 1);
+        assert_eq!(r.body["sessions"][0]["id"], current.as_str());
+        assert_eq!(ctx.get("/api/auth/me", &t).await.status, StatusCode::OK);
+    }
+
+    // ── 2단계 인증 필수 정책 ──
+    {
+        let put_policy = |on: bool| {
+            ctx.req(
+                Method::PUT,
+                "/api/security/policy",
+                Some(&t),
+                None,
+                Some(json!({ "require_2fa": on })),
+            )
+        };
+        // 내 2단계 인증이 꺼져 있으면 켤 수 없음
+        assert_eq!(put_policy(true).await.status, StatusCode::BAD_REQUEST);
+        assert_eq!(
+            ctx.get("/api/security/policy", &t).await.body["require_2fa"],
+            false
+        );
+        assert_eq!(ctx.get("/api/auth/2fa", &t).await.body["required"], false);
+        // 등록 전 표시가 있으면 /auth/* 말고는 막힘
+        let me_id = ctx.get("/api/auth/me", &t).await.body["id"]
+            .as_u64()
+            .unwrap();
+        rpanel::auth::session::set_needs_2fa(&state, me_id, true)
+            .await
+            .unwrap();
+        assert_eq!(
+            ctx.get("/api/projects", &t).await.status,
+            StatusCode::FORBIDDEN
+        );
+        assert_eq!(ctx.get("/api/auth/2fa", &t).await.status, StatusCode::OK);
+        // 정책을 끄면(저장) 모든 표시가 풀림
+        assert_eq!(put_policy(false).await.status, StatusCode::OK);
+        assert_eq!(ctx.get("/api/projects", &t).await.status, StatusCode::OK);
+    }
+
     // ── 프로젝트 ──
     let r = ctx
         .post(

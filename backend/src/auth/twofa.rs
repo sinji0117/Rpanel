@@ -184,12 +184,44 @@ fn setup_key(state: &AppState, uid: u64) -> String {
     state.key(&["totp_setup", &uid.to_string()])
 }
 
-/// GET /api/auth/2fa — 내 2단계 인증 상태
+const POLICY_KEY: &str = "require_2fa";
+
+/// 모든 관리자에게 2단계 인증 필수인지 (패널 설정)
+pub async fn required(state: &AppState) -> bool {
+    sqlx::query_scalar::<_, String>("SELECT v FROM panel_settings WHERE k = ?")
+        .bind(POLICY_KEY)
+        .fetch_optional(&state.db)
+        .await
+        .ok()
+        .flatten()
+        .is_some_and(|v| v == "1")
+}
+
+pub async fn set_required(state: &AppState, on: bool) -> AppResult<()> {
+    sqlx::query(
+        "INSERT INTO panel_settings (k, v) VALUES (?, ?) ON DUPLICATE KEY UPDATE v = VALUES(v)",
+    )
+    .bind(POLICY_KEY)
+    .bind(if on { "1" } else { "0" })
+    .execute(&state.db)
+    .await?;
+    // 아직 등록하지 않은 계정은 바로 등록 화면으로 (끄면 모두 풀림)
+    let users: Vec<(u64, bool)> = sqlx::query_as("SELECT id, totp_enabled FROM users")
+        .fetch_all(&state.db)
+        .await?;
+    for (uid, enabled) in users {
+        session::set_needs_2fa(state, uid, on && !enabled).await?;
+    }
+    Ok(())
+}
+
+/// GET /api/auth/2fa — 내 2단계 인증 상태 (required: 필수 정책)
 pub async fn status(State(state): State<AppState>, user: AuthUser) -> AppResult<Json<Value>> {
     let row = load(&state, user.id).await?;
     Ok(Json(json!({
         "enabled": row.totp_enabled,
         "recovery_left": if row.totp_enabled { recovery_list(&row).len() } else { 0 },
+        "required": required(&state).await,
     })))
 }
 
@@ -260,6 +292,7 @@ pub async fn enable(
     .execute(&state.db)
     .await?;
     let _: () = r.del(setup_key(&state, user.id)).await?;
+    session::set_needs_2fa(&state, user.id, false).await?;
     let row = load(&state, user.id).await?;
     audit::log(&state, Some(user.id), "auth.2fa_enabled", &row.email, &ip).await;
     notify(
@@ -301,6 +334,11 @@ pub async fn disable(
     ClientIp(ip): ClientIp,
     Json(b): Json<ConfirmInput>,
 ) -> AppResult<StatusCode> {
+    if required(&state).await {
+        return Err(AppError::bad(
+            "2단계 인증이 필수로 정해져 있어 끌 수 없습니다",
+        ));
+    }
     let row = confirm(&state, user.id, &b).await?;
     sqlx::query(
         "UPDATE users SET totp_secret = NULL, totp_enabled = 0, totp_recovery = NULL WHERE id = ?",
@@ -361,6 +399,9 @@ pub async fn reset_for_user(
     .await?;
     // 그 계정의 로그인도 모두 끊어, 다시 로그인하면서 새로 등록하게 함
     session::revoke_all_for_user(&state, id).await?;
+    if required(&state).await {
+        session::set_needs_2fa(&state, id, true).await?;
+    }
     audit::log(&state, Some(user.id), "admin.2fa_reset", &row.email, &ip).await;
     notify(
         &state,

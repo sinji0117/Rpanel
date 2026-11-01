@@ -13,7 +13,9 @@ import Projects from './pages/Projects'
 import Settings from './pages/Settings'
 import Sites from './pages/Sites'
 import AdminsPage from './pages/Admins'
-import SecurityPage from './pages/Security'
+import SecurityPage, { ForcedTwoFactor } from './pages/Security'
+import { get } from './lib/api'
+import { useFetch } from './lib/useFetch'
 import RuntimesPage from './pages/Runtimes'
 import LogsPage from './pages/Logs'
 import NotificationsPage from './pages/Notifications'
@@ -37,7 +39,10 @@ function NotFound() {
 function Gate() {
   const { status } = useAuth()
   const lang = useLang() // 언어를 바꾸면 화면 전체를 새 언어로 다시 그림
-  if (status === 'loading') return <Loading full />
+  // 2단계 인증 필수 정책: 아직 등록하지 않았으면 등록 화면부터
+  const tfa = useFetch(() => (status === 'authed' ? get('/auth/2fa').catch(() => null) : Promise.resolve(null)), [status])
+  if (status === 'loading' || (status === 'authed' && tfa.loading)) return <Loading full />
+  if (status === 'authed' && tfa.data?.required && !tfa.data.enabled) return <ForcedTwoFactor key={lang} onDone={() => tfa.reload(true)} />
   if (status === 'setup') return <SetupPage key={lang} />
   if (status === 'anon') return <LoginPage key={lang} />
   return (

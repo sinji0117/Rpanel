@@ -4,6 +4,7 @@
 //! - 토큰은 "패밀리"(=로그인 세션) 단위로 묶이며, 사용할 때마다 회전(rotation)됩니다.
 //! - 이미 사용된 토큰이 다시 들어오면(탈취 의심) 패밀리 전체를 폐기합니다.
 //! - 액세스 JWT의 `sid`에 패밀리 id가 들어가므로, 로그아웃/폐기 즉시 액세스 토큰도 거부됩니다.
+//! - 세션마다 기기 정보(IP · User-Agent · 로그인 시각 · 마지막 사용)를 남겨 '내 로그인 세션' 에서 봅니다.
 
 use rand::RngCore;
 use redis::AsyncCommands;
@@ -28,13 +29,121 @@ fn digest(token: &str) -> String {
     hex::encode(Sha256::digest(token.as_bytes()))
 }
 
+fn now_secs() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
+}
+
+/// 세션(패밀리)의 기기 정보
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct SessionMeta {
+    pub ip: String,
+    pub ua: String,
+    pub created_at: i64,
+    pub last_seen: i64,
+}
+
+async fn save_meta(state: &AppState, fam: &str, meta: &SessionMeta) -> AppResult<()> {
+    let mut r = state.redis.clone();
+    let _: () = r
+        .set_ex(
+            state.key(&["fammeta", fam]),
+            serde_json::to_string(meta).unwrap_or_default(),
+            state.cfg.refresh_ttl_secs as u64,
+        )
+        .await?;
+    Ok(())
+}
+
+async fn load_meta(state: &AppState, fam: &str) -> AppResult<Option<SessionMeta>> {
+    let mut r = state.redis.clone();
+    let raw: Option<String> = r.get(state.key(&["fammeta", fam])).await?;
+    Ok(raw.and_then(|s| serde_json::from_str(&s).ok()))
+}
+
+/// 리프레시할 때 마지막 사용 시각 · IP 갱신
+pub async fn touch(state: &AppState, fam: &str, ip: &str) -> AppResult<()> {
+    let mut meta = load_meta(state, fam).await?.unwrap_or_default();
+    meta.last_seen = now_secs();
+    if !ip.is_empty() && ip != "unknown" {
+        meta.ip = ip.to_string();
+    }
+    save_meta(state, fam, &meta).await
+}
+
+#[derive(Debug, Serialize)]
+pub struct SessionInfo {
+    pub id: String,
+    pub ip: String,
+    pub user_agent: String,
+    pub created_at: i64,
+    pub last_seen: i64,
+}
+
+/// 사용자의 살아 있는 로그인 세션 (끝난 세션은 목록에서 정리)
+pub async fn list_for_user(state: &AppState, uid: u64) -> AppResult<Vec<SessionInfo>> {
+    let mut r = state.redis.clone();
+    let ufam = state.key(&["ufam", &uid.to_string()]);
+    let fams: Vec<String> = r.smembers(&ufam).await?;
+    let mut out = Vec::new();
+    for fam in fams {
+        let alive: bool = r.exists(state.key(&["rtfam", &fam])).await?;
+        if !alive || is_revoked(state, &fam).await? {
+            let _: () = r.srem(&ufam, &fam).await?;
+            continue;
+        }
+        let m = load_meta(state, &fam).await?.unwrap_or_default();
+        out.push(SessionInfo {
+            id: fam,
+            ip: m.ip,
+            user_agent: m.ua,
+            created_at: m.created_at,
+            last_seen: m.last_seen,
+        });
+    }
+    out.sort_by(|a, b| b.last_seen.cmp(&a.last_seen));
+    Ok(out)
+}
+
+/// 내 세션 하나 끝내기. 내 세션이 아니면 false
+pub async fn revoke_for_user(state: &AppState, uid: u64, fam: &str) -> AppResult<bool> {
+    let mut r = state.redis.clone();
+    let ufam = state.key(&["ufam", &uid.to_string()]);
+    let mine: bool = r.sismember(&ufam, fam).await?;
+    if !mine {
+        return Ok(false);
+    }
+    revoke_family(state, fam).await?;
+    let _: () = r.srem(&ufam, fam).await?;
+    Ok(true)
+}
+
+/// 2단계 인증 필수 정책에서 아직 등록하지 않은 사용자 표시 (등록 전에는 /auth/* 만 쓸 수 있음)
+pub async fn needs_2fa(state: &AppState, uid: u64) -> AppResult<bool> {
+    let mut r = state.redis.clone();
+    Ok(r.exists(state.key(&["need2fa", &uid.to_string()])).await?)
+}
+
+pub async fn set_needs_2fa(state: &AppState, uid: u64, on: bool) -> AppResult<()> {
+    let mut r = state.redis.clone();
+    let k = state.key(&["need2fa", &uid.to_string()]);
+    if on {
+        let _: () = r.set(&k, 1).await?;
+    } else {
+        let _: () = r.del(&k).await?;
+    }
+    Ok(())
+}
+
 pub struct Issued {
     pub refresh_token: String,
     pub family: String,
 }
 
-/// 새 로그인 세션 생성
-pub async fn create(state: &AppState, uid: u64) -> AppResult<Issued> {
+/// 새 로그인 세션 생성 (ip · ua: 어느 기기에서 로그인했는지)
+pub async fn create(state: &AppState, uid: u64, ip: &str, ua: &str) -> AppResult<Issued> {
     let fam = random_token(16);
     let token = issue_in_family(state, uid, &fam).await?;
     let mut r = state.redis.clone();
@@ -42,6 +151,18 @@ pub async fn create(state: &AppState, uid: u64) -> AppResult<Issued> {
     let ufam = state.key(&["ufam", &uid.to_string()]);
     let _: () = r.sadd(&ufam, &fam).await?;
     let _: () = r.expire(&ufam, ttl).await?;
+    let now = now_secs();
+    save_meta(
+        state,
+        &fam,
+        &SessionMeta {
+            ip: ip.to_string(),
+            ua: ua.chars().take(300).collect(),
+            created_at: now,
+            last_seen: now,
+        },
+    )
+    .await?;
     Ok(Issued {
         refresh_token: token,
         family: fam,
@@ -118,6 +239,7 @@ pub async fn revoke_family(state: &AppState, fam: &str) -> AppResult<()> {
         let _: () = r.del(state.key(&["rt", &h])).await?;
     }
     let _: () = r.del(&famkey).await?;
+    let _: () = r.del(state.key(&["fammeta", fam])).await?;
     // 액세스 토큰 최대 수명 동안 폐기 표시 유지
     let _: () = r
         .set_ex(

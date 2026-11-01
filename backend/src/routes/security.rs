@@ -282,6 +282,65 @@ pub async fn disable(
     Ok(Json(firewall_json(&firewall_state(&state).await?)))
 }
 
+// ───────────────────────── 2단계 인증 필수 정책 ─────────────────────────
+
+/// GET /api/security/policy
+pub async fn policy(State(state): State<AppState>, user: AuthUser) -> AppResult<Json<Value>> {
+    user.require_admin()?;
+    Ok(Json(
+        json!({ "require_2fa": twofa::required(&state).await }),
+    ))
+}
+
+#[derive(Deserialize)]
+pub struct PolicyInput {
+    pub require_2fa: bool,
+}
+
+/// PUT /api/security/policy — 모든 관리자에게 2단계 인증 필수
+pub async fn set_policy(
+    State(state): State<AppState>,
+    user: AuthUser,
+    ClientIp(ip): ClientIp,
+    Json(b): Json<PolicyInput>,
+) -> AppResult<Json<Value>> {
+    user.require_admin()?;
+    if b.require_2fa {
+        let me: bool = sqlx::query_scalar("SELECT totp_enabled FROM users WHERE id = ?")
+            .bind(user.id)
+            .fetch_one(&state.db)
+            .await?;
+        if !me {
+            return Err(AppError::bad("먼저 내 2단계 인증을 켜세요."));
+        }
+    }
+    twofa::set_required(&state, b.require_2fa).await?;
+    audit::log(
+        &state,
+        Some(user.id),
+        "security.require_2fa",
+        if b.require_2fa { "on" } else { "off" },
+        &ip,
+    )
+    .await;
+    crate::notify::emit(
+        &state,
+        crate::notify::Event::new(
+            "security",
+            if b.require_2fa { "info" } else { "warning" },
+            if b.require_2fa {
+                "2단계 인증 필수를 켰습니다"
+            } else {
+                "2단계 인증 필수를 껐습니다"
+            },
+            json!({}),
+        )
+        .link("/security?tab=2fa"),
+    )
+    .await;
+    Ok(Json(json!({ "require_2fa": b.require_2fa })))
+}
+
 // ───────────────────────── 로그인 보안 ─────────────────────────
 
 /// 로그인 시도 카운터 (Redis "rl:login:*") — 많은 순

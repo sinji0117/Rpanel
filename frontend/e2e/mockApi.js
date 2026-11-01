@@ -29,6 +29,19 @@ export function createMockBackend({ needsSetup = false } = {}) {
     mongos: [],
     panelDomain: null,
     panelAllow: [],
+    // 2단계 인증 (인증 앱 코드는 항상 123456 으로 가정)
+    totp: { enabled: false, recovery: [] },
+    firewall: {
+      active: true,
+      rules: [
+        { to: '22/tcp', action: 'ALLOW IN', from: 'Anywhere' },
+        { to: '8443/tcp', action: 'ALLOW IN', from: 'Anywhere' },
+        { to: '80/tcp', action: 'ALLOW IN', from: 'Anywhere' },
+        { to: '443/tcp', action: 'ALLOW IN', from: 'Anywhere' },
+        { to: '3000/tcp', action: 'ALLOW IN', from: 'Anywhere' },
+      ],
+    },
+    loginCounters: [{ bucket: 'login:ip:198.51.100.7', kind: 'ip', who: '198.51.100.7', count: 11, limit: 10, blocked: true, ttl: 240 }],
     engines: [
       {
         engine: 'mariadb',
@@ -110,6 +123,33 @@ export function createMockBackend({ needsSetup = false } = {}) {
 
   const json = (route, status, body) => route.fulfill({ status, contentType: 'application/json', body: body === undefined ? '' : JSON.stringify(body) })
   const token = () => ({ access_token: 'test-access-token', token_type: 'Bearer', expires_at: Date.now() / 1000 + 900, user: db.user })
+  const TOTP_CODE = '123456'
+  const MFA_TOKEN = 'cd'.repeat(24)
+  const newRecovery = () => Array.from({ length: 10 }, (_, i) => `a1b2-c3d${i}`)
+  /** 6자리 코드 또는 복구 코드 (복구 코드는 쓰면 지움) */
+  const checkCode = (code) => {
+    const c = (code ?? '').trim()
+    if (c === TOTP_CODE) return true
+    const i = db.totp.recovery.indexOf(c.toLowerCase())
+    if (i < 0) return false
+    db.totp.recovery.splice(i, 1)
+    return true
+  }
+  const PROTECTED = [22, 8443, 80, 443]
+  const fwView = () => {
+    const f = db.firewall
+    return {
+      installed: true,
+      active: f.active,
+      ssh_port: 22,
+      panel_port: 8443,
+      protected: PROTECTED,
+      rules: f.active
+        ? f.rules.map((r, i) => ({ num: i + 1, ...r, v6: false, comment: null, protected: r.action.startsWith('ALLOW') && PROTECTED.includes(parseInt(r.to, 10)) }))
+        : [],
+      added: f.active ? [] : f.rules.map((r) => `ufw ${r.action.startsWith('DENY') ? 'deny' : 'allow'} ${r.to}`),
+    }
+  }
 
   async function handle(route) {
     const req = route.request()
@@ -137,6 +177,13 @@ export function createMockBackend({ needsSetup = false } = {}) {
     }
     if (path === '/auth/login' && method === 'POST') {
       if (body.email !== db.user?.email || body.password !== db.password) return json(route, 400, { error: 'bad_request', message: '이메일 또는 비밀번호가 올바르지 않습니다' })
+      if (db.totp.enabled) return json(route, 200, { mfa_required: true, mfa_token: MFA_TOKEN, expires_in: 300 })
+      db.loggedIn = true
+      return json(route, 200, token())
+    }
+    if (path === '/auth/login/otp' && method === 'POST') {
+      if (body.mfa_token !== MFA_TOKEN) return json(route, 400, { error: 'bad_request', message: '로그인 시간이 지났습니다. 처음부터 다시 로그인하세요' })
+      if (!checkCode(body.code)) return json(route, 400, { error: 'bad_request', message: '인증 코드가 맞지 않습니다' })
       db.loggedIn = true
       return json(route, 200, token())
     }
@@ -147,6 +194,76 @@ export function createMockBackend({ needsSetup = false } = {}) {
     }
     if (!authed && !/^\/dbweb\/(login|logout|s\/)/.test(path)) return json(route, 401, { error: 'unauthorized', message: '인증이 필요합니다' })
     if (path === '/auth/ws-ticket') return json(route, 200, { ticket: 'a'.repeat(48), expires_in: 30 })
+
+    // ── 2단계 인증 ──
+    if (path === '/auth/2fa') return json(route, 200, { enabled: db.totp.enabled, recovery_left: db.totp.enabled ? db.totp.recovery.length : 0 })
+    if (path === '/auth/2fa/setup' && method === 'POST') {
+      const secret = 'JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP'
+      return json(route, 200, { secret, uri: `otpauth://totp/Rpanel:admin%40example.com?secret=${secret}&issuer=Rpanel&algorithm=SHA1&digits=6&period=30`, expires_in: 600 })
+    }
+    if (path === '/auth/2fa/enable' && method === 'POST') {
+      if (body.code !== TOTP_CODE) return json(route, 400, { error: 'bad_request', message: '코드가 맞지 않습니다. 휴대폰 시간이 자동으로 맞춰져 있는지 확인하세요' })
+      db.totp = { enabled: true, recovery: newRecovery() }
+      return json(route, 200, { recovery_codes: [...db.totp.recovery] })
+    }
+    if ((path === '/auth/2fa/disable' || path === '/auth/2fa/recovery') && method === 'POST') {
+      if (body.password !== db.password) return json(route, 400, { error: 'bad_request', message: '비밀번호가 올바르지 않습니다' })
+      if (!checkCode(body.code)) return json(route, 400, { error: 'bad_request', message: '인증 코드가 맞지 않습니다' })
+      if (path.endsWith('/disable')) {
+        db.totp = { enabled: false, recovery: [] }
+        return json(route, 204)
+      }
+      db.totp.recovery = newRecovery()
+      return json(route, 200, { recovery_codes: [...db.totp.recovery] })
+    }
+
+    // ── 보안 ──
+    if (path === '/security/check') {
+      const items = [
+        { id: 'firewall', level: db.firewall.active ? 'ok' : 'fail', data: { state: db.firewall.active ? 'active' : 'inactive' } },
+        { id: 'ssh_password', level: 'warn', data: { value: 'yes', fail2ban: 'missing' } },
+        { id: 'panel_access', level: db.panelAllow.length ? 'ok' : 'warn', data: { my_ip: '203.0.113.9' } },
+        { id: 'two_factor', level: db.totp.enabled ? 'ok' : 'warn', data: { total: 1, enabled: db.totp.enabled ? 1 : 0, me: db.totp.enabled } },
+        { id: 'certificates', level: 'fail', data: { expired: ['Example API'], soon: [], total: 1 } },
+      ]
+      const count = (lv) => items.filter((i) => i.level === lv).length
+      return json(route, 200, { items, summary: { ok: count('ok'), warn: count('warn'), fail: count('fail'), info: count('info') } })
+    }
+    if (path === '/security/firewall') return json(route, 200, fwView())
+    if (path === '/security/firewall/allow' && method === 'POST') {
+      const mm = String(body.port).match(/^(\d{1,5})(?::(\d{1,5}))?$/)
+      if (!mm || Number(mm[1]) < 1 || Number(mm[2] ?? mm[1]) > 65535)
+        return json(route, 400, { error: 'bad_request', message: '포트는 3000 또는 3000:3010 처럼 1~65535 사이로 넣으세요' })
+      db.firewall.rules.push({ to: body.proto === 'any' ? body.port : `${body.port}/${body.proto}`, action: 'ALLOW IN', from: body.from || 'Anywhere' })
+      return json(route, 200, fwView())
+    }
+    if (path === '/security/firewall/block' && method === 'POST') {
+      if (body.ip === '203.0.113.9') return json(route, 400, { error: 'bad_request', message: '지금 접속한 IP 203.0.113.9 가 들어 있어 막을 수 없습니다' })
+      db.firewall.rules.unshift({ to: 'Anywhere', action: 'DENY IN', from: body.ip })
+      return json(route, 200, fwView())
+    }
+    if (path === '/security/firewall/delete' && method === 'POST') {
+      const r = fwView().rules.find((x) => x.num === body.num)
+      if (!r || r.to !== body.to) return json(route, 400, { error: 'bad_request', message: `규칙 #${body.num} 이 바뀌었습니다 (목록을 새로고침하세요)` })
+      if (r.protected) return json(route, 400, { error: 'bad_request', message: 'SSH·패널·웹(80·443) 포트를 여는 규칙은 지울 수 없습니다' })
+      db.firewall.rules.splice(body.num - 1, 1)
+      return json(route, 200, fwView())
+    }
+    if (path === '/security/firewall/enable' || path === '/security/firewall/disable') {
+      db.firewall.active = path.endsWith('enable')
+      return json(route, 200, fwView())
+    }
+    if (path === '/security/logins')
+      return json(route, 200, {
+        failures: [{ id: 1, user_id: null, email: null, action: 'auth.login_failed', target: 'admin@example.com', ip: '198.51.100.7', created_at: now() }],
+        counters: db.loginCounters,
+        limit: 10,
+        window_secs: 300,
+      })
+    if (path === '/security/unblock' && method === 'POST') {
+      db.loginCounters = db.loginCounters.filter((c) => c.bucket !== body.bucket)
+      return json(route, 200, { counters: db.loginCounters })
+    }
 
     // ── system ──
     if (path === '/system/info')
@@ -318,7 +435,8 @@ export function createMockBackend({ needsSetup = false } = {}) {
 
     // ── admins ──
     const admins = () => [db.user, ...db.admins]
-    if (path === '/users' && method === 'GET') return json(route, 200, { users: admins().map((u) => ({ last_login_at: null, ...u })), me: db.user.id })
+    if (path === '/users' && method === 'GET')
+      return json(route, 200, { users: admins().map((u) => ({ last_login_at: null, totp_enabled: false, ...u, ...(u.id === db.user.id ? { totp_enabled: db.totp.enabled } : {}) })), me: db.user.id })
     if (path === '/users' && method === 'POST') {
       if (!/^[^@\s]+@[^@\s]+$/.test(body.email ?? '')) return json(route, 400, { error: 'bad_request', message: '이메일 형식이 올바르지 않습니다' })
       if ((body.password ?? '').length < 10) return json(route, 400, { error: 'bad_request', message: '비밀번호는 10자 이상이어야 합니다' })
@@ -326,6 +444,13 @@ export function createMockBackend({ needsSetup = false } = {}) {
       const u = { id: 1000 + id(), email: body.email.toLowerCase(), role: 'admin', created_at: now(), last_login_at: null }
       db.admins.push(u)
       return json(route, 201, u)
+    }
+    const tm = path.match(/^\/users\/(\d+)\/2fa$/)
+    if (tm && method === 'DELETE') {
+      const u = admins().find((x) => x.id === Number(tm[1]))
+      if (!u || u.id === db.user.id) return json(route, 400, { error: 'bad_request', message: '내 2단계 인증은 보안 → 2단계 인증에서 끄세요' })
+      u.totp_enabled = false
+      return json(route, 204)
     }
     let um = path.match(/^\/users\/(\d+)$/)
     if (um) {
@@ -1096,6 +1221,16 @@ export function createMockBackend({ needsSetup = false } = {}) {
       delete db.dbSessions[req.headers()['x-db-token']]
       return json(route, 204)
     }
+    m = path.match(/^\/deployments\/(\d+)\/cancel$/)
+    if (m && method === 'POST') {
+      const d = db.deployments.find((x) => x.id === Number(m[1]))
+      if (!d || !['queued', 'running'].includes(d.status)) return json(route, 409, { error: 'conflict', message: '이미 끝난 배포입니다' })
+      d.status = 'cancelled'
+      d.finished_at = now()
+      const a = db.apps.find((x) => x.id === d.app_id)
+      if (a?.status === 'deploying') a.status = a.current_release ? 'running' : 'failed'
+      return json(route, 200, { ok: true })
+    }
     m = path.match(/^\/deployments\/(\d+)$/)
     if (m) {
       const d = db.deployments.find((x) => x.id === Number(m[1]))
@@ -1110,6 +1245,8 @@ export function createMockBackend({ needsSetup = false } = {}) {
     const m = ws.url().match(/\/ws\/deployments\/(\d+)/)
     if (m) {
       const d = db.deployments.find((x) => x.id === Number(m[1]))
+      // hold: 끝나지 않고 계속 진행 중인 배포 (중지 버튼 시험용)
+      if (d?.hold) return
       const lines = [
         'Rpanel 배포 #' + m[1],
         '▶ 소스 가져오기',

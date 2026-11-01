@@ -1111,3 +1111,139 @@ test('설정: 백업 · 프로젝트 저장 위치 바꾸기', async ({ page }) 
   await pj.getByRole('button', { name: '옮기기' }).click()
   await expect(page.getByTestId('storage-path-projects')).toHaveText('/srv/rpanel')
 })
+
+test('배포 중지: 진행 중 표시 · 삭제 잠금 · 중지', async ({ page }) => {
+  const backend = seededBackend()
+  const at = new Date().toISOString()
+  backend.db.deployments.push({ id: 30, app_id: 2, status: 'queued', hold: true, triggered_by: 1, commit_sha: null, error: null, started_at: null, finished_at: null, created_at: at })
+  await backend.install(page)
+  await acceptPopups(page)
+  await page.goto('/apps/2')
+
+  // 대기 중이어도 상단은 "배포 중…" + 중지 버튼, 헤더에는 진행 중 1개
+  await expect(page.getByRole('button', { name: '배포 중…' })).toBeDisabled()
+  await expect(page.getByRole('button', { name: '■ 배포 중지' })).toBeVisible()
+  await expect(page.getByTestId('active-deploy-count').first()).toHaveText('1')
+  await page.getByRole('button', { name: '진행 중인 배포 1개' }).first().click()
+  const pop = page.getByRole('dialog', { name: '진행 중인 배포' })
+  await expect(pop.getByText('Example API')).toBeVisible()
+  await page.keyboard.press('Escape')
+
+  // 설정 탭: 삭제 버튼이 잠기고 안내 · 중지 버튼
+  await page.getByRole('tab', { name: '설정' }).click()
+  await expect(page.getByText('배포 #30 이(가) 진행 중이라 지금은 삭제할 수 없습니다')).toBeVisible()
+  await expect(page.getByRole('button', { name: '앱 삭제' })).toBeDisabled()
+  await page.getByRole('status').filter({ hasText: '배포 #30' }).getByRole('button', { name: '■ 중지' }).click()
+  await expect(page.getByText('취소 요청을 보냈습니다')).toBeVisible()
+  await expect(page.getByRole('button', { name: '앱 삭제' })).toBeEnabled()
+  expect(backend.db.deployments.find((d) => d.id === 30).status).toBe('cancelled')
+  // 상단도 다시 "배포" 로, 헤더 표시는 사라짐
+  await expect(page.getByRole('button', { name: '배포', exact: true })).toBeVisible({ timeout: 10_000 })
+  await expect(page.getByTestId('active-deploy-count')).toHaveCount(0, { timeout: 20_000 })
+
+  // 로그 > 배포 기록: 진행 중 필터
+  await page.goto('/logs?tab=deployments')
+  await expect(page.getByRole('button', { name: '진행 중 0' })).toBeVisible()
+  await page.getByRole('button', { name: '진행 중 0' }).click()
+  await expect(page.getByText('진행 중인 배포가 없습니다')).toBeVisible()
+})
+
+test('2단계 인증: 켜기 → 로그인 두 번째 단계 · 복구 코드 → 끄기', async ({ page }) => {
+  const backend = createMockBackend()
+  await loginAs(page, backend)
+  await page.goto('/security?tab=2fa')
+  await expect(page.getByTestId('tfa-state')).toContainText('꺼짐')
+
+  await page.getByRole('button', { name: '켜기', exact: true }).click()
+  await expect(page.getByRole('img', { name: 'QR 코드' })).toBeVisible()
+  await expect(page.getByTestId('totp-secret')).toHaveText('JBSW Y3DP EHPK 3PXP JBSW Y3DP EHPK 3PXP')
+  await page.getByLabel('인증 코드').fill('000000')
+  await page.getByRole('button', { name: '확인하고 켜기' }).click()
+  await expect(page.getByRole('alert')).toContainText('코드가 맞지 않습니다')
+  await page.getByLabel('인증 코드').fill('123456')
+  await page.getByRole('button', { name: '확인하고 켜기' }).click()
+  await expect(page.getByTestId('recovery-codes').locator('li')).toHaveCount(10)
+  await page.getByRole('button', { name: '저장했습니다' }).click()
+  await expect(page.getByTestId('tfa-state')).toContainText('켜짐')
+  await expect(page.getByText('남은 복구 코드 10개')).toBeVisible()
+  await page.goto('/admins')
+  await expect(page.getByTestId('tfa-1')).toContainText('켜짐')
+
+  // 다시 로그인: 비밀번호 다음에 코드
+  backend.db.loggedIn = false
+  await page.goto('/')
+  await page.getByLabel('이메일').fill('admin@example.com')
+  await page.getByLabel('비밀번호').fill('correct-horse-1')
+  await page.getByRole('button', { name: '로그인' }).click()
+  await expect(page.getByRole('heading', { name: '2단계 인증' })).toBeVisible()
+  await page.getByLabel('인증 코드').fill('111111')
+  await page.getByRole('button', { name: '확인' }).click()
+  await expect(page.getByRole('alert')).toContainText('인증 코드가 맞지 않습니다')
+  // 휴대폰이 없으면 복구 코드
+  await page.getByLabel('인증 코드').fill('a1b2-c3d0')
+  await page.getByRole('button', { name: '확인' }).click()
+  await expect(page.getByRole('heading', { name: '대시보드' })).toBeVisible()
+  expect(backend.db.totp.recovery).toHaveLength(9)
+
+  // 끄기: 비밀번호 + 코드
+  await page.goto('/security?tab=2fa')
+  await expect(page.getByText('남은 복구 코드 9개')).toBeVisible()
+  await page.getByRole('button', { name: '끄기' }).click()
+  const dlg = page.getByRole('dialog', { name: '2단계 인증 끄기' })
+  await dlg.getByLabel('비밀번호').fill('correct-horse-1')
+  await dlg.getByLabel('인증 코드 또는 복구 코드').fill('123456')
+  await dlg.getByRole('button', { name: '확인' }).click()
+  await expect(page.getByTestId('tfa-state')).toContainText('꺼짐')
+  expect(backend.db.totp.enabled).toBe(false)
+})
+
+test('보안: 점검 → 방화벽 규칙 · 차단 → 로그인 차단 해제 → 다른 관리자 2단계 초기화', async ({ page }) => {
+  const backend = seededBackend()
+  backend.db.admins.push({ id: 1001, email: 'ops@example.com', role: 'admin', created_at: '', last_login_at: null, totp_enabled: true })
+  await backend.install(page)
+  await acceptPopups(page)
+  await menu(page).getByRole('link', { name: '보안' }).click()
+  await expect(page.getByRole('heading', { name: '보안' })).toBeVisible()
+
+  // 점검: 위험이 위로, 고칠 곳으로 바로 이동
+  await expect(page.getByTestId('check-firewall')).toHaveAttribute('data-level', 'ok')
+  await expect(page.getByTestId('check-certificates')).toContainText('만료됨: Example API')
+  await expect(page.locator('[data-testid^=check-]').first()).toHaveAttribute('data-level', 'fail')
+  await page.getByTestId('check-two_factor').getByRole('button', { name: '설정하기' }).click()
+  await expect(page).toHaveURL(/tab=2fa/)
+
+  // 방화벽
+  await page.getByRole('tab', { name: '방화벽' }).click()
+  await expect(page.getByTestId('firewall-state')).toContainText('켜짐')
+  const rules = page.getByRole('table', { name: '규칙' })
+  await expect(rules.getByRole('row', { name: /22\/tcp/ })).toContainText('보호됨')
+  await rules.getByRole('row', { name: /3000\/tcp/ }).getByRole('button', { name: '지우기' }).click()
+  await expect(rules.getByRole('row', { name: /3000\/tcp/ })).toHaveCount(0)
+  await page.getByLabel('포트', { exact: true }).fill('70000')
+  await page.getByRole('button', { name: '열기', exact: true }).click()
+  await expect(page.getByRole('alert')).toContainText('1~65535')
+  await page.getByLabel('포트', { exact: true }).fill('5000')
+  await page.getByRole('button', { name: '열기', exact: true }).click()
+  await expect(rules.getByRole('row', { name: /5000\/tcp/ })).toBeVisible()
+  await page.getByLabel('IP 차단').fill('198.51.100.7')
+  await page.getByRole('button', { name: '차단', exact: true }).click()
+  await expect(rules.getByRole('row', { name: /198\.51\.100\.7/ })).toContainText('DENY IN')
+  await page.getByRole('button', { name: '끄기' }).click()
+  await expect(page.getByTestId('firewall-state')).toContainText('꺼짐')
+  await expect(page.getByText('ufw allow 5000/tcp')).toBeVisible()
+
+  // 로그인 보안: 막힌 IP 해제, 실패 기록
+  await page.getByRole('tab', { name: '로그인 보안' }).click()
+  await expect(page.getByTestId('panel-access-state')).toHaveText('어디서나 접속 가능')
+  const limits = page.getByRole('table', { name: '로그인 시도 제한' })
+  await expect(limits).toContainText('차단됨')
+  await limits.getByRole('button', { name: '해제' }).click()
+  await expect(page.getByText('지금 막힌 IP·계정이 없습니다')).toBeVisible()
+  await expect(page.getByRole('table', { name: '최근 로그인 실패' })).toContainText('비밀번호 틀림')
+
+  // 관리자: 다른 관리자의 2단계 인증 초기화
+  await page.goto('/admins')
+  await expect(page.getByTestId('tfa-1001')).toContainText('켜짐')
+  await page.getByRole('button', { name: '2단계 인증 초기화' }).click()
+  await expect(page.getByTestId('tfa-1001')).toContainText('꺼짐')
+})

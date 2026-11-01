@@ -726,9 +726,9 @@ test('알림: 종 아이콘 · 목록 · 설정 · 시험 알림, 메뉴 순서,
   await acceptPopups(page)
   await page.goto('/')
 
-  // 메뉴 순서: … 로그 · 런타임 · 설정 · 관리자
+  // 메뉴 순서: … 로그 · 런타임 · 보안 · 설정 · 관리자
   await expect(page.locator('[data-testid^=nav-group-]')).toHaveText([/웹사이트/, /데이터베이스/, /운영/, /시스템/])
-  await expect(page.locator('aside nav a')).toHaveText(['대시보드', '사이트', '프로젝트', 'MariaDB', 'MongoDB', 'Redis', '백업', '로그', '알림', '런타임', '설정', '관리자'])
+  await expect(page.locator('aside nav a')).toHaveText(['대시보드', '사이트', '프로젝트', 'MariaDB', 'MongoDB', 'Redis', '백업', '로그', '알림', '런타임', '보안', '설정', '관리자'])
 
   // 종 아이콘: 안 읽은 2개 → 펼치면 번역된 제목 → 누르면 링크로 이동하고 읽음
   await expect(page.getByTestId('notification-count').first()).toHaveText('2')

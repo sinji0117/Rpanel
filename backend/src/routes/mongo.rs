@@ -93,7 +93,7 @@ async fn username_taken(state: &AppState, name: &str) -> AppResult<bool> {
 
 /// GET /api/mongo
 pub async fn list(State(state): State<AppState>, user: AuthUser) -> AppResult<Json<Value>> {
-    user.require_admin()?;
+    user.require_full_admin()?;
     let info = mongo::server_info(&state).await;
     let dbs =
         sqlx::query_as::<_, MongoDb>(&format!("SELECT {COLS} FROM mongo_databases ORDER BY name"))

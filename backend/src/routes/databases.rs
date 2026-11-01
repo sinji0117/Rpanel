@@ -200,7 +200,7 @@ pub async fn list_all(
     State(state): State<AppState>,
     user: AuthUser,
 ) -> AppResult<Json<serde_json::Value>> {
-    user.require_admin()?;
+    user.require_full_admin()?;
     let dbs = sqlx::query_as::<_, AppDatabase>(&format!(
         "SELECT {DB_COLUMNS} FROM app_databases ORDER BY name"
     ))
@@ -277,7 +277,7 @@ pub async fn get_for_app(
     user: AuthUser,
     Path(id): Path<u64>,
 ) -> AppResult<Json<serde_json::Value>> {
-    user.require_admin()?;
+    user.require_full_admin()?;
     let app = apps::fetch(&state, id).await?;
     let dbs = list_for_app(&state, id).await?;
     let databases: Vec<serde_json::Value> = dbs

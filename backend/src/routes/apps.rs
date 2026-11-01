@@ -566,7 +566,7 @@ pub async fn get_env(
     user: AuthUser,
     Path(id): Path<u64>,
 ) -> AppResult<Json<EnvResponse>> {
-    user.require_admin()?;
+    user.require_full_admin()?;
     let app = fetch(&state, id).await?;
     Ok(Json(EnvResponse {
         vars: runner::load_env(&state, id).await?,
@@ -808,7 +808,7 @@ pub async fn get_webhook(
     user: AuthUser,
     Path(id): Path<u64>,
 ) -> AppResult<Json<serde_json::Value>> {
-    user.require_admin()?;
+    user.require_full_admin()?;
     let app = fetch(&state, id).await?;
     Ok(Json(
         json!({ "path": format!("/api/hooks/{}", app.slug), "token": app.webhook_token, "branch": app.git_branch }),

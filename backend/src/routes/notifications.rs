@@ -76,7 +76,7 @@ fn events_catalog() -> Value {
 
 /// GET /api/notifications/settings
 pub async fn get_settings(State(state): State<AppState>, user: AuthUser) -> AppResult<Json<Value>> {
-    user.require_admin()?;
+    user.require_full_admin()?;
     Ok(Json(
         json!({ "settings": notify::load_settings(&state).await, "events": events_catalog() }),
     ))

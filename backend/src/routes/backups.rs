@@ -238,7 +238,7 @@ pub async fn download(
     ClientIp(ip): ClientIp,
     Path(id): Path<u64>,
 ) -> AppResult<Response> {
-    user.require_admin()?;
+    user.require_full_admin()?;
     let b = fetch(&state, id).await?;
     if b.status != "success" || !backup::valid_file_name(&b.file) {
         return Err(AppError::NotFound);

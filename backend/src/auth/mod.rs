@@ -15,20 +15,37 @@ use axum::{
 
 use crate::{error::AppError, state::AppState};
 
+/// 계정 역할: 관리자(모두) · 보기 전용(조회만, 비밀값 제외)
+pub const ROLES: &[&str] = &["admin", "viewer"];
+
 /// 인증된 사용자 (Authorization: Bearer <access JWT>)
 #[derive(Debug, Clone)]
 pub struct AuthUser {
     pub id: u64,
     pub role: String,
     pub sid: String,
+    /// GET 처럼 아무것도 바꾸지 않는 요청인지
+    pub read_only: bool,
 }
 
 impl AuthUser {
+    /// 관리자, 또는 조회 요청이면 보기 전용 계정도 허용
     pub fn require_admin(&self) -> Result<(), AppError> {
-        if self.role == "admin" {
+        if self.role == "admin" || (self.role == "viewer" && self.read_only) {
             Ok(())
         } else {
             Err(AppError::Forbidden("관리자 권한이 필요합니다".into()))
+        }
+    }
+
+    /// 관리자만 (환경변수 · 웹훅 토큰 · DB 접속 정보 · 파일 · 백업 내려받기처럼 비밀이 보이는 조회 포함)
+    pub fn require_full_admin(&self) -> Result<(), AppError> {
+        if self.role == "admin" {
+            Ok(())
+        } else {
+            Err(AppError::Forbidden(
+                "보기 전용 계정은 볼 수 없는 정보입니다".into(),
+            ))
         }
     }
 }
@@ -62,10 +79,21 @@ impl FromRequestParts<AppState> for AuthUser {
                 "2단계 인증을 먼저 등록하세요 (보안 → 2단계 인증)".into(),
             ));
         }
+        let read_only = matches!(
+            parts.method,
+            axum::http::Method::GET | axum::http::Method::HEAD | axum::http::Method::OPTIONS
+        );
+        // 보기 전용 계정: 내 계정 관련(/auth/*) 말고는 바꾸는 요청을 모두 막음
+        if claims.role != "admin" && !read_only && !auth_path {
+            return Err(AppError::Forbidden(
+                "보기 전용 계정은 바꿀 수 없습니다".into(),
+            ));
+        }
         Ok(AuthUser {
             id: claims.sub,
             role: claims.role,
             sid: claims.sid,
+            read_only,
         })
     }
 }

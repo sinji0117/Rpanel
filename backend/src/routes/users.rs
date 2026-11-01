@@ -1,6 +1,7 @@
 //! 관리자 계정 관리 — 패널에 로그인하는 사람들
 //!
-//! 지금은 모든 계정이 관리자(admin) 권한입니다. 자기 자신과 마지막 관리자는 지울 수 없습니다.
+//! 역할: admin(관리자, 모든 권한) · viewer(보기 전용 — 조회만, 비밀값은 못 봄).
+//! 자기 자신과 마지막 관리자는 지울 수 없고, 마지막 관리자를 보기 전용으로 바꿀 수도 없습니다.
 //! 비밀번호를 바꾸거나 계정을 지우면 그 계정의 모든 로그인 세션이 바로 끊어집니다.
 
 use axum::{
@@ -14,7 +15,7 @@ use serde_json::json;
 
 use crate::{
     audit,
-    auth::{password, session, AuthUser, ClientIp},
+    auth::{password, session, AuthUser, ClientIp, ROLES},
     error::{AppError, AppResult},
     state::AppState,
     validate,
@@ -54,10 +55,24 @@ pub async fn list(
     Ok(Json(json!({ "users": rows, "me": user.id })))
 }
 
+fn default_role() -> String {
+    "admin".into()
+}
+
+fn check_role(role: &str) -> AppResult<()> {
+    if ROLES.contains(&role) {
+        Ok(())
+    } else {
+        Err(AppError::bad("역할은 admin(관리자) 또는 viewer(보기 전용)입니다"))
+    }
+}
+
 #[derive(Deserialize)]
 pub struct CreateAdmin {
     pub email: String,
     pub password: String,
+    #[serde(default = "default_role")]
+    pub role: String,
 }
 
 /// POST /api/users — 관리자 추가
@@ -71,6 +86,7 @@ pub async fn create(
     let email = b.email.trim().to_ascii_lowercase();
     validate::email(&email).map_err(AppError::BadRequest)?;
     validate::password(&b.password).map_err(AppError::BadRequest)?;
+    check_role(&b.role)?;
     let exists: Option<(u64,)> = sqlx::query_as("SELECT id FROM users WHERE email = ?")
         .bind(&email)
         .fetch_optional(&state.db)
@@ -81,12 +97,20 @@ pub async fn create(
         )));
     }
     let hash = password::hash(&b.password)?;
-    let res = sqlx::query("INSERT INTO users (email, password_hash, role) VALUES (?, ?, 'admin')")
+    let res = sqlx::query("INSERT INTO users (email, password_hash, role) VALUES (?, ?, ?)")
         .bind(&email)
         .bind(&hash)
+        .bind(&b.role)
         .execute(&state.db)
         .await?;
-    audit::log(&state, Some(user.id), "admin.create", &email, &ip).await;
+    audit::log(
+        &state,
+        Some(user.id),
+        "admin.create",
+        &format!("{email} ({})", b.role),
+        &ip,
+    )
+    .await;
     Ok((
         StatusCode::CREATED,
         Json(fetch(&state, res.last_insert_id()).await?),
@@ -98,6 +122,8 @@ pub struct UpdateAdmin {
     pub email: Option<String>,
     /// 새 비밀번호 (비우면 그대로)
     pub password: Option<String>,
+    /// admin | viewer (비우면 그대로)
+    pub role: Option<String>,
 }
 
 /// PUT /api/users/{id} — 이메일 · 비밀번호 변경 (비밀번호를 바꾸면 그 계정의 세션 모두 종료)
@@ -110,6 +136,38 @@ pub async fn update(
 ) -> AppResult<Json<AdminView>> {
     user.require_admin()?;
     let cur = fetch(&state, id).await?;
+    if let Some(role) = b.role.filter(|r| *r != cur.role) {
+        check_role(&role)?;
+        if id == user.id {
+            return Err(AppError::bad("내 역할은 바꿀 수 없습니다"));
+        }
+        if cur.role == "admin" {
+            let admins: i64 =
+                sqlx::query_scalar("SELECT COUNT(*) FROM users WHERE role = 'admin'")
+                    .fetch_one(&state.db)
+                    .await?;
+            if admins <= 1 {
+                return Err(AppError::bad(
+                    "마지막 관리자는 보기 전용으로 바꿀 수 없습니다",
+                ));
+            }
+        }
+        sqlx::query("UPDATE users SET role = ? WHERE id = ?")
+            .bind(&role)
+            .bind(id)
+            .execute(&state.db)
+            .await?;
+        // 새 역할로 다시 로그인하게 (토큰에 역할이 들어 있음)
+        session::revoke_all_for_user(&state, id).await?;
+        audit::log(
+            &state,
+            Some(user.id),
+            "admin.role",
+            &format!("{} → {role}", cur.email),
+            &ip,
+        )
+        .await;
+    }
     if let Some(email) = b.email.map(|e| e.trim().to_ascii_lowercase()) {
         if email != cur.email {
             validate::email(&email).map_err(AppError::BadRequest)?;

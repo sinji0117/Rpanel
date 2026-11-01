@@ -531,7 +531,7 @@ pub async fn admin_tables(
     user: AuthUser,
     Path(id): Path<u64>,
 ) -> AppResult<Json<Value>> {
-    user.require_admin()?;
+    user.require_full_admin()?;
     let (c, db) = admin_creds(&state, id).await?;
     Ok(Json(do_tables(&state, &c, &db).await?))
 }
@@ -542,7 +542,7 @@ pub async fn admin_browse(
     Path((id, table)): Path<(u64, String)>,
     Query(q): Query<BrowseQuery>,
 ) -> AppResult<Json<Value>> {
-    user.require_admin()?;
+    user.require_full_admin()?;
     let (c, db) = admin_creds(&state, id).await?;
     Ok(Json(do_browse(&state, &c, &db, &table, &q).await?))
 }

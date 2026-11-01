@@ -46,7 +46,7 @@ pub async fn list(
     Path(id): Path<u64>,
     Query(q): Query<PathQuery>,
 ) -> AppResult<Json<serde_json::Value>> {
-    user.require_admin()?;
+    user.require_full_admin()?;
     let app = apps::fetch(&state, id).await?;
     check_path(&q.path)?;
     let mut v = files::json(&state, &app, &["list", &q.path]).await?;
@@ -62,7 +62,7 @@ pub async fn read(
     Path(id): Path<u64>,
     Query(q): Query<PathQuery>,
 ) -> AppResult<Json<serde_json::Value>> {
-    user.require_admin()?;
+    user.require_full_admin()?;
     let app = apps::fetch(&state, id).await?;
     check_path(&q.path)?;
     let st = files::json(&state, &app, &["stat", &q.path]).await?;
@@ -188,7 +188,7 @@ pub async fn download(
     Path(id): Path<u64>,
     Query(q): Query<PathQuery>,
 ) -> AppResult<Response> {
-    user.require_admin()?;
+    user.require_full_admin()?;
     let app = apps::fetch(&state, id).await?;
     check_path(&q.path)?;
     let st = files::json(&state, &app, &["stat", &q.path]).await?;

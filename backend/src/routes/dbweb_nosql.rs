@@ -96,7 +96,7 @@ pub async fn mongo_collections(
     user: AuthUser,
     Path(id): Path<u64>,
 ) -> AppResult<Json<Value>> {
-    user.require_admin()?;
+    user.require_full_admin()?;
     let t = mongo_target(&state, id).await?;
     let mut names = t.db.list_collection_names().await.map_err(mongo_err)?;
     names.retain(|n| !n.starts_with("system."));
@@ -127,7 +127,7 @@ pub async fn mongo_find(
     Path((id, coll)): Path<(u64, String)>,
     Query(q): Query<FindQuery>,
 ) -> AppResult<Json<Value>> {
-    user.require_admin()?;
+    user.require_full_admin()?;
     valid_collection(&coll)?;
     let t = mongo_target(&state, id).await?;
     let filter = match q.filter.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
@@ -281,7 +281,7 @@ async fn redis_conn(state: &AppState, db: u32) -> AppResult<redis::aio::Multiple
 
 /// GET /api/dbweb/redis
 pub async fn redis_dbs(State(state): State<AppState>, user: AuthUser) -> AppResult<Json<Value>> {
-    user.require_admin()?;
+    user.require_full_admin()?;
     let mut out = Vec::new();
     for (db, app) in redis_allowed(&state).await? {
         let mut c = redis_conn(&state, db).await?;
@@ -304,7 +304,7 @@ pub async fn redis_keys(
     Path(db): Path<u32>,
     Query(q): Query<ScanQuery>,
 ) -> AppResult<Json<Value>> {
-    user.require_admin()?;
+    user.require_full_admin()?;
     let mut c = redis_conn(&state, db).await?;
     let pattern = q
         .pattern
@@ -371,7 +371,7 @@ pub async fn redis_get(
     Path(db): Path<u32>,
     Query(q): Query<KeyQuery>,
 ) -> AppResult<Json<Value>> {
-    user.require_admin()?;
+    user.require_full_admin()?;
     let mut c = redis_conn(&state, db).await?;
     let k = q.k;
     let ty: String = redis::cmd("TYPE").arg(&k).query_async(&mut c).await?;

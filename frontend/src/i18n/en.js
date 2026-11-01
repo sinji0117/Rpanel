@@ -1394,4 +1394,11 @@ export default {
   "먼저 내 2단계 인증을 켜세요.": "Turn on your own two-factor authentication first.",
   "2단계 인증 등록이 필요합니다": "Two-factor authentication setup required",
   "관리자가 모든 계정에 2단계 인증을 필수로 정했습니다. 등록을 마쳐야 패널을 쓸 수 있습니다.": "An admin made two-factor authentication required for all accounts. Finish setup to use the panel.",
+  "보기 전용 계정입니다. 둘러볼 수만 있고 바꾸는 기능은 쓸 수 없습니다.": "This is a view-only account. You can look around but cannot change anything.",
+  "보기 전용 계정은 바꿀 수 없습니다": "View-only accounts cannot make changes",
+  "보기 전용 계정은 볼 수 없는 정보입니다": "View-only accounts cannot see this information",
+  "역할": "Role",
+  "보기 전용: 화면을 둘러볼 수만 있고, 환경변수 · DB 접속 정보 · 파일 같은 비밀은 볼 수 없습니다": "View-only: can browse the panel but cannot see secrets such as environment variables, database credentials or files",
+  "보기 전용": "View-only",
+  "패널에 로그인할 수 있는 계정을 추가·수정·삭제합니다. 관리자는 모든 기능을, 보기 전용 계정은 둘러보기만 할 수 있습니다.": "Add, edit and remove accounts that can log in to the panel. Admins can do everything; view-only accounts can only look around.",
 }

@@ -15,11 +15,17 @@ import { FileManager, SiteSettings, SslTab } from './SiteTabs'
 import { t, tx } from '../i18n'
 import { confirmDialog } from '../components/Dialog'
 import { isServiceKind } from '../lib/kinds'
+import { useAuth } from '../context/AuthContext'
+
+// 보기 전용 계정에게는 숨기는 탭 (환경변수 · DB 접속 정보 · 웹훅 토큰 · 파일)
+const SECRET_TABS = ['env', 'db', 'git', 'files']
 
 export default function AppDetail() {
   const { id } = useParams()
   const nav = useNavigate()
   const toast = useToast()
+  const { user } = useAuth()
+  const viewer = user?.role === 'viewer'
   const app = useFetch(() => get(`/apps/${id}`), [id])
   const [params] = useSearchParams()
   const [tabState, setTab] = useState(() => params.get('tab'))
@@ -41,7 +47,7 @@ export default function AppDetail() {
   const isService = isServiceKind(a.kind)
   const isGit = a.source === 'git'
   const isFiles = a.source === 'files'
-  const tab = tabState ?? (isGit ? 'deployments' : isFiles ? 'files' : 'settings')
+  const wantedTab = tabState ?? (isGit ? 'deployments' : isFiles ? 'files' : 'settings')
   const inProgress = a.status === 'deploying' || queued
 
   const deploy = async () => {
@@ -122,6 +128,8 @@ export default function AppDetail() {
           { id: 'nginx', label: t('Nginx 로그') },
           { id: 'deployments', label: t('적용 기록') },
         ]
+  const visibleTabs = viewer ? tabs.filter((x) => !SECRET_TABS.includes(x.id)) : tabs
+  const tab = visibleTabs.some((x) => x.id === wantedTab) ? wantedTab : visibleTabs[0].id
 
   return (
     <>
@@ -212,7 +220,7 @@ export default function AppDetail() {
         </dl>
       </PageHeader>
 
-      <Tabs tabs={tabs} active={tab} onChange={setTab} />
+      <Tabs tabs={visibleTabs} active={tab} onChange={setTab} />
       {tab === 'deployments' && <DeploymentsTab app={a} selected={logId} onSelect={setLogId} onChanged={() => app.reload(true)} />}
       {tab === 'env' && <EnvTab app={a} />}
       {tab === 'db' && <DatabaseTab app={a} onChanged={() => app.reload(true)} />}

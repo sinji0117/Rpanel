@@ -570,6 +570,93 @@ async fn full_flow() {
         assert_eq!(ctx.get("/api/projects", &t).await.status, StatusCode::OK);
     }
 
+    // ── 보기 전용 계정 ──
+    {
+        let bad = ctx
+            .post(
+                "/api/users",
+                &t,
+                json!({ "email": "x@example.com", "password": "viewer-pass-123", "role": "root" }),
+            )
+            .await;
+        assert_eq!(bad.status, StatusCode::BAD_REQUEST);
+        let vcreds = json!({ "email": "viewer@example.com", "password": "viewer-pass-123" });
+        let mut body = vcreds.clone();
+        body["role"] = json!("viewer");
+        let r = ctx.post("/api/users", &t, body).await;
+        assert_eq!(r.status, StatusCode::CREATED, "{:?}", r.body);
+        assert_eq!(r.body["role"], "viewer");
+        let vid = r.body["id"].as_u64().unwrap();
+        let r = ctx
+            .req(Method::POST, "/api/auth/login", None, None, Some(vcreds))
+            .await;
+        assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+        let vt = r.body["access_token"].as_str().unwrap().to_string();
+        // 조회는 되고, 바꾸기와 비밀이 보이는 조회는 막힘
+        assert_eq!(ctx.get("/api/projects", &vt).await.status, StatusCode::OK);
+        assert_eq!(ctx.get("/api/users", &vt).await.status, StatusCode::OK);
+        assert_eq!(
+            ctx.post("/api/projects", &vt, json!({ "name": "nope" }))
+                .await
+                .status,
+            StatusCode::FORBIDDEN
+        );
+        assert_eq!(
+            ctx.get("/api/notifications/settings", &vt).await.status,
+            StatusCode::FORBIDDEN
+        );
+        // 내 계정 관련(/auth/*)은 쓸 수 있음
+        assert_eq!(
+            ctx.get("/api/auth/sessions", &vt).await.status,
+            StatusCode::OK
+        );
+        // 내 역할은 못 바꿈
+        let me_id = ctx.get("/api/auth/me", &t).await.body["id"]
+            .as_u64()
+            .unwrap();
+        assert_eq!(
+            ctx.req(
+                Method::PUT,
+                &format!("/api/users/{me_id}"),
+                Some(&t),
+                None,
+                Some(json!({ "role": "viewer" })),
+            )
+            .await
+            .status,
+            StatusCode::BAD_REQUEST
+        );
+        // 역할을 바꾸면 그 계정은 다시 로그인해야 함
+        let r = ctx
+            .req(
+                Method::PUT,
+                &format!("/api/users/{vid}"),
+                Some(&t),
+                None,
+                Some(json!({ "role": "admin" })),
+            )
+            .await;
+        assert_eq!(r.status, StatusCode::OK, "{:?}", r.body);
+        assert_eq!(r.body["role"], "admin");
+        assert_eq!(
+            ctx.get("/api/auth/me", &vt).await.status,
+            StatusCode::UNAUTHORIZED
+        );
+        // 뒤의 관리자 테스트가 관리자 1명을 가정하므로 지움
+        assert_eq!(
+            ctx.req(
+                Method::DELETE,
+                &format!("/api/users/{vid}"),
+                Some(&t),
+                None,
+                None
+            )
+            .await
+            .status,
+            StatusCode::NO_CONTENT
+        );
+    }
+
     // ── 프로젝트 ──
     let r = ctx
         .post(

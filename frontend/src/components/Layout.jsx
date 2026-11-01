@@ -302,6 +302,11 @@ export default function Layout() {
       <main className="min-w-0 px-4 py-6 md:px-8 md:py-8">
         <div className="mx-auto max-w-6xl">
           <StaleBundleBanner />
+          {user?.role === 'viewer' && (
+            <p role="status" data-testid="viewer-banner" className="mb-4 rounded-lg border border-sky-400/30 bg-sky-400/5 px-4 py-2.5 text-sm text-sky-300">
+              {t('보기 전용 계정입니다. 둘러볼 수만 있고 바꾸는 기능은 쓸 수 없습니다.')}
+            </p>
+          )}
           <SectionBar />
           <Outlet />
         </div>

@@ -63,7 +63,9 @@ fn check_role(role: &str) -> AppResult<()> {
     if ROLES.contains(&role) {
         Ok(())
     } else {
-        Err(AppError::bad("역할은 admin(관리자) 또는 viewer(보기 전용)입니다"))
+        Err(AppError::bad(
+            "역할은 admin(관리자) 또는 viewer(보기 전용)입니다",
+        ))
     }
 }
 
@@ -142,10 +144,9 @@ pub async fn update(
             return Err(AppError::bad("내 역할은 바꿀 수 없습니다"));
         }
         if cur.role == "admin" {
-            let admins: i64 =
-                sqlx::query_scalar("SELECT COUNT(*) FROM users WHERE role = 'admin'")
-                    .fetch_one(&state.db)
-                    .await?;
+            let admins: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users WHERE role = 'admin'")
+                .fetch_one(&state.db)
+                .await?;
             if admins <= 1 {
                 return Err(AppError::bad(
                     "마지막 관리자는 보기 전용으로 바꿀 수 없습니다",

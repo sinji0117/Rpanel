@@ -599,7 +599,7 @@ function ConfirmModal({ title, danger, onClose, onSubmit }) {
 }
 
 /** 모든 관리자에게 2단계 인증 필수 (관리자만) */
-function PolicyCard({ myEnabled }) {
+function PolicyCard({ myEnabled, onChange }) {
   const { user } = useAuth()
   const toast = useToast()
   const p = useFetch(() => (user?.role === 'admin' ? get('/security/policy') : Promise.resolve(null)), [user?.role])
@@ -622,6 +622,7 @@ function PolicyCard({ myEnabled }) {
             setBusy(true)
             try {
               p.setData(await put('/security/policy', { require_2fa: next }))
+              onChange?.()
               toast.push(next ? t('2단계 인증 필수를 켰습니다') : t('2단계 인증 필수를 껐습니다'), 'success')
             } catch (err) {
               toast.push(err.message, 'error')
@@ -803,7 +804,7 @@ export function TwoFactorTab({ forced = false, onChange }) {
         />
       )}
     </Section>
-    {!forced && <PolicyCard myEnabled={s.enabled} />}
+    {!forced && <PolicyCard myEnabled={s.enabled} onChange={() => st.reload(true)} />}
     </div>
   )
 }

@@ -12,6 +12,7 @@ import { confirmDialog } from '../components/Dialog'
 function AdminModal({ initial, onClose, onSaved }) {
   const editing = !!initial
   const [email, setEmail] = useState(initial?.email ?? '')
+  const [role, setRole] = useState(initial?.role ?? 'admin')
   const [password, setPassword] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
@@ -24,7 +25,7 @@ function AdminModal({ initial, onClose, onSaved }) {
           setBusy(true)
           setError(null)
           try {
-            const r = editing ? await put(`/users/${initial.id}`, { email, password: password || undefined }) : await post('/users', { email, password })
+            const r = editing ? await put(`/users/${initial.id}`, { email, role, password: password || undefined }) : await post('/users', { email, password, role })
             onSaved(r, password)
           } catch (err) {
             setError(err)
@@ -56,6 +57,14 @@ function AdminModal({ initial, onClose, onSaved }) {
             </button>
           </div>
         </Field>
+        {!initial?.me && (
+          <Field label={t('역할')} htmlFor="adm-role" hint={t('보기 전용: 화면을 둘러볼 수만 있고, 환경변수 · DB 접속 정보 · 파일 같은 비밀은 볼 수 없습니다')}>
+            <select id="adm-role" className="input" value={role} onChange={(e) => setRole(e.target.value)}>
+              <option value="admin">{t('관리자')}</option>
+              <option value="viewer">{t('보기 전용')}</option>
+            </select>
+          </Field>
+        )}
         <ErrorBox error={error} />
         <div className="flex justify-end gap-2">
           <button type="button" className="btn-ghost" onClick={onClose}>
@@ -79,7 +88,7 @@ export default function AdminsPage() {
     <>
       <PageHeader
         title={t('관리자')}
-        help={t('패널에 로그인할 수 있는 관리자 계정을 추가·수정·삭제합니다. 모든 관리자는 같은 권한을 가집니다.')}
+        help={t('패널에 로그인할 수 있는 계정을 추가·수정·삭제합니다. 관리자는 모든 기능을, 보기 전용 계정은 둘러보기만 할 수 있습니다.')}
         actions={
           <button className="btn-primary" onClick={() => setEditing({})}>
             + {t('관리자 추가')}
@@ -105,6 +114,7 @@ export default function AdminsPage() {
                   <tr key={u.id}>
                     <td className="py-2.5 pr-3">
                       {u.email}
+                      {u.role === 'viewer' && <span className="ml-2 rounded border border-sky-400/40 px-1.5 text-[11px] text-sky-300" data-testid={`role-${u.id}`}>{t('보기 전용')}</span>}
                       {u.id === list.data.me && <span className="ml-2 rounded border border-signal/40 px-1.5 text-[11px] text-signal">{t('나')}</span>}
                     </td>
                     <td className="px-3 py-2.5 text-xs" data-testid={`tfa-${u.id}`}>
@@ -115,7 +125,7 @@ export default function AdminsPage() {
                     </td>
                     <td className="px-3 py-2.5 text-xs text-ink-400">{dateTime(u.created_at)}</td>
                     <td className="py-2.5 pl-3 text-right whitespace-nowrap">
-                      <button className="btn-ghost mr-1.5 px-2.5 py-1 text-xs" onClick={() => setEditing(u)}>
+                      <button className="btn-ghost mr-1.5 px-2.5 py-1 text-xs" onClick={() => setEditing({ ...u, me: u.id === list.data.me })}>
                         {t('수정')}
                       </button>
                       {u.id !== list.data.me && u.totp_enabled && (

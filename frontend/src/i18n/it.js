@@ -1333,4 +1333,11 @@ export default {
   "먼저 내 2단계 인증을 켜세요.": "Prima attiva la tua autenticazione a due fattori.",
   "2단계 인증 등록이 필요합니다": "Configurazione dell’autenticazione a due fattori richiesta",
   "관리자가 모든 계정에 2단계 인증을 필수로 정했습니다. 등록을 마쳐야 패널을 쓸 수 있습니다.": "Un amministratore ha reso obbligatoria l’autenticazione a due fattori per tutti gli account. Completa la configurazione per usare il pannello.",
+  "보기 전용 계정입니다. 둘러볼 수만 있고 바꾸는 기능은 쓸 수 없습니다.": "Questo è un account di sola lettura. Puoi guardare ma non modificare nulla.",
+  "보기 전용 계정은 바꿀 수 없습니다": "Gli account di sola lettura non possono apportare modifiche",
+  "보기 전용 계정은 볼 수 없는 정보입니다": "Gli account di sola lettura non possono vedere queste informazioni",
+  "역할": "Ruolo",
+  "보기 전용: 화면을 둘러볼 수만 있고, 환경변수 · DB 접속 정보 · 파일 같은 비밀은 볼 수 없습니다": "Sola lettura: può consultare il pannello ma non vedere segreti come variabili d’ambiente, credenziali dei database o file",
+  "보기 전용": "Sola lettura",
+  "패널에 로그인할 수 있는 계정을 추가·수정·삭제합니다. 관리자는 모든 기능을, 보기 전용 계정은 둘러보기만 할 수 있습니다.": "Aggiungi, modifica e rimuovi gli account che possono accedere al pannello. Gli amministratori possono fare tutto; gli account di sola lettura possono solo guardare.",
 }

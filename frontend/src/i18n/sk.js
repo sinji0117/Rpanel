@@ -1333,4 +1333,11 @@ export default {
   "먼저 내 2단계 인증을 켜세요.": "Najprv si zapnite vlastné dvojfázové overenie.",
   "2단계 인증 등록이 필요합니다": "Je potrebné nastaviť dvojfázové overenie",
   "관리자가 모든 계정에 2단계 인증을 필수로 정했습니다. 등록을 마쳐야 패널을 쓸 수 있습니다.": "Správca nastavil dvojfázové overenie ako povinné pre všetky účty. Dokončite nastavenie, aby ste mohli panel používať.",
+  "보기 전용 계정입니다. 둘러볼 수만 있고 바꾸는 기능은 쓸 수 없습니다.": "Toto je účet len na čítanie. Môžete sa pozerať, ale nič meniť.",
+  "보기 전용 계정은 바꿀 수 없습니다": "Účty len na čítanie nemôžu nič meniť",
+  "보기 전용 계정은 볼 수 없는 정보입니다": "Účty len na čítanie tieto informácie nevidia",
+  "역할": "Rola",
+  "보기 전용: 화면을 둘러볼 수만 있고, 환경변수 · DB 접속 정보 · 파일 같은 비밀은 볼 수 없습니다": "Len na čítanie: môže prezerať panel, ale nevidí tajné údaje ako premenné prostredia, prístupy k databázam alebo súbory",
+  "보기 전용": "Len na čítanie",
+  "패널에 로그인할 수 있는 계정을 추가·수정·삭제합니다. 관리자는 모든 기능을, 보기 전용 계정은 둘러보기만 할 수 있습니다.": "Pridávajte, upravujte a odoberajte účty, ktoré sa môžu prihlásiť do panelu. Správcovia môžu všetko, účty len na čítanie sa môžu len pozerať.",
 }

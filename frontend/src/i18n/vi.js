@@ -1333,4 +1333,11 @@ export default {
   "먼저 내 2단계 인증을 켜세요.": "Hãy bật xác thực hai bước cho tài khoản của bạn trước.",
   "2단계 인증 등록이 필요합니다": "Cần đăng ký xác thực hai bước",
   "관리자가 모든 계정에 2단계 인증을 필수로 정했습니다. 등록을 마쳐야 패널을 쓸 수 있습니다.": "Quản trị viên đã bắt buộc xác thực hai bước cho mọi tài khoản. Hãy hoàn tất đăng ký để dùng bảng điều khiển.",
+  "보기 전용 계정입니다. 둘러볼 수만 있고 바꾸는 기능은 쓸 수 없습니다.": "Đây là tài khoản chỉ xem. Bạn có thể xem nhưng không thể thay đổi gì.",
+  "보기 전용 계정은 바꿀 수 없습니다": "Tài khoản chỉ xem không thể thay đổi",
+  "보기 전용 계정은 볼 수 없는 정보입니다": "Tài khoản chỉ xem không thể xem thông tin này",
+  "역할": "Vai trò",
+  "보기 전용: 화면을 둘러볼 수만 있고, 환경변수 · DB 접속 정보 · 파일 같은 비밀은 볼 수 없습니다": "Chỉ xem: có thể xem bảng điều khiển nhưng không thấy các bí mật như biến môi trường, thông tin đăng nhập cơ sở dữ liệu hay tệp",
+  "보기 전용": "Chỉ xem",
+  "패널에 로그인할 수 있는 계정을 추가·수정·삭제합니다. 관리자는 모든 기능을, 보기 전용 계정은 둘러보기만 할 수 있습니다.": "Thêm, sửa và xóa các tài khoản có thể đăng nhập bảng điều khiển. Quản trị viên làm được mọi thứ; tài khoản chỉ xem chỉ có thể xem.",
 }

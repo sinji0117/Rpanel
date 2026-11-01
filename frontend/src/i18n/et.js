@@ -1333,4 +1333,11 @@ export default {
   "먼저 내 2단계 인증을 켜세요.": "Lülita esmalt sisse oma kaheastmeline autentimine.",
   "2단계 인증 등록이 필요합니다": "Kaheastmeline autentimine tuleb seadistada",
   "관리자가 모든 계정에 2단계 인증을 필수로 정했습니다. 등록을 마쳐야 패널을 쓸 수 있습니다.": "Administraator muutis kaheastmelise autentimise kõigile kontodele kohustuslikuks. Paneeli kasutamiseks lõpeta seadistamine.",
+  "보기 전용 계정입니다. 둘러볼 수만 있고 바꾸는 기능은 쓸 수 없습니다.": "See on ainult vaatamiseks mõeldud konto. Saad ringi vaadata, kuid mitte midagi muuta.",
+  "보기 전용 계정은 바꿀 수 없습니다": "Ainult vaatamise kontod ei saa midagi muuta",
+  "보기 전용 계정은 볼 수 없는 정보입니다": "Ainult vaatamise kontod ei näe seda teavet",
+  "역할": "Roll",
+  "보기 전용: 화면을 둘러볼 수만 있고, 환경변수 · DB 접속 정보 · 파일 같은 비밀은 볼 수 없습니다": "Ainult vaatamine: saab paneeli sirvida, kuid ei näe saladusi nagu keskkonnamuutujad, andmebaaside paroolid või failid",
+  "보기 전용": "Ainult vaatamine",
+  "패널에 로그인할 수 있는 계정을 추가·수정·삭제합니다. 관리자는 모든 기능을, 보기 전용 계정은 둘러보기만 할 수 있습니다.": "Lisa, muuda ja eemalda kontosid, millega saab paneeli sisse logida. Administraatorid saavad teha kõike, ainult vaatamise kontod saavad vaid ringi vaadata.",
 }

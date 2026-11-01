@@ -1333,4 +1333,11 @@ export default {
   "먼저 내 2단계 인증을 켜세요.": "Cuir do fhíordheimhniú dhá chéim féin ar siúl ar dtús.",
   "2단계 인증 등록이 필요합니다": "Tá socrú fíordheimhnithe dhá chéim ag teastáil",
   "관리자가 모든 계정에 2단계 인증을 필수로 정했습니다. 등록을 마쳐야 패널을 쓸 수 있습니다.": "Rinne riarthóir fíordheimhniú dhá chéim éigeantach do gach cuntas. Críochnaigh an socrú chun an painéal a úsáid.",
+  "보기 전용 계정입니다. 둘러볼 수만 있고 바꾸는 기능은 쓸 수 없습니다.": "Is cuntas féachana amháin é seo. Is féidir leat breathnú thart ach ní féidir aon rud a athrú.",
+  "보기 전용 계정은 바꿀 수 없습니다": "Ní féidir le cuntais féachana amháin athruithe a dhéanamh",
+  "보기 전용 계정은 볼 수 없는 정보입니다": "Ní féidir le cuntais féachana amháin an t-eolas seo a fheiceáil",
+  "역할": "Ról",
+  "보기 전용: 화면을 둘러볼 수만 있고, 환경변수 · DB 접속 정보 · 파일 같은 비밀은 볼 수 없습니다": "Féachaint amháin: is féidir leis an painéal a bhrabhsáil ach ní fheiceann sé rúin ar nós athróg timpeallachta, faisnéis rochtana bunachar sonraí ná comhaid",
+  "보기 전용": "Féachaint amháin",
+  "패널에 로그인할 수 있는 계정을 추가·수정·삭제합니다. 관리자는 모든 기능을, 보기 전용 계정은 둘러보기만 할 수 있습니다.": "Cuir leis, cuir in eagar agus bain cuntais ar féidir leo logáil isteach sa phainéal. Is féidir le riarthóirí gach rud a dhéanamh; ní féidir le cuntais féachana amháin ach breathnú thart.",
 }

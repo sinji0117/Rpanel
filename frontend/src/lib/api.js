@@ -13,6 +13,8 @@ export class ApiError extends Error {
 
 let accessToken = null
 let refreshing = null
+// 보기 전용 계정이면 바꾸는 요청을 서버에 보내기 전에 막음 (서버도 막음)
+let viewerSession = false
 const listeners = new Set()
 
 export function getAccessToken() {
@@ -21,6 +23,7 @@ export function getAccessToken() {
 
 export function setSession(token, user) {
   accessToken = token
+  viewerSession = !!token && user?.role === 'viewer'
   listeners.forEach((fn) => fn(token ? (user ?? null) : null))
 }
 
@@ -68,6 +71,7 @@ export function refreshSession() {
 }
 
 export async function api(path, { method = 'GET', body, retry = true } = {}) {
+  if (viewerSession && method !== 'GET' && !path.startsWith('/auth/')) throw new ApiError(403, '보기 전용 계정은 바꿀 수 없습니다', 'forbidden')
   const run = () => {
     const headers = { ...CSRF }
     if (body !== undefined) headers['Content-Type'] = 'application/json'

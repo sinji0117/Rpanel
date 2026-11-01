@@ -466,7 +466,7 @@ export function createMockBackend({ needsSetup = false } = {}) {
       if (!/^[^@\s]+@[^@\s]+$/.test(body.email ?? '')) return json(route, 400, { error: 'bad_request', message: '이메일 형식이 올바르지 않습니다' })
       if ((body.password ?? '').length < 10) return json(route, 400, { error: 'bad_request', message: '비밀번호는 10자 이상이어야 합니다' })
       if (admins().some((u) => u.email === body.email.toLowerCase())) return json(route, 409, { error: 'conflict', message: '이미 존재하는 값입니다' })
-      const u = { id: 1000 + id(), email: body.email.toLowerCase(), role: 'admin', created_at: now(), last_login_at: null }
+      const u = { id: 1000 + id(), email: body.email.toLowerCase(), role: body.role || 'admin', created_at: now(), last_login_at: null }
       db.admins.push(u)
       return json(route, 201, u)
     }
@@ -482,6 +482,10 @@ export function createMockBackend({ needsSetup = false } = {}) {
       const u = admins().find((x) => x.id === Number(um[1]))
       if (!u) return json(route, 404, { error: 'not_found', message: '찾을 수 없습니다' })
       if (method === 'PUT') {
+        if (body.role && body.role !== u.role) {
+          if (u.id === db.user.id) return json(route, 400, { error: 'bad_request', message: '내 역할은 바꿀 수 없습니다' })
+          u.role = body.role
+        }
         if (body.email) u.email = body.email.toLowerCase()
         return json(route, 200, u)
       }

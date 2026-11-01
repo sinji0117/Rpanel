@@ -103,7 +103,7 @@ pub async fn list_for_user(state: &AppState, uid: u64) -> AppResult<Vec<SessionI
             last_seen: m.last_seen,
         });
     }
-    out.sort_by(|a, b| b.last_seen.cmp(&a.last_seen));
+    out.sort_by_key(|s| std::cmp::Reverse(s.last_seen));
     Ok(out)
 }
 

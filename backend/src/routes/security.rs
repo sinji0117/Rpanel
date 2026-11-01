@@ -385,7 +385,7 @@ async fn login_counters(state: &AppState) -> AppResult<Vec<Value>> {
             "ttl": ttl.max(0),
         }));
     }
-    out.sort_by(|a, b| b["count"].as_u64().cmp(&a["count"].as_u64()));
+    out.sort_by_key(|c| std::cmp::Reverse(c["count"].as_u64()));
     out.truncate(200);
     Ok(out)
 }

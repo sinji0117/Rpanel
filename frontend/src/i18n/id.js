@@ -1333,4 +1333,11 @@ export default {
   "먼저 내 2단계 인증을 켜세요.": "Aktifkan dulu autentikasi dua langkah Anda sendiri.",
   "2단계 인증 등록이 필요합니다": "Perlu mengatur autentikasi dua langkah",
   "관리자가 모든 계정에 2단계 인증을 필수로 정했습니다. 등록을 마쳐야 패널을 쓸 수 있습니다.": "Admin mewajibkan autentikasi dua langkah untuk semua akun. Selesaikan pengaturan untuk memakai panel.",
+  "보기 전용 계정입니다. 둘러볼 수만 있고 바꾸는 기능은 쓸 수 없습니다.": "Ini akun hanya-lihat. Anda bisa melihat-lihat, tetapi tidak bisa mengubah apa pun.",
+  "보기 전용 계정은 바꿀 수 없습니다": "Akun hanya-lihat tidak bisa mengubah apa pun",
+  "보기 전용 계정은 볼 수 없는 정보입니다": "Akun hanya-lihat tidak bisa melihat informasi ini",
+  "역할": "Peran",
+  "보기 전용: 화면을 둘러볼 수만 있고, 환경변수 · DB 접속 정보 · 파일 같은 비밀은 볼 수 없습니다": "Hanya lihat: bisa menjelajah panel, tetapi tidak bisa melihat rahasia seperti variabel lingkungan, kredensial database, atau file",
+  "보기 전용": "Hanya lihat",
+  "패널에 로그인할 수 있는 계정을 추가·수정·삭제합니다. 관리자는 모든 기능을, 보기 전용 계정은 둘러보기만 할 수 있습니다.": "Tambah, ubah, dan hapus akun yang bisa login ke panel. Admin bisa melakukan semuanya; akun hanya-lihat hanya bisa melihat-lihat.",
 }

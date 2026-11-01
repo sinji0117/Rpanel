@@ -1184,4 +1184,7 @@ export default {
   "서버에 없음": "Serveris puudub",
   "Maven 버전은 3 · 3.9 형식입니다 (주 버전만 쓰면 그 안의 최신)": "Maveni versioon on 3 või 3.9 (ainult peaversioon = selle uusim)",
   "Gradle 버전은 9 · 8.14 형식입니다 (주 버전만 쓰면 그 안의 최신)": "Gradle'i versioon on 9 või 8.14 (ainult peaversioon = selle uusim)",
+  "배포 중지": "Peata juurutus",
+  "적용 중지": "Peata rakendamine",
+  "진행 중인 작업을 중지할까요? 지금 실행 중인 버전은 그대로 유지됩니다.": "Kas peatada käimasolev töö? Praegu töötav versioon jääb alles.",
 }

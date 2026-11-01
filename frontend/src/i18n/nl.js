@@ -1184,4 +1184,7 @@ export default {
   "서버에 없음": "Niet op de server",
   "Maven 버전은 3 · 3.9 형식입니다 (주 버전만 쓰면 그 안의 최신)": "De Maven-versie is 3 of 3.9 (alleen het hoofdnummer = de nieuwste daarbinnen)",
   "Gradle 버전은 9 · 8.14 형식입니다 (주 버전만 쓰면 그 안의 최신)": "De Gradle-versie is 9 of 8.14 (alleen het hoofdnummer = de nieuwste daarbinnen)",
+  "배포 중지": "Deploy stoppen",
+  "적용 중지": "Toepassen stoppen",
+  "진행 중인 작업을 중지할까요? 지금 실행 중인 버전은 그대로 유지됩니다.": "De lopende taak stoppen? De versie die nu draait blijft ongewijzigd.",
 }

@@ -1245,4 +1245,7 @@ export default {
   "서버에 없음": "Not on server",
   "Maven 버전은 3 · 3.9 형식입니다 (주 버전만 쓰면 그 안의 최신)": "Maven version is 3 or 3.9 (major only means the latest in it)",
   "Gradle 버전은 9 · 8.14 형식입니다 (주 버전만 쓰면 그 안의 최신)": "Gradle version is 9 or 8.14 (major only means the latest in it)",
+  "배포 중지": "Stop deploy",
+  "적용 중지": "Stop apply",
+  "진행 중인 작업을 중지할까요? 지금 실행 중인 버전은 그대로 유지됩니다.": "Stop the job in progress? The version running now stays as it is.",
 }

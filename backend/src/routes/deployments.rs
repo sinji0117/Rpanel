@@ -154,6 +154,16 @@ pub async fn cancel(
             .bind(id)
             .execute(&state.db)
             .await?;
+        // 다른 진행 중 배포가 없으면 앱이 '배포 중'에 멈춰 있지 않게 되돌림
+        sqlx::query(
+            "UPDATE apps SET status = IF(current_release IS NULL, 'failed', 'running') \
+             WHERE id = ? AND status = 'deploying' AND NOT EXISTS \
+             (SELECT 1 FROM deployments WHERE app_id = ? AND status IN ('queued','running'))",
+        )
+        .bind(d.deployment.app_id)
+        .bind(d.deployment.app_id)
+        .execute(&state.db)
+        .await?;
     }
     audit::log(
         &state,

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router'
 import AppForm, { sshUrl, toPayload } from '../components/AppForm'
-import DeploymentLogPanel from '../components/DeploymentLog'
+import DeploymentLogPanel, { CancelDeployButton, cancelDeployment } from '../components/DeploymentLog'
 import LogViewer from '../components/LogViewer'
 import { CardHeader, CopyButton, ErrorBox, HelpTip, KindBadge, PageHeader, Spinner, StatusBadge, Tabs } from '../components/ui'
 import { useToast } from '../context/ToastContext'
@@ -49,6 +49,25 @@ export default function AppDetail() {
       toast.push(e.message, 'error')
     } finally {
       setDeploying(false)
+    }
+  }
+
+  // 진행 중인 배포를 찾아 중지 (헤더 버튼)
+  const stopDeploy = async () => {
+    try {
+      const list = await get(`/apps/${id}/deployments?limit=10`)
+      const active = list.find((d) => ['queued', 'running'].includes(d.status))
+      if (!active) {
+        app.reload(true)
+        return
+      }
+      if (await cancelDeployment(active.id, toast)) {
+        setLogId(active.id)
+        setTab('deployments')
+        for (const ms of [500, 2000, 4000]) setTimeout(() => app.reload(true), ms)
+      }
+    } catch (e) {
+      toast.push(e.message, 'error')
     }
   }
 
@@ -135,6 +154,11 @@ export default function AppDetail() {
             <button className="btn-primary" onClick={deploy} disabled={deploying || a.status === 'deploying'} title={isGit ? '' : t('설정(Nginx·서비스)을 다시 적용합니다')}>
               {a.status === 'deploying' ? (isGit ? t('배포 중…') : t('적용 중…')) : isGit ? t('배포') : t('적용')}
             </button>
+            {a.status === 'deploying' && (
+              <button className="btn-danger" onClick={stopDeploy}>
+                ■ {isGit ? t('배포 중지') : t('적용 중지')}
+              </button>
+            )}
           </>
         }
       >
@@ -321,6 +345,16 @@ function DeploymentsTab({ app, selected, onSelect, onChanged }) {
                     >
                       {t('롤백')}
                     </button>
+                  )}
+                  {['queued', 'running'].includes(d.status) && (
+                    <CancelDeployButton
+                      id={d.id}
+                      className="btn-danger px-2.5 py-1 text-xs"
+                      onDone={() => {
+                        onChanged()
+                        list.reload(true)
+                      }}
+                    />
                   )}
                   <button className="btn-ghost ml-1.5 px-2.5 py-1 text-xs" aria-label={t('#{id} 로그 보기', { id: d.id })} onClick={(e) => (e.stopPropagation(), onSelect?.(d.id))}>
                     {t('로그')}

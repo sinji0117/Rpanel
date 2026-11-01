@@ -1184,4 +1184,7 @@ export default {
   "서버에 없음": "Sunucuda yok",
   "Maven 버전은 3 · 3.9 형식입니다 (주 버전만 쓰면 그 안의 최신)": "Maven sürümü 3 veya 3.9 biçimindedir (yalnızca ana sürüm = o serinin en yenisi)",
   "Gradle 버전은 9 · 8.14 형식입니다 (주 버전만 쓰면 그 안의 최신)": "Gradle sürümü 9 veya 8.14 biçimindedir (yalnızca ana sürüm = o serinin en yenisi)",
+  "배포 중지": "Dağıtımı durdur",
+  "적용 중지": "Uygulamayı durdur",
+  "진행 중인 작업을 중지할까요? 지금 실행 중인 버전은 그대로 유지됩니다.": "Devam eden iş durdurulsun mu? Şu anda çalışan sürüm olduğu gibi kalır.",
 }

@@ -1,8 +1,8 @@
 import { Link, useParams } from 'react-router'
+import { CancelDeployButton } from '../components/DeploymentLog'
 import LogViewer from '../components/LogViewer'
 import { ErrorBox, PageHeader, Spinner, StatusBadge } from '../components/ui'
-import { useToast } from '../context/ToastContext'
-import { get, post } from '../lib/api'
+import { get } from '../lib/api'
 import { dateTime, duration, shortSha } from '../lib/format'
 import { useFetch } from '../lib/useFetch'
 import { useDeploymentLog } from '../lib/useSockets'
@@ -11,7 +11,6 @@ import { t } from '../i18n'
 
 export default function DeploymentView() {
   const { id } = useParams()
-  const toast = useToast()
   const d = useFetch(() => get(`/deployments/${id}`), [id])
   const { lines, status, connected } = useDeploymentLog(id, d.data?.status)
 
@@ -44,19 +43,9 @@ export default function DeploymentView() {
         actions={
           <>
             {active && (
-              <button
-                className="btn-danger"
-                onClick={async () => {
-                  try {
-                    await post(`/deployments/${dep.id}/cancel`)
-                    toast.push(t('취소 요청을 보냈습니다'))
-                  } catch (e) {
-                    toast.push(e.message, 'error')
-                  }
-                }}
-              >
-                {t('취소')}
-              </button>
+              <CancelDeployButton id={dep.id} onDone={() => d.reload(true)}>
+                ■ {t('중지')}
+              </CancelDeployButton>
             )}
             <Link to={`/apps/${dep.app_id}`} className="btn-ghost">
               {t('앱으로')}

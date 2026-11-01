@@ -324,12 +324,21 @@ async fn run(
     .await;
 
     log.line("빌드 슬롯 대기 중…").await;
-    let _permit = state
-        .build_slots
-        .clone()
-        .acquire_owned()
-        .await
-        .map_err(|_| anyhow!("semaphore closed"))?;
+    // 다른 배포가 슬롯을 다 쓰고 있어도 '중지'를 누르면 기다리지 않고 바로 끝냄
+    let mut cancel = log.cancel_receiver();
+    let _permit = tokio::select! {
+        permit = state.build_slots.clone().acquire_owned() => {
+            permit.map_err(|_| anyhow!("semaphore closed"))?
+        }
+        _ = async {
+            if cancel.wait_for(|v| *v).await.is_err() {
+                // 취소 채널이 닫혔으면 슬롯만 기다림
+                futures::future::pending::<()>().await;
+            }
+        } => {
+            bail!("사용자가 배포를 취소했습니다");
+        }
+    };
     if log.is_cancelled() {
         bail!("사용자가 배포를 취소했습니다");
     }

@@ -27,7 +27,13 @@ export default function AppDetail() {
   // 배포 탭에서 로그를 볼 배포 (null = 가장 최근)
   const [logId, setLogId] = useState(null)
 
+  // 가장 최근 배포 — 앱마다 진행 중 배포는 하나뿐이라, 대기(queued)도 여기서 알 수 있음
+  const latest = useFetch(() => get(`/apps/${id}/deployments?limit=1`), [id, app.data?.status])
+  const queued = latest.data?.[0]?.status === 'queued'
+
   useInterval(() => app.reload(true), 4000, app.data?.status === 'deploying')
+  // 슬롯을 기다리는 동안: 실행으로 넘어가거나 취소되는지 확인
+  useInterval(() => (latest.reload(true), app.reload(true)), 3000, queued)
 
   if (app.loading) return <Spinner className="text-ink-400" />
   if (app.error) return <ErrorBox error={app.error} />
@@ -36,6 +42,7 @@ export default function AppDetail() {
   const isGit = a.source === 'git'
   const isFiles = a.source === 'files'
   const tab = tabState ?? (isGit ? 'deployments' : isFiles ? 'files' : 'settings')
+  const inProgress = a.status === 'deploying' || queued
 
   const deploy = async () => {
     setDeploying(true)
@@ -45,6 +52,7 @@ export default function AppDetail() {
       setLogId(deployment_id)
       setTab('deployments')
       app.reload(true)
+      latest.reload(true)
     } catch (e) {
       toast.push(e.message, 'error')
     } finally {
@@ -59,12 +67,13 @@ export default function AppDetail() {
       const active = list.find((d) => ['queued', 'running'].includes(d.status))
       if (!active) {
         app.reload(true)
+        latest.reload(true)
         return
       }
       if (await cancelDeployment(active.id, toast)) {
         setLogId(active.id)
         setTab('deployments')
-        for (const ms of [500, 2000, 4000]) setTimeout(() => app.reload(true), ms)
+        for (const ms of [500, 2000, 4000]) setTimeout(() => (app.reload(true), latest.reload(true)), ms)
       }
     } catch (e) {
       toast.push(e.message, 'error')
@@ -151,10 +160,10 @@ export default function AppDetail() {
             >
               {isGit ? t('배포 로그') : t('적용 로그')}
             </button>
-            <button className="btn-primary" onClick={deploy} disabled={deploying || a.status === 'deploying'} title={isGit ? '' : t('설정(Nginx·서비스)을 다시 적용합니다')}>
-              {a.status === 'deploying' ? (isGit ? t('배포 중…') : t('적용 중…')) : isGit ? t('배포') : t('적용')}
+            <button className="btn-primary" onClick={deploy} disabled={deploying || inProgress} title={isGit ? '' : t('설정(Nginx·서비스)을 다시 적용합니다')}>
+              {inProgress ? (isGit ? t('배포 중…') : t('적용 중…')) : isGit ? t('배포') : t('적용')}
             </button>
-            {a.status === 'deploying' && (
+            {inProgress && (
               <button className="btn-danger" onClick={stopDeploy}>
                 ■ {isGit ? t('배포 중지') : t('적용 중지')}
               </button>

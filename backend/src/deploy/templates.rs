@@ -485,9 +485,11 @@ fn site_body(i: &SiteInput, https: bool) -> String {
                 root = i.paths.www_current.display()
             ));
             if let Some(api) = app.api_proxy_port {
+                // `^~` — 정규식 location(아래 정적 파일 캐시 `\.(js|css|png|jpe?g|webp…)$`)보다 먼저.
+                // 없으면 백엔드가 내려주는 `/api/files/a.jpg` 같은 이미지 요청이 정적 파일로 잡혀 404 가 됨.
                 s.push_str(&format!(
                     "
-    location /api/ {{
+    location ^~ /api/ {{
         proxy_pass http://127.0.0.1:{api};
 {PROXY_HEADERS}    }}
 "
@@ -885,7 +887,9 @@ mod tests {
         })
         .unwrap();
         assert!(s.contains("root /var/lib/rpanel/www/example-api/current;"));
-        assert!(s.contains("location /api/ {\n        proxy_pass http://127.0.0.1:8101;"));
+        assert!(s.contains("location ^~ /api/ {\n        proxy_pass http://127.0.0.1:8101;"));
+        // /api/ 아래 이미지(…/a.jpg)가 정적 파일 정규식 location 에 잡히지 않게 ^~
+        assert!(!s.contains("location /api/ {"));
         assert!(s.contains("try_files $uri $uri/ /index.html;"));
         assert_eq!(s.matches('{').count(), s.matches('}').count());
         // SEO: robots · sitemap 은 백엔드로, 백엔드에 없으면 빌드된 파일
@@ -908,7 +912,7 @@ mod tests {
             ipv6: true,
         })
         .unwrap();
-        assert!(s.contains("location /api/"));
+        assert!(s.contains("location ^~ /api/"));
         assert!(!s.contains("/api/seo/"));
         a.app_role = Some("front".into());
 
@@ -920,7 +924,7 @@ mod tests {
             ipv6: true,
         })
         .unwrap();
-        assert!(!s.contains("location /api/"));
+        assert!(!s.contains("/api/ {"));
         assert!(!s.contains("/api/seo/"));
 
         a.domains = "".into();

@@ -137,6 +137,16 @@ export async function openSocket(path) {
   return new WebSocket(`${proto}://${window.location.host}/api${path}?ticket=${encodeURIComponent(ticket)}`)
 }
 
+/** 웹 터미널: { kind: 'site', app_id } 또는 { kind: 'root', code } → WebSocket (출력은 바이너리) */
+export async function openTerminal(target, cols = 80, rows = 24) {
+  const { ticket } = await post('/terminal/ticket', target)
+  const proto = window.location.protocol === 'https:' ? 'wss' : 'ws'
+  const q = new URLSearchParams({ ticket, cols: String(cols), rows: String(rows) })
+  const ws = new WebSocket(`${proto}://${window.location.host}/api/ws/terminal?${q}`)
+  ws.binaryType = 'arraybuffer'
+  return ws
+}
+
 /** 인증이 필요한 파일 다운로드 (백업 등) */
 export async function download(path, filename) {
   const run = () =>

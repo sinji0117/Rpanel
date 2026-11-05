@@ -728,7 +728,7 @@ test('알림: 종 아이콘 · 목록 · 설정 · 시험 알림, 메뉴 순서,
 
   // 메뉴 순서: … 로그 · 런타임 · 보안 · 설정 · 관리자
   await expect(page.locator('[data-testid^=nav-group-]')).toHaveText([/웹사이트/, /데이터베이스/, /운영/, /시스템/])
-  await expect(page.locator('aside nav a')).toHaveText(['대시보드', '사이트', '프로젝트', 'MariaDB', 'MongoDB', 'Redis', '백업', '로그', '알림', '런타임', '보안', '설정', '관리자'])
+  await expect(page.locator('aside nav a')).toHaveText(['대시보드', '사이트', '프로젝트', 'MariaDB', 'MongoDB', 'Redis', '백업', '로그', '알림', '런타임', '터미널', '보안', '설정', '관리자'])
 
   // 종 아이콘: 안 읽은 2개 → 펼치면 번역된 제목 → 누르면 링크로 이동하고 읽음
   await expect(page.getByTestId('notification-count').first()).toHaveText('2')
@@ -1316,4 +1316,57 @@ test('관리자: 보기 전용 계정 추가 → 역할 표시 · 관리자로 �
   // 내 계정은 역할을 바꿀 수 없음 (칸이 없음)
   await page.getByRole('row', { name: /admin@example\.com/ }).getByRole('button', { name: '수정' }).click()
   await expect(page.getByRole('dialog', { name: '관리자 수정' }).getByLabel('역할')).toHaveCount(0)
+})
+
+test('터미널: 사이트 터미널 입출력 · 서버 터미널은 꺼짐 안내 → 2단계 인증 코드로 열기', async ({ page }) => {
+  const backend = seededBackend()
+  backend.db.apps.push({ ...backend.db.apps[0], id: 7, project_id: null, name: 'Blog', slug: 'blog-example-com', kind: 'static', source: 'files', git_url: null, domains: 'blog.example.com', site_user: 'blog' })
+  await backend.install(page)
+  await page.goto('/')
+  await menu(page).getByRole('link', { name: '터미널' }).click()
+  await expect(page.getByRole('heading', { name: '터미널', exact: true })).toBeVisible()
+
+  // 서버 터미널: 꺼져 있으면 켜는 명령만 안내 (패널에서 켜는 버튼 없음)
+  await expect(page.getByTestId('root-terminal-state')).toHaveText('꺼짐')
+  await expect(page.getByText('sudo rpanel-terminal on', { exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'root 로 열기' })).toHaveCount(0)
+
+  // 사이트 터미널 열기 → 입력이 서버로 가고 출력이 화면에
+  await page.getByRole('combobox', { name: '사이트', exact: true }).selectOption({ label: 'blog.example.com (blog)' })
+  await page.getByRole('button', { name: '열기', exact: true }).click()
+  const term = page.getByTestId('terminal')
+  await expect(term).toHaveAttribute('data-state', 'open')
+  await expect(term).toContainText('site@server:~$')
+  await term.click()
+  await page.keyboard.type('ls -la')
+  await page.keyboard.press('Enter')
+  await expect(term).toContainText('you typed: ls -la')
+  expect(backend.db.terminal.opened[0]).toEqual({ kind: 'site', app_id: 7 })
+  expect(backend.db.terminal.size?.[0]).toBeGreaterThan(20)
+  // exit → 닫힘 표시, 다시 연결 가능
+  await page.keyboard.type('exit')
+  await page.keyboard.press('Enter')
+  await expect(term).toContainText('터미널이 닫혔습니다')
+  await expect(page.getByRole('button', { name: '다시 연결' })).toBeVisible()
+  await page.getByRole('button', { name: 'blog 닫기' }).click()
+  await expect(page.getByTestId('terminal')).toHaveCount(0)
+
+  // 서버 터미널 켜짐 + 2단계 인증 → 코드 넣고 열기
+  backend.db.terminal.root = true
+  backend.db.terminal.twofa = true
+  await page.reload()
+  await expect(page.getByTestId('root-terminal-state')).toHaveText('켜짐')
+  await page.getByLabel('인증 코드').fill('111111')
+  await page.getByRole('button', { name: 'root 로 열기' }).click()
+  await expect(page.getByTestId('terminal')).toContainText('인증 코드가 맞지 않습니다')
+  await page.getByRole('button', { name: 'root 닫기' }).click()
+  await page.getByLabel('인증 코드').fill('246810')
+  await page.getByRole('button', { name: 'root 로 열기' }).click()
+  await expect(page.getByTestId('terminal')).toContainText('root@server:~#')
+  await expect(page.getByText('root 권한입니다.', { exact: false })).toBeVisible()
+
+  // 사이트 화면의 터미널 탭
+  await page.goto('/apps/7?tab=terminal')
+  await page.getByRole('button', { name: '터미널 열기' }).click()
+  await expect(page.getByTestId('terminal')).toContainText('site@server:~$')
 })

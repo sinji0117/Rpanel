@@ -42,7 +42,7 @@ rm -f "$P/deploy/make-package.sh"
 install -m 0755 "$BIN/rpanel" "$BIN/rpanel-files" "$P/backend/target/release/"
 cp -a "$ROOT/frontend/dist" "$P/frontend/dist"
 echo "$VER $(date -u +%Y-%m-%d) $SHA" > "$P/VERSION"
-chmod 0755 "$P/install.sh" "$P/update.sh" "$P/uninstall.sh" "$P/deploy/install.sh" "$P/deploy/rpanel-helper"
+chmod 0755 "$P/install.sh" "$P/update.sh" "$P/uninstall.sh" "$P/deploy/install.sh" "$P/deploy/rpanel-helper" "$P/deploy/rpanel-terminal"
 
 install -d "$OUT"
 NAME="rpanel-linux-$ARCH.tar.gz"

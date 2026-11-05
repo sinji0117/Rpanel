@@ -1,0 +1,77 @@
+#!/bin/bash
+# rpanel-terminal — 패널의 "서버 터미널(root)" 켜기 · 끄기
+#
+#   sudo rpanel-terminal on        켜기 (패널에서 관리자 + 2단계 인증 코드로 root 셸을 열 수 있음)
+#   sudo rpanel-terminal off       끄기 (열려 있는 서버 터미널도 모두 닫음)
+#   sudo rpanel-terminal status    켜져 있는지, 지금 열린 터미널 목록
+#   sudo rpanel-terminal close     열린 웹 터미널(사이트 · 서버) 모두 닫기
+#
+# 이 설정은 서버에서 root 로만 바꿀 수 있습니다. 패널에서는 켤 수 없으므로,
+# 패널 비밀번호가 새어도 서버 터미널이 꺼져 있으면 root 권한까지 넘어가지 않습니다.
+set -euo pipefail
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+FLAG=/etc/rpanel/terminal-root
+
+die() { printf '\033[1;31m✘ %s\033[0m\n' "$*" >&2; exit 1; }
+ok()  { printf '\033[1;32m✔ %s\033[0m\n' "$*"; }
+
+sessions() {
+  systemctl list-units --type=service --state=running --no-legend --plain 'rpanel-term-*' 2>/dev/null \
+    | awk '{print $1}' || true
+}
+
+show() {
+  if [[ -f $FLAG ]]; then
+    echo "서버 터미널(root): 켜짐  ($(head -n1 "$FLAG"))"
+  else
+    echo "서버 터미널(root): 꺼짐  (켜기: sudo rpanel-terminal on)"
+  fi
+  local s; s="$(sessions)"
+  if [[ -n "$s" ]]; then
+    echo "열린 웹 터미널:"
+    while read -r u; do
+      printf '  %-40s %s\n' "$u" "$(systemctl show -p Description --value "$u" 2>/dev/null)"
+    done <<<"$s"
+  else
+    echo "열린 웹 터미널: 없음"
+  fi
+}
+
+case "${1:-status}" in
+  -h|--help|help) sed -n '2,11p' "$0" ;;
+  status) show ;;
+  on)
+    [[ $EUID -eq 0 ]] || die "root 권한이 필요합니다: sudo rpanel-terminal on"
+    [[ -d /etc/rpanel ]] || die "Rpanel 이 설치되어 있지 않습니다"
+    if [[ -f $FLAG ]]; then ok "이미 켜져 있습니다"; exit 0; fi
+    if [[ -t 0 && "${2:-}" != "--yes" ]]; then
+      cat <<'EOF'
+서버 터미널을 켜면 패널 관리자가 브라우저에서 root 셸을 쓸 수 있습니다.
+  - 관리자 계정이면서 2단계 인증을 켠 계정만, 열 때마다 새 인증 코드를 넣어야 열립니다
+  - 열 때마다 패널 알림 · 감사 기록 · 서버 로그(journalctl -t rpanel-terminal)에 남습니다
+  - 쓰지 않을 때는 꺼 두는 것이 안전합니다: sudo rpanel-terminal off
+EOF
+      read -r -p "켤까요? [y/N] " a
+      [[ "${a,,}" == y || "${a,,}" == yes ]] || { echo "취소했습니다"; exit 1; }
+    fi
+    umask 022
+    printf '%s by %s\n' "$(date '+%Y-%m-%d %H:%M')" "${SUDO_USER:-root}" > "$FLAG.tmp"
+    chown root:root "$FLAG.tmp"; chmod 0644 "$FLAG.tmp"
+    mv -f "$FLAG.tmp" "$FLAG"
+    logger -p auth.notice -t rpanel-terminal "server terminal ENABLED by ${SUDO_USER:-root}" 2>/dev/null || true
+    ok "서버 터미널을 켰습니다. 패널 → 시스템 → 터미널"
+    ;;
+  off)
+    [[ $EUID -eq 0 ]] || die "root 권한이 필요합니다: sudo rpanel-terminal off"
+    rm -f "$FLAG" "$FLAG.tmp"
+    systemctl stop 'rpanel-term-root-*' 2>/dev/null || true
+    logger -p auth.notice -t rpanel-terminal "server terminal disabled by ${SUDO_USER:-root}" 2>/dev/null || true
+    ok "서버 터미널을 껐습니다 (열려 있던 서버 터미널도 닫았습니다)"
+    ;;
+  close)
+    [[ $EUID -eq 0 ]] || die "root 권한이 필요합니다: sudo rpanel-terminal close"
+    systemctl stop 'rpanel-term-*' 2>/dev/null || true
+    ok "열린 웹 터미널을 모두 닫았습니다"
+    ;;
+  *) die "사용법: sudo rpanel-terminal on|off|status|close" ;;
+esac

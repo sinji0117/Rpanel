@@ -409,6 +409,8 @@ install -m 0755 -o root -g root "$SRC/backend/target/release/rpanel-files" /usr/
 # 관리 명령: sudo rpanel-update / sudo rpanel-uninstall
 install -m 0755 -o root -g root "$REPO/update.sh" /usr/local/sbin/rpanel-update
 install -m 0755 -o root -g root "$REPO/uninstall.sh" /usr/local/sbin/rpanel-uninstall
+# 서버(root) 웹 터미널 켜기·끄기: sudo rpanel-terminal on|off (기본 꺼짐)
+install -m 0755 -o root -g root "$REPO/deploy/rpanel-terminal" /usr/local/sbin/rpanel-terminal
 
 cat > /etc/sudoers.d/rpanel.tmp <<'EOF'
 # Rpanel: 패널은 이 helper 하나만 root로 실행할 수 있습니다 (인자·파일은 helper가 검증)
@@ -657,6 +659,7 @@ $([[ -z "${RPANEL_DONE_WORD:-}" ]] && echo "            → 첫 화면에서 관
   모드      $EDGE$([[ $EDGE == proxy ]] && echo " — SSL 은 앞단 프록시($PROXY_IP)에서, 도메인은 프록시에서 이 서버 :80 으로 연결")
   실행 모드  $MODE$( [[ $MODE == dry-run ]] && echo "  — 실제 배포하려면 $ENVF 에서 RPANEL_EXEC_MODE=real 후 systemctl restart rpanel")
   설정·비밀  $ENVF
+  서버 터미널 sudo rpanel-terminal on   (패널에서 root 터미널 쓰기, 기본 꺼짐)
   업데이트   sudo rpanel-update
   삭제      sudo rpanel-uninstall
   로그      journalctl -u rpanel -f

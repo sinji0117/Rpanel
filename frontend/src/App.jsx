@@ -17,6 +17,7 @@ import SecurityPage, { ForcedTwoFactor } from './pages/Security'
 import { get } from './lib/api'
 import { useFetch } from './lib/useFetch'
 import RuntimesPage from './pages/Runtimes'
+import TerminalPage from './pages/Terminal'
 import LogsPage from './pages/Logs'
 import NotificationsPage from './pages/Notifications'
 import MongoPage from './pages/MongoPage'
@@ -69,6 +70,7 @@ function Gate() {
         <Route path="apps/:id" element={<AppDetail />} />
         <Route path="deployments/:id" element={<DeploymentView />} />
         <Route path="settings" element={<Settings />} />
+        <Route path="terminal" element={<TerminalPage />} />
         <Route path="*" element={<NotFound />} />
       </Route>
     </Routes>

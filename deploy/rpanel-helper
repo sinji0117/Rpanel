@@ -1993,6 +1993,58 @@ UNIT
   echo "✔ ${new:-$DATA (기본)}"
 }
 
+# ───────────────────────── 웹 터미널 ─────────────────────────
+# 패널 서비스는 ProtectHome · PrivateTmp 샌드박스 안에서 돌기 때문에, 셸은 systemd-run --pty 로
+# 패널 밖(일반 SSH 로그인과 같은 환경)에서 띄웁니다. 유닛 이름: rpanel-term-<slug|root>-<난수>
+#   서버(root) 터미널은 /etc/rpanel/terminal-root 가 있을 때만 — 이 파일은 서버에서
+#   root 가 sudo rpanel-terminal on 으로만 만들 수 있고, 패널(helper)에는 만드는 명령이 없습니다.
+
+TERM_ROOT_FLAG="${RPANEL_TEST_TERM_FLAG:-/etc/rpanel/terminal-root}"   # 테스트용 덮어쓰기 (sudo env_reset 으로 운영에선 불가)
+
+term_root_on() {
+  local f="$TERM_ROOT_FLAG"
+  [[ -f "$f" && ! -L "$f" ]] || return 1
+  [[ "$(stat -c %u "$f")" == 0 ]] || return 1
+  [[ "$(stat -c %u "$(dirname "$f")")" == 0 ]] || return 1
+  return 0
+}
+
+term_exec() { # term_exec <유닛 앞부분> <사용자> <HOME> <시작 폴더> <설명>
+  local unit user="$2" home="$3" cwd="$4" desc="$5"
+  unit="$1-$(od -An -N4 -tx4 /dev/urandom | tr -d ' \n')"
+  command -v systemd-run >/dev/null || die "systemd-run 이 없습니다"
+  exec systemd-run --quiet --pty --collect --unit="$unit" --description="$desc" \
+    --uid="$user" --gid="$(id -g "$user")" --working-directory="$cwd" \
+    -p KillMode=control-group \
+    --setenv=TERM=xterm-256color --setenv=COLORTERM=truecolor --setenv=LANG=C.UTF-8 \
+    --setenv=HOME="$home" --setenv=USER="$user" --setenv=LOGNAME="$user" --setenv=SHELL=/bin/bash \
+    --setenv=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+    /bin/bash -l
+}
+
+term_site() {
+  local slug="$1" user home cwd uid
+  user="$(site_user_of "$slug")"
+  [[ -n "$user" ]] || die "사이트 계정이 없습니다: $slug"
+  valid_site_user "$user"
+  uid="$(id -u "$user" 2>/dev/null)" || die "리눅스 계정이 없습니다: $user"
+  (( uid >= 1000 )) || die "시스템 계정으로는 터미널을 열 수 없습니다: $user"
+  id -nG "$user" | tr ' ' '\n' | grep -qx "$SITES_GROUP" || die "사이트 계정이 아닙니다: $user"
+  home="/home/$user"
+  cwd="$(site_root_of "$slug")"
+  [[ -n "$cwd" && -d "$cwd" ]] || cwd="$home"
+  logger -p auth.info -t rpanel-terminal "site terminal opened: $slug ($user)" 2>/dev/null || true
+  term_exec "rpanel-term-$slug" "$user" "$home" "$cwd" "Rpanel site terminal ($slug)"
+}
+
+term_root() {
+  local who="${1:-}"
+  [[ "$who" =~ ^[0-9]{1,12}$ ]] || die "invalid panel user id: '$who'"
+  term_root_on || die "서버 터미널이 꺼져 있습니다. 서버에서 sudo rpanel-terminal on 으로 켜세요"
+  logger -p auth.notice -t rpanel-terminal "ROOT terminal opened from panel (panel user #$who)" 2>/dev/null || true
+  term_exec "rpanel-term-root" root /root /root "Rpanel server terminal (root, panel user #$who)"
+}
+
 # ───────────────────────── main ─────────────────────────
 
 main() {
@@ -2106,6 +2158,9 @@ case "$cmd" in
   security-scan)       security_scan ;;
   runtime-remove)  runtime_remove "${1:-}" "${2:-}" ;;
   storage-set)     storage_set "${1:-}" "${2:-}" ;;
+  term-site)        valid_slug "${1:-}"; term_site "$1" ;;
+  term-root)        term_root "${1:-}" ;;
+  term-root-status) if term_root_on; then echo on; else echo off; fi ;;
   purge-app)
     valid_slug "${1:-}"
     remove_all_crons "$1"
@@ -2119,7 +2174,7 @@ case "$cmd" in
     echo "purged $1"
     ;;
   *)
-    die "usage: rpanel-helper {prepare-app|install-unit|remove-unit|install-site|remove-site|purge-app} <slug> | svc {start|stop|restart} <slug> | status|journal <slug> | {install,remove,run}-cron|cron-status|cron-log <slug> <id> | db-{create,drop,password} <db> <user> | db-user-create <db> <user> <all|read> (pw stdin) | db-user-drop <db> <user> | db-user-password <db> <user> (pw stdin) | redis-user-set <user> <pattern> <rw|ro> (pw stdin) | redis-user-drop <user> | backup-db <slug> <db> <stamp> | backup-data <slug> <stamp> | restore-db <slug> <db> <file> | restore-data <slug> <file> | nginx-log <slug> access|error <lines> | site-create <slug> <user> <domain> <static|rust|python|node|java> | site-password <slug> (stdin) | site-account-create <slug> <user> <ssh|sftp> (pw stdin) | site-account-update <slug> <user> <ssh|sftp> <on|off> | site-account-password <slug> <user> (stdin) | site-account-keys <slug> <user> (stdin) | site-account-delete <slug> <user> | ssl-issue <slug> <email> <domain>... | ssl-custom|ssl-info|ssl-remove <slug> | backup-files <slug> <stamp> | restore-files <slug> <file> | backup-mongo <slug> <db> <stamp> | restore-mongo <slug> <db> <file> | runtime-install|runtime-remove <python|node|java|maven|gradle> <version> | system-log <panel|nginx|ssh|mariadb|redis> <lines> | system-events <count> | panel-domain-set <domain> <email> | panel-domain-remove | db-engine-upgrade|db-engine-downgrade <mariadb|mongodb|redis> <version> | panel-access <any|CIDR,...> | firewall-status | firewall-allow <port|a:b> <tcp|udp|any> <CIDR|any> | firewall-block <CIDR> | firewall-delete <num> [to] | firewall-enable | firewall-disable | security-scan | storage-set <backups|projects> <path|default>"
+    die "usage: rpanel-helper {prepare-app|install-unit|remove-unit|install-site|remove-site|purge-app} <slug> | svc {start|stop|restart} <slug> | status|journal <slug> | {install,remove,run}-cron|cron-status|cron-log <slug> <id> | db-{create,drop,password} <db> <user> | db-user-create <db> <user> <all|read> (pw stdin) | db-user-drop <db> <user> | db-user-password <db> <user> (pw stdin) | redis-user-set <user> <pattern> <rw|ro> (pw stdin) | redis-user-drop <user> | backup-db <slug> <db> <stamp> | backup-data <slug> <stamp> | restore-db <slug> <db> <file> | restore-data <slug> <file> | nginx-log <slug> access|error <lines> | site-create <slug> <user> <domain> <static|rust|python|node|java> | site-password <slug> (stdin) | site-account-create <slug> <user> <ssh|sftp> (pw stdin) | site-account-update <slug> <user> <ssh|sftp> <on|off> | site-account-password <slug> <user> (stdin) | site-account-keys <slug> <user> (stdin) | site-account-delete <slug> <user> | ssl-issue <slug> <email> <domain>... | ssl-custom|ssl-info|ssl-remove <slug> | backup-files <slug> <stamp> | restore-files <slug> <file> | backup-mongo <slug> <db> <stamp> | restore-mongo <slug> <db> <file> | runtime-install|runtime-remove <python|node|java|maven|gradle> <version> | system-log <panel|nginx|ssh|mariadb|redis> <lines> | system-events <count> | panel-domain-set <domain> <email> | panel-domain-remove | db-engine-upgrade|db-engine-downgrade <mariadb|mongodb|redis> <version> | panel-access <any|CIDR,...> | firewall-status | firewall-allow <port|a:b> <tcp|udp|any> <CIDR|any> | firewall-block <CIDR> | firewall-delete <num> [to] | firewall-enable | firewall-disable | security-scan | storage-set <backups|projects> <path|default> | term-site <slug> | term-root <panel-user-id> | term-root-status"
     ;;
 esac
 }

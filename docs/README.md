@@ -22,6 +22,7 @@
 | [데이터베이스 쓰기](database.md) | MariaDB · MongoDB · Redis 만들기, 계정 관리, DB 웹 관리(`/db`) |
 | [백업과 복원](backup.md) | 지금 백업, 백업 예약, 복원 |
 | [언어 버전 (런타임)](runtimes.md) | Rust · Python · Node.js · Java 버전 설치 · 기본 버전 · 앱별 버전 |
+| [웹 터미널](terminal.md) | 브라우저에서 사이트 계정 · 서버(root) 셸, 켜고 끄기, 기록 |
 | [보안](security.md) | 보안 점검, 방화벽(ufw), 로그인 세션 · 시도 제한, 2단계 인증(OTP) · 필수 정책, 보기 전용 계정 |
 | [모니터링과 로그](monitoring-logs.md) | 대시보드 그래프, 가동 시간, 로그 메뉴 |
 | [알림](notifications.md) | 종 아이콘, 알림 받을 일, Discord · Slack · Telegram · 웹훅 |

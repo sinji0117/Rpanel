@@ -1056,3 +1056,96 @@ fn helper_storage_path_rules() {
     assert!(!with("storage_set backups default"));
     std::fs::remove_dir_all(&dir).ok();
 }
+
+// ───────────── 웹 터미널 ─────────────
+
+fn run_helper(args: &[&str], env: &[(&str, &str)]) -> (bool, String, String) {
+    let mut c = Command::new("bash");
+    c.arg(helper()).args(args);
+    for (k, v) in env {
+        c.env(k, v);
+    }
+    let out = c.output().expect("bash");
+    (
+        out.status.success(),
+        String::from_utf8_lossy(&out.stdout).into_owned(),
+        String::from_utf8_lossy(&out.stderr).into_owned(),
+    )
+}
+
+#[test]
+fn root_terminal_is_off_without_root_owned_flag() {
+    let dir =
+        std::env::temp_dir().join(format!("rpanel-term-{}-{}", std::process::id(), rand_id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let flag = dir.join("terminal-root");
+    let f = flag.display().to_string();
+    let env = [("RPANEL_TEST_TERM_FLAG", f.as_str())];
+
+    // 파일이 없으면 꺼짐, 서버 터미널도 열리지 않음
+    let (ok, out, _) = run_helper(&["term-root-status"], &env);
+    assert!(ok);
+    assert_eq!(out.trim(), "off");
+    let (ok, _, err) = run_helper(&["term-root", "1"], &env);
+    assert!(!ok);
+    assert!(err.contains("꺼져"), "{err}");
+
+    // root 가 아닌 사용자가 만든 파일은 무시 (패널이 스스로 켜지 못함)
+    std::fs::write(&flag, "x\n").unwrap();
+    // SAFETY: getuid 는 항상 성공
+    if unsafe { libc::getuid() } != 0 {
+        let (_, out, _) = run_helper(&["term-root-status"], &env);
+        assert_eq!(out.trim(), "off");
+    }
+    // 심볼릭 링크도 무시
+    std::fs::remove_file(&flag).unwrap();
+    std::os::unix::fs::symlink("/etc/hostname", &flag).unwrap();
+    let (_, out, _) = run_helper(&["term-root-status"], &env);
+    assert_eq!(out.trim(), "off");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn terminal_commands_validate_arguments() {
+    for bad in ["", "abc", "1;id", "-1", "12345678901234"] {
+        let (ok, _, err) = run_helper(&["term-root", bad], &[]);
+        assert!(!ok, "term-root {bad:?} accepted");
+        assert!(err.contains("invalid panel user id"), "{err}");
+    }
+    for bad in ["", "../etc", "Blog", "a b", "-x"] {
+        let (ok, _, err) = run_helper(&["term-site", bad], &[]);
+        assert!(!ok, "term-site {bad:?} accepted");
+        assert!(err.contains("invalid slug"), "{err}");
+    }
+}
+
+#[test]
+fn site_terminal_needs_a_registered_site_user() {
+    let dir = std::env::temp_dir().join(format!(
+        "rpanel-term-reg-{}-{}",
+        std::process::id(),
+        rand_id()
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    let reg = dir.join("site-users");
+    std::fs::write(
+        &reg,
+        "blog root /root\nshop nosuchuser-xyz /home/nosuchuser-xyz\n",
+    )
+    .unwrap();
+    let r = reg.display().to_string();
+    let env = [("RPANEL_TEST_SITES_REG", r.as_str())];
+    // 등록 안 된 사이트
+    let (ok, _, err) = run_helper(&["term-site", "unknown"], &env);
+    assert!(!ok);
+    assert!(err.contains("사이트 계정이 없습니다"), "{err}");
+    // 예약된 이름(root 등)은 등록돼 있어도 거부
+    let (ok, _, err) = run_helper(&["term-site", "blog"], &env);
+    assert!(!ok);
+    assert!(err.contains("reserved user name"), "{err}");
+    // 리눅스 계정이 없는 경우
+    let (ok, _, err) = run_helper(&["term-site", "shop"], &env);
+    assert!(!ok);
+    assert!(err.contains("리눅스 계정이 없습니다"), "{err}");
+    let _ = std::fs::remove_dir_all(&dir);
+}

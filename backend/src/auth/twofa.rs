@@ -173,7 +173,7 @@ pub(crate) async fn check_code(
     Ok((res.rows_affected() == 1).then_some("recovery"))
 }
 
-async fn limit(state: &AppState, uid: u64) -> AppResult<()> {
+pub(crate) async fn limit(state: &AppState, uid: u64) -> AppResult<()> {
     if !session::rate_limit(state, &format!("2fa:{uid}"), 10, 300).await? {
         return Err(AppError::TooManyRequests);
     }

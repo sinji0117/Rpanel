@@ -28,6 +28,7 @@ export function createMockBackend({ needsSetup = false } = {}) {
     admins: [],
     mongos: [],
     panelDomain: null,
+    terminal: { root: false, twofa: false, opened: [] },
     panelAllow: [],
     // 2단계 인증 (인증 앱 코드는 항상 123456 으로 가정)
     totp: { enabled: false, recovery: [] },
@@ -309,6 +310,19 @@ export function createMockBackend({ needsSetup = false } = {}) {
       })
     if (path === '/audit') return json(route, 200, [])
     if (path === '/system/version') return json(route, 200, db.version)
+    if (path === '/terminal' && method === 'GET') {
+      const sites = db.apps.filter((a) => a.site_user).map((a) => ({ id: a.id, name: a.name, slug: a.slug, user: a.site_user, domain: (a.domains || '').split(' ')[0] }))
+      return json(route, 200, { available: true, sites, root: { enabled: db.terminal.root, twofa: db.terminal.twofa }, limits: { per_user: 4, idle_minutes: 30 } })
+    }
+    if (path === '/terminal/ticket' && method === 'POST') {
+      if (body.kind === 'root') {
+        if (!db.terminal.root) return json(route, 403, { error: 'forbidden', message: '서버 터미널이 꺼져 있습니다. 서버에서 sudo rpanel-terminal on 으로 켜세요' })
+        if (body.code !== '246810') return json(route, 400, { error: 'bad_request', message: '인증 코드가 맞지 않습니다' })
+      }
+      const ticket = 'ab'.repeat(24)
+      db.terminal.opened.push(body)
+      return json(route, 200, { ticket, expires_in: 30 })
+    }
     // ── notifications ──
     if (path === '/notifications' && method === 'GET') {
       const unreadOnly = url.searchParams.get('unread') === 'true'
@@ -1271,6 +1285,42 @@ export function createMockBackend({ needsSetup = false } = {}) {
 
   /** 배포 로그 WebSocket: 줄을 보내고 성공 상태로 종료 */
   function handleWs(ws) {
+    // 웹 터미널: 프롬프트를 보내고, 받은 입력을 되돌려 줌 (exit 이면 종료)
+    if (ws.url().includes('/ws/terminal')) {
+      const target = db.terminal.opened[db.terminal.opened.length - 1] ?? {}
+      const enc = new TextEncoder()
+      const prompt = target.kind === 'root' ? 'root@server:~# ' : 'site@server:~$ '
+      ws.send(Buffer.from(enc.encode(`mock shell ready\r\n${prompt}`)))
+      let line = ''
+      ws.onMessage((m) => {
+        if (typeof m === 'string') {
+          try {
+            const c = JSON.parse(m)
+            if (c.type === 'resize') db.terminal.size = [c.cols, c.rows]
+          } catch {
+            /* 무시 */
+          }
+          return
+        }
+        const text = Buffer.from(m).toString('utf8')
+        for (const ch of text) {
+          if (ch === '\r') {
+            if (line === 'exit') {
+              ws.send(Buffer.from(enc.encode('\r\nlogout\r\n')))
+              ws.send(JSON.stringify({ type: 'exit', code: 0 }))
+              ws.close()
+              return
+            }
+            ws.send(Buffer.from(enc.encode(`\r\nyou typed: ${line}\r\n${prompt}`)))
+            line = ''
+          } else {
+            line += ch
+            ws.send(Buffer.from(enc.encode(ch)))
+          }
+        }
+      })
+      return
+    }
     const m = ws.url().match(/\/ws\/deployments\/(\d+)/)
     if (m) {
       const d = db.deployments.find((x) => x.id === Number(m[1]))

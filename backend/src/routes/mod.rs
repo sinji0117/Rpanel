@@ -19,6 +19,7 @@ pub mod site_admin;
 pub mod sites;
 pub mod storage;
 pub mod system;
+pub mod terminal;
 pub mod users;
 pub mod ws;
 
@@ -307,6 +308,10 @@ pub fn router(state: AppState) -> Router {
         // 외부 트리거
         .route("/hooks/{slug}", post(deployments::webhook))
         // WebSocket
+        // 웹 터미널
+        .route("/terminal", get(terminal::status))
+        .route("/terminal/ticket", post(terminal::ticket))
+        .route("/ws/terminal", get(terminal::socket))
         .route("/ws/metrics", get(ws::metrics))
         .route("/ws/deployments/{id}", get(ws::deployment_log))
         .fallback(|| async { crate::error::AppError::NotFound });

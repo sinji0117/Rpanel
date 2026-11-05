@@ -131,7 +131,8 @@ fi
 
 # ───────────── 3. 프로그램·권한·SSH·방화벽 ─────────────
 say "패널 프로그램 제거"
-rm -f /usr/local/bin/rpanel /usr/local/sbin/rpanel-update /usr/local/sbin/rpanel-uninstall /etc/sudoers.d/rpanel
+systemctl stop 'rpanel-term-*' 2>/dev/null || true
+rm -f /usr/local/bin/rpanel /usr/local/sbin/rpanel-update /usr/local/sbin/rpanel-uninstall /usr/local/sbin/rpanel-terminal /etc/sudoers.d/rpanel
 rm -rf /usr/local/lib/rpanel /usr/share/rpanel /var/lib/rpanel/.self-build /var/lib/rpanel/staging
 info "프로그램·sudo 권한 제거"
 if [[ -f /etc/ssh/sshd_config.d/50-rpanel-sites.conf ]]; then

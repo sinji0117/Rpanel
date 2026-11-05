@@ -10,6 +10,7 @@ import { ago, duration, mergeEnv, parseDotenv, shortSha } from '../lib/format'
 import { useFetch, useInterval } from '../lib/useFetch'
 import { BackupTab, CronTab, DatabaseTab, NginxLogTab } from './AppTabs'
 import { AccountsTab } from './SiteAccounts'
+import { SiteTerminalTab } from './SiteTerminal'
 import { AppRuntimePicker } from './Runtimes'
 import { FileManager, SiteSettings, SslTab } from './SiteTabs'
 import { t, tx } from '../i18n'
@@ -18,7 +19,7 @@ import { isServiceKind } from '../lib/kinds'
 import { useAuth } from '../context/AuthContext'
 
 // 보기 전용 계정에게는 숨기는 탭 (환경변수 · DB 접속 정보 · 웹훅 토큰 · 파일)
-const SECRET_TABS = ['env', 'db', 'git', 'files']
+const SECRET_TABS = ['env', 'db', 'git', 'files', 'terminal']
 
 export default function AppDetail() {
   const { id } = useParams()
@@ -113,6 +114,7 @@ export default function AppDetail() {
           { id: 'files', label: t('파일') },
           { id: 'ssl', label: 'SSL' },
           { id: 'accounts', label: t('사이트 계정') },
+          ...(a.site_user ? [{ id: 'terminal', label: t('터미널') }] : []),
           { id: 'db', label: t('데이터베이스') },
           { id: 'backups', label: t('백업') },
           { id: 'cron', label: t('크론') },
@@ -232,6 +234,7 @@ export default function AppDetail() {
       {tab === 'files' && <FileManager app={a} />}
       {tab === 'ssl' && <SslTab app={a} onChanged={() => app.reload(true)} />}
       {tab === 'accounts' && <AccountsTab app={a} />}
+      {tab === 'terminal' && <SiteTerminalTab app={a} />}
       {tab === 'settings' && (
         <div className="space-y-4">
           <AppRuntimePicker app={a} onSaved={(n) => app.setData(n)} />

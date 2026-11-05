@@ -21,6 +21,7 @@ pub mod security;
 pub mod state;
 pub mod storage;
 pub mod sysevents;
+pub mod terminal;
 pub mod validate;
 
 use std::{

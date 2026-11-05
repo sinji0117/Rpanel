@@ -63,6 +63,8 @@ pub struct Config {
     pub ipv6: bool,
     /// 저장 위치 기록 (helper 가 씀): "<backups|projects> <path>"
     pub storage_reg: PathBuf,
+    /// 테스트 전용: 웹 터미널이 sudo helper 대신 실행할 명령 (운영에서는 항상 None)
+    pub terminal_cmd: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
@@ -164,6 +166,7 @@ impl Config {
             storage_reg: var("RPANEL_STORAGE_REG")
                 .unwrap_or_else(|| "/etc/rpanel/storage".into())
                 .into(),
+            terminal_cmd: None,
         })
     }
 
@@ -200,6 +203,7 @@ impl Config {
             files_bin: "/bin/false".into(),
             ipv6: true,
             storage_reg: "/nonexistent/rpanel-storage".into(),
+            terminal_cmd: None,
         }
     }
 }

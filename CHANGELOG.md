@@ -2,6 +2,17 @@
 
 버전 번호는 [Semantic Versioning](https://semver.org/lang/ko/)을 따릅니다. 업데이트는 서버에서 `sudo rpanel-update`.
 
+## v0.18.0 — 2026-11-06
+
+**웹 터미널**
+
+- **시스템 › 터미널**: 브라우저에서 바로 쓰는 셸 (xterm.js). 탭으로 여러 개, 전체 화면, 창 크기 자동 맞춤, 링크 클릭.
+- **사이트 터미널**: 사이트의 리눅스 계정으로, 사이트 폴더에서 시작 (SSH 로 접속한 것과 같은 권한). 사이트 화면에 **터미널** 탭도 추가. 관리자만.
+- **서버 터미널 (root)**: 기본 꺼짐. 서버에서 `sudo rpanel-terminal on|off|status|close` 로만 켜고 끕니다 (패널에서는 못 켬). 관리자 + 2단계 인증 계정이 열 때마다 새 인증 코드를 넣어야 열리고, 열면 알림이 갑니다.
+- 셸은 `sudo rpanel-helper term-site|term-root` → `systemd-run --pty` 로 패널 서비스의 격리 밖에서 엽니다 (`rpanel-term-*` 유닛).
+- 감사 기록 `terminal.open` · `terminal.close` · `terminal.root_denied`, 서버 로그 `journalctl -t rpanel-terminal`. 30분 무입력 · 12시간 · 로그아웃 · 세션 끊기 때 자동으로 닫힘. 한 사람 4개 · 전체 12개까지.
+- 문서: [웹 터미널](docs/terminal.md).
+
 ## v0.17.0 — 2026-11-06
 
 **메일 서버 같은 낮은 포트 앱**

@@ -1,0 +1,139 @@
+name: Release
+
+# v0.16.0 같은 태그를 올리면 미리 빌드한 설치 묶음(올인원 패키지)을 만들어 GitHub 릴리스에 붙입니다.
+#   git tag v0.16.0 && git push origin v0.16.0
+# install.sh / rpanel-update 는 이 묶음을 받아 서버에서 빌드하지 않고 바로 설치합니다.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "이미 있는 태그로 다시 만들기 (예: v0.16.0)"
+        required: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.event.inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  TAG: ${{ github.event.inputs.tag || github.ref_name }}
+
+jobs:
+  frontend:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ env.TAG }}
+      - name: 태그와 버전이 같은지 확인
+        run: |
+          v="v$(sed -nE 's/^version *= *"([^"]+)".*/\1/p' backend/Cargo.toml | head -n1)"
+          [ "$v" = "$TAG" ] || { echo "::error::태그($TAG)와 backend/Cargo.toml 버전($v)이 다릅니다"; exit 1; }
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci --no-audit --no-fund
+        working-directory: frontend
+      - run: npm run build
+        working-directory: frontend
+      - uses: actions/upload-artifact@v4
+        with:
+          name: frontend-dist
+          path: frontend/dist
+          retention-days: 3
+
+  package:
+    needs: frontend
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          # Ubuntu 24.04 에서 빌드 → 같은 OS 서버에서 그대로 실행
+          - runner: ubuntu-24.04
+            arch: x86_64
+          - runner: ubuntu-24.04-arm
+            arch: aarch64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ env.TAG }}
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: backend
+          key: release-${{ matrix.arch }}
+      - run: cargo build --release --locked --bins
+        working-directory: backend
+      - uses: actions/download-artifact@v4
+        with:
+          name: frontend-dist
+          path: frontend/dist
+      - name: 묶음 만들기
+        run: RPANEL_PKG_ARCH=${{ matrix.arch }} bash deploy/make-package.sh out
+      - name: 묶음 시험 (풀어서 실행 파일 확인)
+        run: |
+          mkdir t && tar -xzf out/rpanel-linux-${{ matrix.arch }}.tar.gz -C t
+          test -x t/rpanel/backend/target/release/rpanel
+          test -x t/rpanel/backend/target/release/rpanel-files
+          test -f t/rpanel/frontend/dist/index.html
+          test -f t/rpanel/deploy/install.sh
+          bash -n t/rpanel/install.sh && bash -n t/rpanel/update.sh && bash -n t/rpanel/deploy/install.sh
+          cat t/rpanel/VERSION
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pkg-${{ matrix.arch }}
+          path: out/
+          retention-days: 3
+
+  publish:
+    needs: package
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ env.TAG }}
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: pkg-*
+          path: out
+          merge-multiple: true
+      - name: 체크섬
+        working-directory: out
+        run: |
+          sha256sum rpanel-linux-*.tar.gz > SHA256SUMS
+          cat SHA256SUMS VERSION
+      - name: 릴리스 노트 (CHANGELOG 의 이 버전 부분)
+        run: |
+          awk -v t="## $TAG" 'index($0,t)==1{f=1;next} /^## v/{if(f)exit} f' CHANGELOG.md > notes.md
+          cat >> notes.md <<'EOF'
+
+          ---
+          **설치** (Ubuntu 24.04, 한 줄)
+
+          ```bash
+          curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/install.sh | sudo bash
+          ```
+
+          인터넷이 느리거나 직접 받고 싶다면: 아래 `rpanel-linux-x86_64.tar.gz`(일반 서버) 또는 `rpanel-linux-aarch64.tar.gz`(ARM 서버)를 받아
+          `tar -xzf rpanel-linux-*.tar.gz && cd rpanel && sudo ./install.sh`
+
+          이미 설치했다면: `sudo rpanel-update`
+          EOF
+      - name: GitHub 릴리스에 올리기
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" out/rpanel-linux-*.tar.gz out/SHA256SUMS out/VERSION --clobber
+          else
+            gh release create "$TAG" out/rpanel-linux-*.tar.gz out/SHA256SUMS out/VERSION \
+              --title "Rpanel $TAG" --notes-file notes.md --verify-tag
+          fi

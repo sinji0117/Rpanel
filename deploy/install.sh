@@ -20,6 +20,9 @@
 #   --dry-run-mode           패널을 RPANEL_EXEC_MODE=dry-run 으로 시작 (둘러보기용)
 #   --no-build               빌드 생략 (이미 빌드된 결과물 사용)
 #   --no-mongodb             MongoDB 를 설치하지 않음 (패널 로그는 MariaDB 에 저장, --mongodb 로 다시 켬)
+#   --no-swap                메모리가 2GB 보다 적어도 스왑 파일을 만들지 않음
+#
+# 환경변수 RPANEL_INSTALL_FROM=auto|release|source — 업데이트 때 미리 빌드한 묶음을 쓸지 (install.sh·update.sh 가 넘김)
 #
 # 여러 번 실행해도 안전합니다. 비밀값과 처음 고른 옵션은 /etc/rpanel/rpanel.env 에 저장돼 다음 실행(업데이트)에도 그대로 쓰입니다.
 set -euo pipefail
@@ -39,6 +42,9 @@ ALLOW_FROM="$(envget RPANEL_ALLOW_FROM)"
 PANEL_DOMAIN="$(envget RPANEL_PANEL_DOMAIN)"
 EMAIL="$(envget RPANEL_EMAIL)"
 MONGO="$(envget RPANEL_MONGODB)"; MONGO="${MONGO:-1}"
+SWAP=1
+INSTALL_FROM="${RPANEL_INSTALL_FROM:-$(envget RPANEL_INSTALL_FROM)}"
+case "$INSTALL_FROM" in release|source) ;; *) INSTALL_FROM=auto ;; esac
 for arg in "$@"; do
   case "$arg" in
     --mode=*) MODE_ARG="${arg#*=}" ;;
@@ -50,12 +56,13 @@ for arg in "$@"; do
     --no-build) BUILD=0 ;;
     --no-mongodb) MONGO=0 ;;
     --mongodb) MONGO=1 ;;
+    --no-swap) SWAP=0 ;;
     --no-firewall) FIREWALL=0 ;;
     --firewall) FIREWALL=1 ;;
     --no-ssh-password) SSH_PASSWORD=0 ;;
     --ssh-password) SSH_PASSWORD=1 ;;
     --dry-run-mode) EXEC_MODE=dry-run ;;
-    -h|--help) sed -n '2,24p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,27p' "$0"; exit 0 ;;
     *) echo "알 수 없는 옵션: $arg  (--help)" >&2; exit 2 ;;
   esac
 done
@@ -150,6 +157,19 @@ apt-get install -y -q qemu-guest-agent >/dev/null 2>&1 || true
 [[ "$(timedatectl show -p Timezone --value 2>/dev/null || echo UTC)" == "Etc/UTC" || "$(timedatectl show -p Timezone --value 2>/dev/null || echo UTC)" == "UTC" ]] \
   && timedatectl set-timezone "${RPANEL_TZ:-Asia/Seoul}" 2>/dev/null || true
 systemctl enable --now qemu-guest-agent >/dev/null 2>&1 || true
+# 메모리가 2GB 보다 적고 스왑이 없으면 2GB 스왑 파일 (DB 여러 개 + 빌드 중 메모리 부족 방지)
+if [[ $SWAP -eq 1 && "$(mem_mb)" -lt 2000 && -z "$(swapon --show=NAME --noheadings 2>/dev/null)" && ! -e /swapfile ]]; then
+  if [[ "$(df -Pm / | awk 'NR==2 {print $4}')" -gt 8192 ]]; then
+    if { fallocate -l 2G /swapfile 2>/dev/null || dd if=/dev/zero of=/swapfile bs=1M count=2048 status=none; } \
+      && chmod 0600 /swapfile && mkswap /swapfile >/dev/null && swapon /swapfile; then
+      grep -q '^/swapfile ' /etc/fstab || echo '/swapfile none swap sw 0 0' >> /etc/fstab
+      info "메모리가 $(mem_mb)MB 라서 2GB 스왑 파일을 만들었습니다 (/swapfile)"
+    else
+      rm -f /swapfile
+      warn "스왑 파일을 만들지 못했습니다 — 메모리가 부족하면 설치·빌드가 멈출 수 있습니다"
+    fi
+  fi
+fi
 info "$(nginx -v 2>&1) · $(mariadb --version | awk '{print $5}' | tr -d ,) · $(redis-server --version | awk '{print $3}')"
 
 # ───────────────────────── 2. MariaDB ─────────────────────────
@@ -312,7 +332,7 @@ node_ok || die "Node.js 20.19+/22.12+ 설치 실패 (현재: $(node -v 2>/dev/nu
 info "node $(node -v) · npm $(npm -v)"
 
 # ───────────────────────── 5. 사용자 · 빌드 ─────────────────────────
-step "사용자 · Rust · 빌드"
+if [[ $BUILD -eq 1 ]]; then step "사용자 · Rust · 빌드"; else step "사용자 · Rust"; fi
 id rpanel >/dev/null 2>&1 || useradd --system --home-dir /var/lib/rpanel --create-home --shell /usr/sbin/nologin rpanel
 id rpanel-app >/dev/null 2>&1 || useradd --system --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin rpanel-app
 install -d -o rpanel -g rpanel -m 0755 /var/lib/rpanel /var/lib/rpanel/builds /var/lib/rpanel/apps /var/lib/rpanel/www
@@ -362,6 +382,7 @@ if [[ $BUILD -eq 1 ]]; then
     || die "화면(프런트) 빌드에 실패했습니다 (위 오류 참고)"
 elif [[ -x "$REPO/backend/target/release/rpanel" && -f "$REPO/frontend/dist/index.html" ]]; then
   SRC="$REPO"
+  [[ -f "$REPO/VERSION" ]] && info "미리 빌드한 묶음 사용: $(cut -d' ' -f1 "$REPO/VERSION") (서버에서 빌드하지 않음)"
 fi
 [[ -x "$SRC/backend/target/release/rpanel" ]] || die "백엔드 바이너리가 없습니다: $SRC/backend/target/release/rpanel"
 [[ -x "$SRC/backend/target/release/rpanel-files" ]] || die "파일 관리 도구가 없습니다: $SRC/backend/target/release/rpanel-files"
@@ -374,7 +395,10 @@ install -d -m 0755 /usr/share/rpanel/www
 rsync -a --delete "$SRC/frontend/dist/" /usr/share/rpanel/www/
 chmod -R a+rX /usr/share/rpanel/www
 # 설치된 버전 기록 (rpanel-update 가 새 버전과 비교)
-if git -C "$REPO" rev-parse --short HEAD >/dev/null 2>&1; then
+if [[ -f "$REPO/VERSION" && "$SRC" == "$REPO" ]]; then
+  # 미리 빌드한 묶음: "v0.16.0 2026-11-05 ab12cd3" (rpanel-update 가 릴리스 태그와 비교)
+  head -n1 "$REPO/VERSION" > /usr/share/rpanel/VERSION
+elif git -C "$REPO" rev-parse --short HEAD >/dev/null 2>&1; then
   git -C "$REPO" log -1 --format='%h %cd' --date=format:'%Y-%m-%d' > /usr/share/rpanel/VERSION
 else
   echo "local $(date +%Y-%m-%d)" > /usr/share/rpanel/VERSION
@@ -406,7 +430,7 @@ COOKIE=true
 EXTRA=""
 if [[ -f $ENVF ]]; then
   # 스크립트가 관리하지 않는 사용자 추가 설정은 보존
-  EXTRA="$(grep -Ev '^(#|$|DATABASE_URL=|REDIS_URL=|MONGODB_URL=|RPANEL_MONGODB=|JWT_SECRET=|BIND_ADDR=|RPANEL_EXEC_MODE=|COOKIE_SECURE=|RPANEL_EDGE_MODE=|RPANEL_TRUSTED_PROXY=|RPANEL_IPV6=|RPANEL_ALLOW_FROM=|RPANEL_FIREWALL=|RPANEL_SSH_PASSWORD=|RPANEL_PANEL_DOMAIN=|RPANEL_EMAIL=)' "$ENVF" || true)"
+  EXTRA="$(grep -Ev '^(#|$|DATABASE_URL=|REDIS_URL=|MONGODB_URL=|RPANEL_MONGODB=|JWT_SECRET=|BIND_ADDR=|RPANEL_EXEC_MODE=|COOKIE_SECURE=|RPANEL_EDGE_MODE=|RPANEL_TRUSTED_PROXY=|RPANEL_IPV6=|RPANEL_ALLOW_FROM=|RPANEL_FIREWALL=|RPANEL_SSH_PASSWORD=|RPANEL_PANEL_DOMAIN=|RPANEL_EMAIL=|RPANEL_INSTALL_FROM=)' "$ENVF" || true)"
   cp -p "$ENVF" "$ENVF.bak"
 fi
 {
@@ -428,6 +452,7 @@ fi
   echo "RPANEL_PANEL_DOMAIN=$PANEL_DOMAIN"
   echo "RPANEL_EMAIL=$EMAIL"
   echo "RPANEL_MONGODB=$MONGO"
+  echo "RPANEL_INSTALL_FROM=$INSTALL_FROM"
   if [[ -n "$EXTRA" ]]; then
     echo "$EXTRA"
   else
@@ -635,4 +660,5 @@ $([[ -z "${RPANEL_DONE_WORD:-}" ]] && echo "            → 첫 화면에서 관
   업데이트   sudo rpanel-update
   삭제      sudo rpanel-uninstall
   로그      journalctl -u rpanel -f
+$([[ -z "${RPANEL_DONE_WORD:-}" ]] && printf '\n  %s\n  %s\n' "! 클라우드 서버(AWS·오라클·네이버클라우드 등)라면 업체 관리 화면의 방화벽(보안 그룹)에서" "  포트 22 · 80 · 443 · $PANEL_PORT 를 열어야 접속됩니다.")
 EOF

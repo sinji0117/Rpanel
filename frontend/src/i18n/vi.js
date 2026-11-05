@@ -1340,4 +1340,6 @@ export default {
   "보기 전용: 화면을 둘러볼 수만 있고, 환경변수 · DB 접속 정보 · 파일 같은 비밀은 볼 수 없습니다": "Chỉ xem: có thể xem bảng điều khiển nhưng không thấy các bí mật như biến môi trường, thông tin đăng nhập cơ sở dữ liệu hay tệp",
   "보기 전용": "Chỉ xem",
   "패널에 로그인할 수 있는 계정을 추가·수정·삭제합니다. 관리자는 모든 기능을, 보기 전용 계정은 둘러보기만 할 수 있습니다.": "Thêm, sửa và xóa các tài khoản có thể đăng nhập bảng điều khiển. Quản trị viên làm được mọi thứ; tài khoản chỉ xem chỉ có thể xem.",
+  "1024 미만 포트 허용 (메일 서버)": "Cho phép cổng dưới 1024 (máy chủ thư)",
+  "25·465·587·993 처럼 낮은 포트를 직접 엽니다. 이 권한 하나만 주고 root 로 실행하지 않습니다 · 다음 배포부터 적용": "Mở trực tiếp các cổng thấp như 25·465·587·993. Chỉ cấp đúng quyền này và ứng dụng không chạy bằng root · Áp dụng từ lần triển khai tiếp theo",
 }

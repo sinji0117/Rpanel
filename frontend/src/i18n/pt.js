@@ -1340,4 +1340,6 @@ export default {
   "보기 전용: 화면을 둘러볼 수만 있고, 환경변수 · DB 접속 정보 · 파일 같은 비밀은 볼 수 없습니다": "Só de leitura: pode percorrer o painel, mas não vê segredos como variáveis de ambiente, credenciais de bases de dados ou ficheiros",
   "보기 전용": "Só de leitura",
   "패널에 로그인할 수 있는 계정을 추가·수정·삭제합니다. 관리자는 모든 기능을, 보기 전용 계정은 둘러보기만 할 수 있습니다.": "Adicione, edite e remova as contas que podem entrar no painel. Os administradores podem fazer tudo; as contas só de leitura apenas podem ver.",
+  "1024 미만 포트 허용 (메일 서버)": "Permitir portas abaixo de 1024 (servidor de e-mail)",
+  "25·465·587·993 처럼 낮은 포트를 직접 엽니다. 이 권한 하나만 주고 root 로 실행하지 않습니다 · 다음 배포부터 적용": "Abre diretamente portas baixas como 25·465·587·993. Só esta permissão é concedida e a app não corre como root · Aplica-se a partir da próxima implementação",
 }

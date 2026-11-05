@@ -1340,4 +1340,6 @@ export default {
   "보기 전용: 화면을 둘러볼 수만 있고, 환경변수 · DB 접속 정보 · 파일 같은 비밀은 볼 수 없습니다": "Jen pro čtení: může procházet panel, ale nevidí tajné údaje jako proměnné prostředí, přístupy k databázím nebo soubory",
   "보기 전용": "Jen pro čtení",
   "패널에 로그인할 수 있는 계정을 추가·수정·삭제합니다. 관리자는 모든 기능을, 보기 전용 계정은 둘러보기만 할 수 있습니다.": "Přidávejte, upravujte a odebírejte účty, které se mohou přihlásit do panelu. Správci mohou vše, účty jen pro čtení se mohou jen dívat.",
+  "1024 미만 포트 허용 (메일 서버)": "Povolit porty pod 1024 (poštovní server)",
+  "25·465·587·993 처럼 낮은 포트를 직접 엽니다. 이 권한 하나만 주고 root 로 실행하지 않습니다 · 다음 배포부터 적용": "Otevře přímo nízké porty jako 25·465·587·993. Udělí se jen toto jedno oprávnění a aplikace neběží jako root · Platí od dalšího nasazení",
 }

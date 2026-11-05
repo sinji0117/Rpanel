@@ -15,6 +15,22 @@ describe('AppForm', () => {
     expect(toPayload({ api_proxy_port: '' }).api_proxy_port).toBe(null)
   })
 
+  it('mail server: low ports option only for backends', async () => {
+    const user = userEvent.setup()
+    const onSubmit = vi.fn()
+    render(<AppForm onSubmit={onSubmit} />)
+    await user.type(screen.getByLabelText('이름'), 'pickmail')
+    await user.type(screen.getByLabelText('Git 저장소'), 'https://github.com/a/pickmail.git')
+    const box = screen.getByRole('checkbox', { name: /1024 미만 포트 허용/ })
+    expect(box).not.toBeChecked()
+    await user.click(box)
+    await user.click(screen.getByRole('button', { name: '앱 만들기' }))
+    expect(onSubmit.mock.calls[0][0]).toMatchObject({ kind: 'rust', low_ports: true })
+    // 프런트엔드(Static)에는 없음
+    await user.click(screen.getByRole('radio', { name: /프런트엔드/ }))
+    expect(screen.queryByRole('checkbox', { name: /1024 미만 포트 허용/ })).not.toBeInTheDocument()
+  })
+
   it('auto-fills slug, switches fields by kind and submits', async () => {
     const user = userEvent.setup()
     const onSubmit = vi.fn()

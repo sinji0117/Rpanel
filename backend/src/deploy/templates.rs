@@ -201,6 +201,17 @@ pub fn systemd_unit(i: &UnitInput) -> anyhow::Result<String> {
         ""
     };
     let path = service_path(app, i.paths, i.path_env);
+    // 메일 서버처럼 25·465·587·993 을 직접 여는 앱: 그 권한 하나만 준다 (root 아님, 다른 권한 없음)
+    let caps = if app.low_ports {
+        "AmbientCapabilities=CAP_NET_BIND_SERVICE\nCapabilityBoundingSet=CAP_NET_BIND_SERVICE\n"
+    } else {
+        ""
+    };
+    // Git 앱: 쓸 수 있는 데이터 폴더를 알려 줌 (앱의 환경변수가 있으면 그쪽이 우선)
+    let data_env = match app.source() {
+        Source::Git => format!("Environment=DATA_DIR={}\n", i.paths.data_dir.display()),
+        _ => String::new(),
+    };
     Ok(format!(
         "{MANAGED_MARKER} (app {slug}) — 직접 수정하지 마세요. 패널에서 재배포 시 덮어씁니다.
 [Unit]
@@ -214,13 +225,13 @@ User={user}
 Group={user}
 WorkingDirectory={cwd}
 EnvironmentFile={env}
-Environment=PATH={path}
+{data_env}Environment=PATH={path}
 ExecStart={exec}
 Restart=always
 RestartSec=5
 TimeoutStopSec=20
 
-{HARDENING}{protect_home}{mdwe}ReadWritePaths={rw}
+{HARDENING}{caps}{protect_home}{mdwe}ReadWritePaths={rw}
 LimitNOFILE=65535
 
 [Install]
@@ -657,6 +668,7 @@ mod tests {
             app_role: None,
             csp_mode: "off".into(),
             csp_policy: None,
+            low_ports: false,
             created_at: Utc::now(),
             updated_at: Utc::now(),
         }
@@ -696,6 +708,31 @@ mod tests {
         assert!(u.contains("EnvironmentFile=/var/lib/rpanel/apps/example-api/app.env"));
         assert!(u.contains("MemoryDenyWriteExecute=true"));
         assert!(u.contains("ReadWritePaths=/var/lib/rpanel/apps/example-api/data"));
+        assert!(u.contains("Environment=DATA_DIR=/var/lib/rpanel/apps/example-api/data\n"));
+        assert!(
+            !u.contains("CAP_NET_BIND_SERVICE"),
+            "기본은 낮은 포트 권한 없음"
+        );
+    }
+
+    #[test]
+    fn low_ports_unit() {
+        let mut a = app("rust");
+        a.low_ports = true;
+        let p = AppPaths::new(Path::new("/var/lib/rpanel"), &a.slug);
+        let u = systemd_unit(&UnitInput {
+            app: &a,
+            paths: &p,
+            run_user: "rpanel-app",
+            path_env: "/usr/bin:/bin",
+        })
+        .unwrap();
+        assert!(u.contains("AmbientCapabilities=CAP_NET_BIND_SERVICE\n"));
+        assert!(u.contains("CapabilityBoundingSet=CAP_NET_BIND_SERVICE\n"));
+        // 다른 격리 설정은 그대로
+        assert!(u.contains("NoNewPrivileges=true"));
+        assert!(u.contains("User=rpanel-app"));
+        assert!(u.contains("ProtectSystem=strict"));
     }
 
     #[test]

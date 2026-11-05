@@ -1,0 +1,2 @@
+-- 메일 서버처럼 1024 미만 포트(25·465·587·993)를 직접 여는 서비스 앱 (CAP_NET_BIND_SERVICE)
+ALTER TABLE apps ADD COLUMN low_ports TINYINT(1) NOT NULL DEFAULT 0;

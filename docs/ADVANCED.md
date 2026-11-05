@@ -80,6 +80,7 @@
 - root 가 필요한 작업은 **`/usr/local/lib/rpanel/rpanel-helper` 한 개**만 sudo 로 허용합니다. helper 는 모든 인자와 스테이징 파일을 **화이트리스트**로 다시 검사합니다:
   - Nginx: 허용된 지시어·location 만, `root` 는 해당 사이트 폴더로 고정, 인증서 경로 고정, `include`·`fastcgi_*` 불가, 다른 설정과 도메인 중복 금지, `nginx -t` 실패 시 원복
   - systemd: 실행 사용자 고정(앱은 `rpanel-app`, 사이트는 그 사이트 유저), `NoNewPrivileges` 필수, 경로는 해당 앱/사이트 안
+  - systemd 권한: 기본은 없음. 앱 옵션 '1024 미만 포트 허용'일 때만 `AmbientCapabilities`·`CapabilityBoundingSet` = `CAP_NET_BIND_SERVICE` 하나 (다른 값은 helper 가 거부). `Environment=` 는 `PATH=` 와 Git 앱의 `DATA_DIR=<데이터 폴더>` 만
   - 사이트 유저: `rpanel-sites` 그룹, 시스템 계정 이름 거부, 레지스트리(`/etc/rpanel/site-users`)에 있는 계정만 삭제
   - MariaDB: 패널이 만든 DB(`/etc/rpanel/managed-dbs`)·추가 계정(`/etc/rpanel/managed-db-users`)만 삭제·덤프·복원·비밀번호 변경. 추가 계정 권한은 `ALL` 또는 `SELECT, SHOW VIEW` 를 그 DB 에만
   - Redis 계정: ACL 사용자. 이름·키 패턴을 화이트리스트로 검사하고, 비밀번호는 stdin 으로 받아 SHA-256 해시만 `/etc/redis/rpanel-users.conf`(root:redis 0640, redis.conf 가 include)에 저장. 권한은 `+@all -@admin -@dangerous`(읽기·쓰기) 또는 `+@read`(읽기 전용) + 키·채널 패턴 제한. `default` 등 예약 이름 거부

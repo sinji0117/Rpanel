@@ -54,6 +54,7 @@ fn app(kind: &str) -> App {
         app_role: None,
         csp_mode: "off".into(),
         csp_policy: None,
+        low_ports: false,
         created_at: Utc::now(),
         updated_at: Utc::now(),
     }
@@ -122,6 +123,43 @@ fn generated_units_pass() {
     for kind in ["rust", "python"] {
         let (ok, err) = validate("validate_unit", &unit(kind), "example-api");
         assert!(ok, "{kind} unit rejected: {err}\n{}", unit(kind));
+    }
+}
+
+#[test]
+fn low_ports_unit_passes_and_other_caps_rejected() {
+    let mut a = app("rust");
+    a.low_ports = true;
+    let p = AppPaths::new(Path::new(DATA), &a.slug);
+    let u = systemd_unit(&UnitInput {
+        app: &a,
+        paths: &p,
+        run_user: "rpanel-app",
+        path_env: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+    })
+    .unwrap();
+    let (ok, err) = validate("validate_unit", &u, "example-api");
+    assert!(ok, "low_ports unit rejected: {err}\n{u}");
+    // 다른 권한·다른 DATA_DIR 은 거부
+    for (from, to) in [
+        (
+            "CAP_NET_BIND_SERVICE\nCapabilityBoundingSet",
+            "CAP_SYS_ADMIN\nCapabilityBoundingSet",
+        ),
+        (
+            "CapabilityBoundingSet=CAP_NET_BIND_SERVICE",
+            "CapabilityBoundingSet=CAP_NET_BIND_SERVICE CAP_NET_RAW",
+        ),
+        ("Environment=DATA_DIR=", "Environment=DATA_DIR=/etc"),
+        (
+            "Environment=DATA_DIR=",
+            "Environment=LD_PRELOAD=/tmp/x.so\nEnvironment=DATA_DIR=",
+        ),
+    ] {
+        let bad = u.replacen(from, to, 1);
+        assert_ne!(bad, u, "{from}");
+        let (ok, _) = validate("validate_unit", &bad, "example-api");
+        assert!(!ok, "should reject: {to}");
     }
 }
 

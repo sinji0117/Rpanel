@@ -101,7 +101,14 @@ validate_unit() {
       Service:WorkingDirectory) [[ "$val" == "$cwd" ]] || die "unit: bad WorkingDirectory" ;;
       Service:EnvironmentFile) [[ "$val" == "$appdir/app.env" ]] || die "unit: bad EnvironmentFile" ;;
       Service:ReadWritePaths) [[ "$val" == "$rw" ]] || die "unit: bad ReadWritePaths" ;;
-      Service:Environment) [[ "$val" =~ ^PATH=[A-Za-z0-9/:._-]+$ ]] || die "unit: only PATH= Environment allowed" ;;
+      Service:Environment)
+        # PATH, 그리고 Git 앱의 데이터 폴더(DATA_DIR = ReadWritePaths 와 같은 값)만
+        [[ "$val" =~ ^PATH=[A-Za-z0-9/:._-]+$ || ( -z "$suser" && "$val" == "DATA_DIR=$rw" ) ]] \
+          || die "unit: only PATH= / DATA_DIR= Environment allowed" ;;
+      Service:AmbientCapabilities|Service:CapabilityBoundingSet)
+        # 메일 서버용 낮은 포트(1024 미만) 열기 — 이 권한 하나만, 상주 서비스에만
+        [[ "$mode" == service && "$val" == CAP_NET_BIND_SERVICE ]] \
+          || die "unit: $key only CAP_NET_BIND_SERVICE for services" ;;
       Service:ExecStart)
         if [[ "$val" == /bin/bash\ -c\ * ]]; then :
         elif [[ -z "$suser" && "$val" =~ ^"$appdir/current/"[A-Za-z0-9_][A-Za-z0-9_.-]*$ ]]; then :

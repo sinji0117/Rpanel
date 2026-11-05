@@ -1340,4 +1340,6 @@ export default {
   "보기 전용: 화면을 둘러볼 수만 있고, 환경변수 · DB 접속 정보 · 파일 같은 비밀은 볼 수 없습니다": "Féachaint amháin: is féidir leis an painéal a bhrabhsáil ach ní fheiceann sé rúin ar nós athróg timpeallachta, faisnéis rochtana bunachar sonraí ná comhaid",
   "보기 전용": "Féachaint amháin",
   "패널에 로그인할 수 있는 계정을 추가·수정·삭제합니다. 관리자는 모든 기능을, 보기 전용 계정은 둘러보기만 할 수 있습니다.": "Cuir leis, cuir in eagar agus bain cuntais ar féidir leo logáil isteach sa phainéal. Is féidir le riarthóirí gach rud a dhéanamh; ní féidir le cuntais féachana amháin ach breathnú thart.",
+  "1024 미만 포트 허용 (메일 서버)": "Ceadaigh calafoirt faoi 1024 (freastalaí ríomhphoist)",
+  "25·465·587·993 처럼 낮은 포트를 직접 엽니다. 이 권한 하나만 주고 root 로 실행하지 않습니다 · 다음 배포부터 적용": "Osclaíonn sé calafoirt ísle ar nós 25·465·587·993 go díreach. Ní thugtar ach an cead amháin seo agus ní ritheann an aip mar root · I bhfeidhm ón gcéad imscaradh eile",
 }

@@ -709,7 +709,10 @@ mod tests {
         assert!(u.contains("MemoryDenyWriteExecute=true"));
         assert!(u.contains("ReadWritePaths=/var/lib/rpanel/apps/example-api/data"));
         assert!(u.contains("Environment=DATA_DIR=/var/lib/rpanel/apps/example-api/data\n"));
-        assert!(!u.contains("CAP_NET_BIND_SERVICE"), "기본은 낮은 포트 권한 없음");
+        assert!(
+            !u.contains("CAP_NET_BIND_SERVICE"),
+            "기본은 낮은 포트 권한 없음"
+        );
     }
 
     #[test]

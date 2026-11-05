@@ -142,10 +142,19 @@ fn low_ports_unit_passes_and_other_caps_rejected() {
     assert!(ok, "low_ports unit rejected: {err}\n{u}");
     // 다른 권한·다른 DATA_DIR 은 거부
     for (from, to) in [
-        ("CAP_NET_BIND_SERVICE\nCapabilityBoundingSet", "CAP_SYS_ADMIN\nCapabilityBoundingSet"),
-        ("CapabilityBoundingSet=CAP_NET_BIND_SERVICE", "CapabilityBoundingSet=CAP_NET_BIND_SERVICE CAP_NET_RAW"),
+        (
+            "CAP_NET_BIND_SERVICE\nCapabilityBoundingSet",
+            "CAP_SYS_ADMIN\nCapabilityBoundingSet",
+        ),
+        (
+            "CapabilityBoundingSet=CAP_NET_BIND_SERVICE",
+            "CapabilityBoundingSet=CAP_NET_BIND_SERVICE CAP_NET_RAW",
+        ),
         ("Environment=DATA_DIR=", "Environment=DATA_DIR=/etc"),
-        ("Environment=DATA_DIR=", "Environment=LD_PRELOAD=/tmp/x.so\nEnvironment=DATA_DIR="),
+        (
+            "Environment=DATA_DIR=",
+            "Environment=LD_PRELOAD=/tmp/x.so\nEnvironment=DATA_DIR=",
+        ),
     ] {
         let bad = u.replacen(from, to, 1);
         assert_ne!(bad, u, "{from}");

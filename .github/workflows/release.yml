@@ -1,39 +1,67 @@
 name: Release
 
-# v0.16.0 같은 태그를 올리면 미리 빌드한 설치 묶음(올인원 패키지)을 만들어 GitHub 릴리스에 붙입니다.
-#   git tag v0.16.0 && git push origin v0.16.0
+# 미리 빌드한 설치 묶음(올인원 패키지)을 만들어 GitHub 릴리스에 붙입니다.
+#   - main 에서 backend/Cargo.toml 의 version 을 올리면 → 그 버전(v0.16.0)의 릴리스가 아직 없을 때 태그·릴리스를 자동으로 만듦
+#   - 또는 태그를 직접 올림: git tag v0.16.0 && git push origin v0.16.0
+#   - Actions 화면에서 수동 실행 (태그 입력) → 그 버전 묶음을 다시 만듦
 # install.sh / rpanel-update 는 이 묶음을 받아 서버에서 빌드하지 않고 바로 설치합니다.
 
 on:
   push:
+    branches: [main]
+    paths: [backend/Cargo.toml, .github/workflows/release.yml]
     tags: ["v*"]
   workflow_dispatch:
     inputs:
       tag:
-        description: "이미 있는 태그로 다시 만들기 (예: v0.16.0)"
+        description: "다시 만들 버전 (예: v0.16.0)"
         required: true
 
 permissions:
   contents: write
 
 concurrency:
-  group: release-${{ github.event.inputs.tag || github.ref_name }}
+  group: release
   cancel-in-progress: false
 
-env:
-  TAG: ${{ github.event.inputs.tag || github.ref_name }}
-
 jobs:
+  # 어떤 버전을 만들지 정하고, main 푸시인데 그 버전 릴리스가 이미 있으면 건너뜀
+  meta:
+    runs-on: ubuntu-24.04
+    outputs:
+      tag: ${{ steps.m.outputs.tag }}
+      ref: ${{ steps.m.outputs.ref }}
+      skip: ${{ steps.m.outputs.skip }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.inputs.tag || github.sha }}
+      - id: m
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT_TAG: ${{ github.event.inputs.tag }}
+        run: |
+          v="v$(sed -nE 's/^version *= *"([^"]+)".*/\1/p' backend/Cargo.toml | head -n1)"
+          skip=false
+          if [ -n "$INPUT_TAG" ]; then tag="$INPUT_TAG"; ref="$INPUT_TAG"
+          elif [ "$GITHUB_REF_TYPE" = tag ]; then tag="$GITHUB_REF_NAME"; ref="$GITHUB_SHA"
+          else
+            tag="$v"; ref="$GITHUB_SHA"
+            if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+              echo "$tag 릴리스가 이미 있어 건너뜁니다 (버전을 올리면 새 릴리스를 만듭니다)"; skip=true
+            fi
+          fi
+          [ "$v" = "$tag" ] || { echo "::error::태그($tag)와 backend/Cargo.toml 버전($v)이 다릅니다"; exit 1; }
+          { echo "tag=$tag"; echo "ref=$ref"; echo "skip=$skip"; } >> "$GITHUB_OUTPUT"
+
   frontend:
+    needs: meta
+    if: needs.meta.outputs.skip != 'true'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
         with:
-          ref: ${{ env.TAG }}
-      - name: 태그와 버전이 같은지 확인
-        run: |
-          v="v$(sed -nE 's/^version *= *"([^"]+)".*/\1/p' backend/Cargo.toml | head -n1)"
-          [ "$v" = "$TAG" ] || { echo "::error::태그($TAG)와 backend/Cargo.toml 버전($v)이 다릅니다"; exit 1; }
+          ref: ${{ needs.meta.outputs.ref }}
       - uses: actions/setup-node@v5
         with:
           node-version: 22
@@ -50,7 +78,7 @@ jobs:
           retention-days: 3
 
   package:
-    needs: frontend
+    needs: [meta, frontend]
     strategy:
       fail-fast: true
       matrix:
@@ -64,7 +92,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
-          ref: ${{ env.TAG }}
+          ref: ${{ needs.meta.outputs.ref }}
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
@@ -94,12 +122,15 @@ jobs:
           retention-days: 3
 
   publish:
-    needs: package
+    needs: [meta, package]
     runs-on: ubuntu-24.04
+    env:
+      TAG: ${{ needs.meta.outputs.tag }}
+      REF: ${{ needs.meta.outputs.ref }}
     steps:
       - uses: actions/checkout@v5
         with:
-          ref: ${{ env.TAG }}
+          ref: ${{ needs.meta.outputs.ref }}
       - uses: actions/download-artifact@v4
         with:
           pattern: pkg-*
@@ -134,6 +165,7 @@ jobs:
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" out/rpanel-linux-*.tar.gz out/SHA256SUMS out/VERSION --clobber
           else
+            # 태그가 없으면(main 에서 버전만 올린 경우) 이 커밋에 태그를 함께 만듦
             gh release create "$TAG" out/rpanel-linux-*.tar.gz out/SHA256SUMS out/VERSION \
-              --title "Rpanel $TAG" --notes-file notes.md --verify-tag
+              --title "Rpanel $TAG" --notes-file notes.md --target "$REF" --latest
           fi

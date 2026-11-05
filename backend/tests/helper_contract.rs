@@ -54,6 +54,7 @@ fn app(kind: &str) -> App {
         app_role: None,
         csp_mode: "off".into(),
         csp_policy: None,
+        low_ports: false,
         created_at: Utc::now(),
         updated_at: Utc::now(),
     }

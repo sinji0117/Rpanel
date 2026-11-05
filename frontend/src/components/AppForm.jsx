@@ -62,6 +62,7 @@ export function emptyApp() {
     domains: '',
     api_proxy_port: '',
     health_path: '/',
+    low_ports: false,
   }
 }
 
@@ -352,6 +353,21 @@ export default function AppForm({ initial, mode = 'create', onSubmit, submitting
           </Field>
         )}
       </div>
+
+      {isService && (
+        <label className="flex items-start gap-2 text-sm">
+          <input
+            type="checkbox"
+            className="mt-1"
+            checked={!!v.low_ports}
+            onChange={(e) => setV((s) => ({ ...s, low_ports: e.target.checked }))}
+          />
+          <span>
+            {t('1024 미만 포트 허용 (메일 서버)')}
+            <span className="mt-1 block text-xs text-ink-400">{t('25·465·587·993 처럼 낮은 포트를 직접 엽니다. 이 권한 하나만 주고 root 로 실행하지 않습니다 · 다음 배포부터 적용')}</span>
+          </span>
+        </label>
+      )}
 
       <div className="flex justify-end pt-2">
         <button className="btn-primary" disabled={submitting}>

@@ -171,6 +171,8 @@ pub struct App {
     pub csp_mode: String,
     /// CSP 정책 문자열 (validate::csp 통과한 값만)
     pub csp_policy: Option<String>,
+    /// 1024 미만 포트를 직접 열 수 있음 (메일 서버 등, CAP_NET_BIND_SERVICE 만 부여)
+    pub low_ports: bool,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -235,7 +237,7 @@ pub struct AuditLog {
 pub const APP_COLUMNS: &str = "id, project_id, name, slug, kind, git_url, git_branch, root_dir, build_cmd, start_cmd, \
      binary_name, output_dir, port, api_proxy_port, domains, health_path, status, current_commit, current_release, webhook_token, redis_db, backup_schedule, backup_keep, backup_last_scheduled, source, site_user, site_root, web_root, \
      proxy_target, ssl_mode, force_https, client_max_body_mb, runtime_version, frontend_dir, app_role, \
-     csp_mode, csp_policy, created_at, updated_at";
+     csp_mode, csp_policy, low_ports, created_at, updated_at";
 
 pub const DEPLOY_COLUMNS: &str =
     "id, app_id, status, triggered_by, commit_sha, error, started_at, finished_at, created_at";

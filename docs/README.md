@@ -12,6 +12,7 @@
 | [Python 프로그램 올리기](python.md) | Flask · FastAPI · Django, `requirements.txt`, Python 버전 |
 | [Node.js · Java 프로그램 올리기](node-java.md) | Express · Next.js · Spring Boot, `package.json`, jar, Node.js · Java 버전 |
 | [Git으로 자동 배포하기](git-deploy.md) | GitHub · GitLab 에서 서버가 직접 빌드 · 웹훅 자동 배포 · 프런트·백엔드·관리자 한 화면 |
+| [메일 서버 올리기](mail-server.md) | 25·465·587·993 같은 낮은 포트를 쓰는 앱 · pickmail 설치 예 |
 
 ## 관리하기
 

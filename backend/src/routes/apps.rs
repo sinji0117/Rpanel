@@ -61,6 +61,9 @@ pub struct AppInput {
     pub proxy_target: Option<String>,
     #[serde(default)]
     pub client_max_body_mb: Option<u32>,
+    /// 1024 미만 포트 허용 (메일 서버 등 서비스 앱만)
+    #[serde(default)]
+    pub low_ports: Option<bool>,
 }
 
 /// 검증·정규화된 입력
@@ -331,8 +334,8 @@ pub async fn create(
         let port = if kind.is_service() { Some(allocate_port(&state).await?) } else { None };
         let res = sqlx::query(
             "INSERT INTO apps (project_id, name, slug, kind, git_url, git_branch, root_dir, build_cmd, start_cmd, binary_name, \
-             output_dir, port, api_proxy_port, domains, health_path, webhook_token, frontend_dir, app_role) \
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+             output_dir, port, api_proxy_port, domains, health_path, webhook_token, frontend_dir, app_role, low_ports) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(project_id)
         .bind(&c.name)
@@ -352,6 +355,7 @@ pub async fn create(
         .bind(random_token(24))
         .bind(&c.frontend_dir)
         .bind(&c.app_role)
+        .bind(kind.is_service() && input.low_ports.unwrap_or(false))
         .execute(&state.db)
         .await
         .map_err(|e| {
@@ -389,9 +393,10 @@ pub async fn update(
     }
     let c = clean(&input, app.kind())?;
     check_domain_conflicts(&state, &c.domains, Some(id)).await?;
+    let low_ports = app.kind().is_service() && input.low_ports.unwrap_or(app.low_ports);
     sqlx::query(
         "UPDATE apps SET name = ?, git_url = ?, git_branch = ?, root_dir = ?, build_cmd = ?, start_cmd = ?, binary_name = ?, \
-         output_dir = ?, api_proxy_port = ?, domains = ?, health_path = ?, frontend_dir = ?, app_role = ? WHERE id = ?",
+         output_dir = ?, api_proxy_port = ?, domains = ?, health_path = ?, frontend_dir = ?, app_role = ?, low_ports = ? WHERE id = ?",
     )
     .bind(&c.name)
     .bind(&c.git_url)
@@ -406,10 +411,22 @@ pub async fn update(
     .bind(&c.health_path)
     .bind(&c.frontend_dir)
     .bind(&c.app_role)
+    .bind(low_ports)
     .bind(id)
     .execute(&state.db)
     .await?;
     audit::log(&state, Some(user.id), "app.update", &app.slug, &ip).await;
+    if low_ports != app.low_ports {
+        // 권한 변경은 따로 남김 — 다음 배포부터 적용
+        audit::log(
+            &state,
+            Some(user.id),
+            "app.low_ports",
+            &format!("{} {}", app.slug, if low_ports { "on" } else { "off" }),
+            &ip,
+        )
+        .await;
+    }
     Ok(Json(fetch(&state, id).await?))
 }
 
@@ -854,6 +871,7 @@ mod tests {
             web_root: None,
             proxy_target: None,
             client_max_body_mb: None,
+            low_ports: None,
             frontend_dir: None,
             app_role: None,
         }

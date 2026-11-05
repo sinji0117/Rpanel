@@ -275,7 +275,9 @@ export default function Layout() {
     <div className="min-h-screen md:grid md:grid-cols-[220px_1fr]">
       <aside className="hidden border-r border-ink-800 bg-ink-900/60 md:flex md:min-h-screen md:flex-col md:px-3 md:py-5">
         <div className="flex items-center justify-between px-2 pb-6">
-          <Logo />
+          <a href={BERIPICK_URL} target="_blank" rel="noopener noreferrer" title="www.beripick.com" aria-label="Rpanel · beripick.com" data-testid="logo-link" className="rounded-md transition hover:opacity-80">
+            <Logo />
+          </a>
           <span className="flex items-center gap-0.5">
             <ActiveDeployments />
             <NotificationBell />
@@ -300,7 +302,9 @@ export default function Layout() {
       </aside>
 
       <header className="flex items-center justify-between border-b border-ink-800 px-4 py-3 md:hidden">
-        <Logo />
+        <a href={BERIPICK_URL} target="_blank" rel="noopener noreferrer" title="www.beripick.com" aria-label="Rpanel · beripick.com" data-testid="logo-link" className="rounded-md transition hover:opacity-80">
+          <Logo />
+        </a>
         <span className="ml-auto mr-2 flex items-center gap-0.5">
           <ActiveDeployments />
           <NotificationBell />

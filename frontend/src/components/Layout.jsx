@@ -190,6 +190,33 @@ function DonateLink({ className = '' }) {
   )
 }
 
+export const BERIPICK_URL = 'https://www.beripick.com/'
+
+/** beripick.com 배너 링크 — compact: 좌측 메뉴용 작은 배너 */
+export function BeripickBanner({ compact = false, className = '' }) {
+  return (
+    <a
+      href={BERIPICK_URL}
+      target="_blank"
+      rel="noopener noreferrer"
+      data-testid="beripick-banner"
+      aria-label="Beripick (beripick.com)"
+      className={`group flex items-center gap-3 rounded-lg border border-signal/30 bg-gradient-to-r from-signal/10 via-sky-400/5 to-transparent transition hover:border-signal/60 hover:from-signal/20 ${compact ? 'px-2.5 py-2' : 'px-4 py-3'} ${className}`}
+    >
+      <span className={`flex shrink-0 items-center justify-center rounded-md bg-signal/15 font-bold text-signal ${compact ? 'h-6 w-6 text-xs' : 'h-8 w-8 text-sm'}`} aria-hidden="true">
+        B
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className={`block truncate font-semibold tracking-tight text-ink-100 ${compact ? 'text-xs' : 'text-sm'}`}>Beripick</span>
+        <span className={`block truncate text-ink-400 ${compact ? 'text-[10px]' : 'text-xs'}`}>www.beripick.com</span>
+      </span>
+      <span aria-hidden="true" className="text-ink-400 transition group-hover:translate-x-0.5 group-hover:text-signal">
+        ↗
+      </span>
+    </a>
+  )
+}
+
 export function Logo() {
   return (
     <div className="flex items-center gap-2.5">
@@ -256,6 +283,7 @@ export default function Layout() {
         </div>
         {nav}
         <div className="mt-auto space-y-3 border-t border-ink-800 px-2 pt-4">
+          <BeripickBanner compact />
           <ThemeLangSwitch compact lang={false} />
           <VersionBadge />
           <p className="truncate text-xs text-ink-400" title={user?.email}>
@@ -285,6 +313,7 @@ export default function Layout() {
         <div className="border-b border-ink-800 px-3 py-3 md:hidden">
           {nav}
           <div className="mt-3 px-3">
+            <BeripickBanner compact className="mb-3" />
             <ThemeLangSwitch lang={false} />
           </div>
           <div className="mt-2 flex items-center justify-between px-3">

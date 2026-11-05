@@ -275,7 +275,7 @@ if [[ -f /etc/rpanel/storage ]]; then
   done < /etc/rpanel/storage
 fi
 for d in backups apps www builds; do mountpoint -q "/var/lib/rpanel/$d" && umount "/var/lib/rpanel/$d" || true; done
-rm -rf --one-file-system /var/lib/rpanel /etc/rpanel /opt/rpanel-src /opt/rpanel
+rm -rf --one-file-system /var/lib/rpanel /etc/rpanel /opt/rpanel-src /opt/rpanel-pkg /opt/rpanel
 userdel rpanel >/dev/null 2>&1 || true
 userdel rpanel-app >/dev/null 2>&1 || true
 groupdel rpanel-sites >/dev/null 2>&1 || true

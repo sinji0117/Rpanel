@@ -10,3 +10,5 @@ frontend/blob-report/
 .env
 *.env.local
 dump.rdb
+# 설치 묶음 (deploy/make-package.sh)
+dist-pkg/

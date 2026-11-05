@@ -1,0 +1,171 @@
+name: Release
+
+# 미리 빌드한 설치 묶음(올인원 패키지)을 만들어 GitHub 릴리스에 붙입니다.
+#   - main 에서 backend/Cargo.toml 의 version 을 올리면 → 그 버전(v0.16.0)의 릴리스가 아직 없을 때 태그·릴리스를 자동으로 만듦
+#   - 또는 태그를 직접 올림: git tag v0.16.0 && git push origin v0.16.0
+#   - Actions 화면에서 수동 실행 (태그 입력) → 그 버전 묶음을 다시 만듦
+# install.sh / rpanel-update 는 이 묶음을 받아 서버에서 빌드하지 않고 바로 설치합니다.
+
+on:
+  push:
+    branches: [main]
+    paths: [backend/Cargo.toml, .github/workflows/release.yml]
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "다시 만들 버전 (예: v0.16.0)"
+        required: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  # 어떤 버전을 만들지 정하고, main 푸시인데 그 버전 릴리스가 이미 있으면 건너뜀
+  meta:
+    runs-on: ubuntu-24.04
+    outputs:
+      tag: ${{ steps.m.outputs.tag }}
+      ref: ${{ steps.m.outputs.ref }}
+      skip: ${{ steps.m.outputs.skip }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.inputs.tag || github.sha }}
+      - id: m
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT_TAG: ${{ github.event.inputs.tag }}
+        run: |
+          v="v$(sed -nE 's/^version *= *"([^"]+)".*/\1/p' backend/Cargo.toml | head -n1)"
+          skip=false
+          if [ -n "$INPUT_TAG" ]; then tag="$INPUT_TAG"; ref="$INPUT_TAG"
+          elif [ "$GITHUB_REF_TYPE" = tag ]; then tag="$GITHUB_REF_NAME"; ref="$GITHUB_SHA"
+          else
+            tag="$v"; ref="$GITHUB_SHA"
+            if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+              echo "$tag 릴리스가 이미 있어 건너뜁니다 (버전을 올리면 새 릴리스를 만듭니다)"; skip=true
+            fi
+          fi
+          [ "$v" = "$tag" ] || { echo "::error::태그($tag)와 backend/Cargo.toml 버전($v)이 다릅니다"; exit 1; }
+          { echo "tag=$tag"; echo "ref=$ref"; echo "skip=$skip"; } >> "$GITHUB_OUTPUT"
+
+  frontend:
+    needs: meta
+    if: needs.meta.outputs.skip != 'true'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.meta.outputs.ref }}
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci --no-audit --no-fund
+        working-directory: frontend
+      - run: npm run build
+        working-directory: frontend
+      - uses: actions/upload-artifact@v4
+        with:
+          name: frontend-dist
+          path: frontend/dist
+          retention-days: 3
+
+  package:
+    needs: [meta, frontend]
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          # Ubuntu 24.04 에서 빌드 → 같은 OS 서버에서 그대로 실행
+          - runner: ubuntu-24.04
+            arch: x86_64
+          - runner: ubuntu-24.04-arm
+            arch: aarch64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.meta.outputs.ref }}
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: backend
+          key: release-${{ matrix.arch }}
+      - run: cargo build --release --locked --bins
+        working-directory: backend
+      - uses: actions/download-artifact@v4
+        with:
+          name: frontend-dist
+          path: frontend/dist
+      - name: 묶음 만들기
+        run: RPANEL_PKG_ARCH=${{ matrix.arch }} bash deploy/make-package.sh out
+      - name: 묶음 시험 (풀어서 실행 파일 확인)
+        run: |
+          mkdir t && tar -xzf out/rpanel-linux-${{ matrix.arch }}.tar.gz -C t
+          test -x t/rpanel/backend/target/release/rpanel
+          test -x t/rpanel/backend/target/release/rpanel-files
+          test -f t/rpanel/frontend/dist/index.html
+          test -f t/rpanel/deploy/install.sh
+          bash -n t/rpanel/install.sh && bash -n t/rpanel/update.sh && bash -n t/rpanel/deploy/install.sh
+          cat t/rpanel/VERSION
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pkg-${{ matrix.arch }}
+          path: out/
+          retention-days: 3
+
+  publish:
+    needs: [meta, package]
+    runs-on: ubuntu-24.04
+    env:
+      TAG: ${{ needs.meta.outputs.tag }}
+      REF: ${{ needs.meta.outputs.ref }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.meta.outputs.ref }}
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: pkg-*
+          path: out
+          merge-multiple: true
+      - name: 체크섬
+        working-directory: out
+        run: |
+          sha256sum rpanel-linux-*.tar.gz > SHA256SUMS
+          cat SHA256SUMS VERSION
+      - name: 릴리스 노트 (CHANGELOG 의 이 버전 부분)
+        run: |
+          awk -v t="## $TAG" 'index($0,t)==1{f=1;next} /^## v/{if(f)exit} f' CHANGELOG.md > notes.md
+          cat >> notes.md <<'EOF'
+
+          ---
+          **설치** (Ubuntu 24.04, 한 줄)
+
+          ```bash
+          curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/install.sh | sudo bash
+          ```
+
+          인터넷이 느리거나 직접 받고 싶다면: 아래 `rpanel-linux-x86_64.tar.gz`(일반 서버) 또는 `rpanel-linux-aarch64.tar.gz`(ARM 서버)를 받아
+          `tar -xzf rpanel-linux-*.tar.gz && cd rpanel && sudo ./install.sh`
+
+          이미 설치했다면: `sudo rpanel-update`
+          EOF
+      - name: GitHub 릴리스에 올리기
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" out/rpanel-linux-*.tar.gz out/SHA256SUMS out/VERSION --clobber
+          else
+            # 태그가 없으면(main 에서 버전만 올린 경우) 이 커밋에 태그를 함께 만듦
+            gh release create "$TAG" out/rpanel-linux-*.tar.gz out/SHA256SUMS out/VERSION \
+              --title "Rpanel $TAG" --notes-file notes.md --target "$REF" --latest
+          fi

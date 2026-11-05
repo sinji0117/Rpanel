@@ -13,7 +13,6 @@ import ExportDataModal from '../components/ExportDataModal'
 import HistoricalTrendChart from '../components/HistoricalTrendChart'
 import SystemSnapshotModal from '../components/SystemSnapshotModal'
 import { t, tx } from '../i18n'
-import { BeripickBanner } from '../components/Layout'
 
 function Stat({ label, value, sub }) {
   return (
@@ -195,7 +194,6 @@ export default function Dashboard() {
 
   return (
     <>
-      <BeripickBanner className="mb-6" />
       <PageHeader
         title={t('대시보드')}
         subtitle={host ? `${host.hostname ?? 'app-server'} · ${host.os ?? ''} · ${host.cpu_count} vCPU` : t('서버 상태')}

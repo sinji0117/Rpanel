@@ -68,7 +68,7 @@
 | 항목 | 내용 |
 |---|---|
 | 서버 | **Ubuntu Server 24.04**를 새로 설치한 컴퓨터. 클라우드 서버(VPS)나 집의 남는 PC·가상머신 모두 됩니다. |
-| 사양 | 메모리 **2GB 이상**(서버에서 Rust를 빌드하려면 4GB 이상 권장), 디스크 20GB 이상 |
+| 사양 | 메모리 **2GB 이상** 권장 (1GB 서버도 됩니다 — 스왑을 자동으로 만들고 MongoDB 는 빼고 설치), 디스크 20GB 이상. CPU 는 일반(x86_64) · ARM(aarch64) 모두 됩니다. |
 | 인터넷 | 설치하는 동안 인터넷 연결이 필요합니다. |
 | 도메인 (선택) | `example.com` 같은 주소. 없어도 설치와 둘러보기는 됩니다. |
 
@@ -96,8 +96,15 @@ curl -fsSL https://raw.githubusercontent.com/sinji0117/Rpanel/main/install.sh | 
 ```
 
 - 비밀번호를 물으면 서버 계정 비밀번호를 입력합니다. 입력하는 동안 화면에 아무것도 안 보이는 것이 정상입니다.
-- **10~20분** 정도 걸립니다. 웹 서버(Nginx), 데이터베이스(MariaDB·MongoDB·Redis), Rust 등 필요한 프로그램을 모두 자동으로 설치합니다.
+- 먼저 **서버 확인**(운영체제·메모리·디스크·포트)을 하고, **설치 마법사**가 몇 가지만 묻습니다. 잘 모르면 **그냥 Enter** 를 누르세요.
+  1. 패널을 도메인으로 열까요? (없으면 Enter → `https://서버IP:8443`)
+  2. MongoDB 도 설치할까요? (메모리가 적으면 기본값이 '아니오')
+  3. 고급 설정을 바꿀까요? (앞단 프록시 · 접속 IP 제한 · 방화벽 — 처음이면 Enter)
+- **올인원 설치**: 웹 서버(Nginx), 데이터베이스(MariaDB·MongoDB·Redis), Rust·Python·Node.js, 무료 인증서(Let's Encrypt), 방화벽까지 한 번에 설치·설정합니다. 패널은 **미리 빌드해 둔 묶음**을 받기 때문에 서버에서 컴파일하지 않고 **5~10분** 이면 끝납니다.
 - 끝나면 `✔ Rpanel 설치 완료`와 접속 주소가 나옵니다.
+
+> 묻지 않고 기본값으로 바로 설치하려면 끝에 `-s -- --yes` 를 붙입니다: `curl -fsSL …/install.sh | sudo bash -s -- --yes`
+> 옵션 목록은 `-s -- --help`. 직접 받아서 설치하려면 [릴리스](https://github.com/sinji0117/Rpanel/releases/latest)에서 `rpanel-linux-x86_64.tar.gz`(ARM 서버는 `aarch64`)를 받아 `tar -xzf rpanel-linux-*.tar.gz && cd rpanel && sudo ./install.sh`.
 
 ### 3. 브라우저로 접속합니다
 

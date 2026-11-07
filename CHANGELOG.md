@@ -2,6 +2,15 @@
 
 버전 번호는 [Semantic Versioning](https://semver.org/lang/ko/)을 따릅니다. 업데이트는 서버에서 `sudo rpanel-update`.
 
+## v0.18.1 — 2026-11-07
+
+**고침: 첫 배포가 `디렉토리 생성 실패: /var/lib/rpanel/apps/<앱>/releases: Permission denied` 로 멈춤**
+
+- 첫 배포 전에 앱 data 백업(예약·지금 백업)이나 data 복원이 돌면 helper 의 `install -d` 가 앱 폴더(`/var/lib/rpanel/apps/<앱>`)를 root 소유로 만들어,
+  패널(rpanel 계정)이 릴리스 폴더를 만들지 못했습니다.
+- helper 가 앱 폴더를 항상 `rpanel` 소유로 만들고, 이미 root 소유로 된 앱 폴더·`releases`·`current` 링크도 배포 때 바로잡습니다 (`prepare-app <slug> [dirs]`, data 폴더는 앱 계정 소유 그대로).
+- 배포는 이제 디렉토리를 만들기 **전에** `prepare-app` 을 부릅니다 (정적 앱도 폴더 소유만 확인). 업데이트(`sudo rpanel-update`) 뒤 다시 배포하면 저절로 고쳐집니다.
+
 ## v0.18.0 — 2026-11-06
 
 **웹 터미널**

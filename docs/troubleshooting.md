@@ -10,6 +10,7 @@
 | https 발급이 실패해요 | 위의 DNS와 80 포트가 대부분의 원인입니다. 프록시 모드라면 앞단 프록시에서 발급해야 합니다. |
 | HTML 사이트에 "403"이나 "404"가 나와요 | 파일 탭에서 `index.html`이 사이트 폴더 **바로 안**에 있는지 확인하세요. zip을 풀면 폴더가 한 겹 더 생기는 경우가 많습니다. |
 | MongoDB 가 시작되지 않아요 ("Linux kernel versions 6.19 and newer") | 커널 6.19 이상에서 MongoDB 8 이 시작을 거부하는 알려진 문제입니다. `sudo rpanel-update --force` 로 업데이트하면 우회 설정(`/etc/systemd/system/mongod.service.d/rpanel-kernel.conf`)이 들어갑니다. |
+| 배포가 `디렉토리 생성 실패: /var/lib/rpanel/apps/<앱>/releases: Permission denied` 로 멈춰요 | 첫 배포 전에 백업이 돌아 앱 폴더가 root 소유가 된 경우입니다 (v0.18.0 까지의 문제). `sudo rpanel-update` 로 0.18.1 이상으로 올린 뒤 다시 **배포**하면 저절로 고쳐집니다. 바로 고치려면 서버에서 `sudo chown rpanel:rpanel /var/lib/rpanel/apps/<앱>` 뒤 다시 배포. |
 | 설치·업데이트가 실패해요 | 실패한 단계 아래에 오류 끝부분이 나옵니다. 전체 기록은 `sudo less /var/log/rpanel-install.log` 로 봅니다. |
 | 그 밖의 오류 | 사이트 → **Nginx 로그** 탭의 오류 기록을 확인하세요. 해결이 안 되면 [이슈](https://github.com/sinji0117/Rpanel/issues)에 남겨 주세요. |
 

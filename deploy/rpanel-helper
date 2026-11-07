@@ -588,10 +588,28 @@ backup_db() {
   finish_file "$out"
 }
 
+# 앱 폴더(/var/lib/rpanel/apps/<slug>)는 패널(rpanel)이 릴리스를 만드는 곳이라 rpanel 소유여야 합니다.
+# 예전에는 첫 배포 전에 data 백업·복원이 돌면 `install -d` 가 이 폴더를 root 소유로 만들어
+# 다음 배포가 "디렉토리 생성 실패: …/releases: Permission denied" 로 멈췄습니다. 여기서 만들고 고칩니다.
+own_app_dir() {
+  local app="$DATA/apps/$1"
+  [[ -L "$app" ]] && die "앱 폴더가 심볼릭 링크입니다: $app"
+  install -d -o rpanel -g rpanel -m 0755 "$app"
+  # 이미 root 소유로 만들어진 릴리스 폴더 · current 링크도 바로잡음 (data 는 앱 계정 소유 그대로)
+  if [[ -d "$app/releases" && ! -L "$app/releases" && "$(stat -c %U "$app/releases")" != rpanel ]]; then
+    chown -R --no-dereference rpanel:rpanel "$app/releases"
+  fi
+  if [[ -L "$app/current" && "$(stat -c %U "$app/current")" != rpanel ]]; then
+    chown --no-dereference rpanel:rpanel "$app/current"
+  fi
+  return 0
+}
+
 backup_data() {
   local slug="$1" stamp="$2" dir out
   valid_stamp "$stamp"
   dir="$(backup_dir "$slug")"; out="$dir/$stamp-data.tar.gz"
+  own_app_dir "$slug"
   install -d -o "$RUN_USER" -g "$RUN_USER" -m 0750 "$DATA/apps/$slug/data"
   tar -C "$DATA/apps/$slug" -czf "$out.part" data || { rm -f "$out.part"; die "tar 실패"; }
   mv "$out.part" "$out"
@@ -620,7 +638,7 @@ restore_data() {
   unit="$(unit_name "$slug")"
   if systemctl is-active --quiet "$unit" 2>/dev/null; then was_active=1; systemctl stop "$unit"; fi
   rm -rf --one-file-system "$app/data"
-  install -d -m 0750 "$app"
+  own_app_dir "$slug"
   tar -C "$app" --no-same-owner --no-same-permissions -xzf "$path"
   chown -R "$RUN_USER:$RUN_USER" "$app/data"; chmod 0750 "$app/data"
   (( was_active )) && systemctl start "$unit"
@@ -2051,8 +2069,10 @@ main() {
 cmd="${1:-}"; shift || true
 case "$cmd" in
   prepare-app)
+    # prepare-app <slug> [dirs] — 앱 폴더를 패널 소유로 만들고(고치고), 서비스 앱이면 data 폴더도 (dirs 면 빼고)
     valid_slug "${1:-}"
-    install -d -o "$RUN_USER" -g "$RUN_USER" -m 0750 "$DATA/apps/$1/data"
+    own_app_dir "$1"
+    [[ "${2:-}" == dirs ]] || install -d -o "$RUN_USER" -g "$RUN_USER" -m 0750 "$DATA/apps/$1/data"
     ;;
   install-unit) valid_slug "${1:-}"; install_unit "$1" ;;
   remove-unit)  valid_slug "${1:-}"; remove_unit "$1" ;;
@@ -2174,7 +2194,7 @@ case "$cmd" in
     echo "purged $1"
     ;;
   *)
-    die "usage: rpanel-helper {prepare-app|install-unit|remove-unit|install-site|remove-site|purge-app} <slug> | svc {start|stop|restart} <slug> | status|journal <slug> | {install,remove,run}-cron|cron-status|cron-log <slug> <id> | db-{create,drop,password} <db> <user> | db-user-create <db> <user> <all|read> (pw stdin) | db-user-drop <db> <user> | db-user-password <db> <user> (pw stdin) | redis-user-set <user> <pattern> <rw|ro> (pw stdin) | redis-user-drop <user> | backup-db <slug> <db> <stamp> | backup-data <slug> <stamp> | restore-db <slug> <db> <file> | restore-data <slug> <file> | nginx-log <slug> access|error <lines> | site-create <slug> <user> <domain> <static|rust|python|node|java> | site-password <slug> (stdin) | site-account-create <slug> <user> <ssh|sftp> (pw stdin) | site-account-update <slug> <user> <ssh|sftp> <on|off> | site-account-password <slug> <user> (stdin) | site-account-keys <slug> <user> (stdin) | site-account-delete <slug> <user> | ssl-issue <slug> <email> <domain>... | ssl-custom|ssl-info|ssl-remove <slug> | backup-files <slug> <stamp> | restore-files <slug> <file> | backup-mongo <slug> <db> <stamp> | restore-mongo <slug> <db> <file> | runtime-install|runtime-remove <python|node|java|maven|gradle> <version> | system-log <panel|nginx|ssh|mariadb|redis> <lines> | system-events <count> | panel-domain-set <domain> <email> | panel-domain-remove | db-engine-upgrade|db-engine-downgrade <mariadb|mongodb|redis> <version> | panel-access <any|CIDR,...> | firewall-status | firewall-allow <port|a:b> <tcp|udp|any> <CIDR|any> | firewall-block <CIDR> | firewall-delete <num> [to] | firewall-enable | firewall-disable | security-scan | storage-set <backups|projects> <path|default> | term-site <slug> | term-root <panel-user-id> | term-root-status"
+    die "usage: rpanel-helper prepare-app <slug> [dirs] | {install-unit|remove-unit|install-site|remove-site|purge-app} <slug> | svc {start|stop|restart} <slug> | status|journal <slug> | {install,remove,run}-cron|cron-status|cron-log <slug> <id> | db-{create,drop,password} <db> <user> | db-user-create <db> <user> <all|read> (pw stdin) | db-user-drop <db> <user> | db-user-password <db> <user> (pw stdin) | redis-user-set <user> <pattern> <rw|ro> (pw stdin) | redis-user-drop <user> | backup-db <slug> <db> <stamp> | backup-data <slug> <stamp> | restore-db <slug> <db> <file> | restore-data <slug> <file> | nginx-log <slug> access|error <lines> | site-create <slug> <user> <domain> <static|rust|python|node|java> | site-password <slug> (stdin) | site-account-create <slug> <user> <ssh|sftp> (pw stdin) | site-account-update <slug> <user> <ssh|sftp> <on|off> | site-account-password <slug> <user> (stdin) | site-account-keys <slug> <user> (stdin) | site-account-delete <slug> <user> | ssl-issue <slug> <email> <domain>... | ssl-custom|ssl-info|ssl-remove <slug> | backup-files <slug> <stamp> | restore-files <slug> <file> | backup-mongo <slug> <db> <stamp> | restore-mongo <slug> <db> <file> | runtime-install|runtime-remove <python|node|java|maven|gradle> <version> | system-log <panel|nginx|ssh|mariadb|redis> <lines> | system-events <count> | panel-domain-set <domain> <email> | panel-domain-remove | db-engine-upgrade|db-engine-downgrade <mariadb|mongodb|redis> <version> | panel-access <any|CIDR,...> | firewall-status | firewall-allow <port|a:b> <tcp|udp|any> <CIDR|any> | firewall-block <CIDR> | firewall-delete <num> [to] | firewall-enable | firewall-disable | security-scan | storage-set <backups|projects> <path|default> | term-site <slug> | term-root <panel-user-id> | term-root-status"
     ;;
 esac
 }

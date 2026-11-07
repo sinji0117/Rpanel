@@ -358,8 +358,13 @@ async fn run(
         return apply_site(state, deploy_id, &app, &vars, &paths, log).await;
     }
 
-    // 1) 디렉토리
+    // 1) 디렉토리 — 앱 폴더 소유자부터 바로잡음 (첫 배포 전 백업이 root 소유로 만들어 둔 경우)
     log.step("작업 디렉토리 준비").await;
+    if kind.is_service() {
+        helper::call(state, &["prepare-app", &app.slug], log).await?;
+    } else {
+        helper::call(state, &["prepare-app", &app.slug, "dirs"], log).await?;
+    }
     for d in [
         &paths.build_dir,
         &paths.releases_dir,
@@ -367,9 +372,6 @@ async fn run(
         &paths.staging_site.parent().unwrap().to_path_buf(),
     ] {
         exec.mkdirs(d, log).await?;
-    }
-    if kind.is_service() {
-        helper::call(state, &["prepare-app", &app.slug], log).await?;
     }
 
     // 2) 소스
